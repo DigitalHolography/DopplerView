@@ -50,17 +50,11 @@ def binary_segmentation(frames, config):
         vessel_mask = feature_map > threshold
     
     # Morphological operations to clean up mask
-    # Remove small objects - for compatibility with different scikit-image versions
+    # Suppress deprecation warnings for scikit-image version compatibility
     import warnings
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=FutureWarning)
         vessel_mask = morphology.remove_small_objects(vessel_mask, min_size=min_vessel_size)
-    
-    # Use closing/opening operations
-    if hasattr(morphology, 'closing') and callable(morphology.closing):
-        vessel_mask = morphology.closing(vessel_mask, morphology.disk(3))
-        vessel_mask = morphology.opening(vessel_mask, morphology.disk(2))
-    else:
         vessel_mask = morphology.binary_closing(vessel_mask, morphology.disk(3))
         vessel_mask = morphology.binary_opening(vessel_mask, morphology.disk(2))
     

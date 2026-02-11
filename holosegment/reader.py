@@ -140,7 +140,7 @@ class HoloReader:
             # Try to read footer
             try:
                 self.read_footer(f)
-            except:
+            except Exception:
                 # Footer is optional
                 pass
         
