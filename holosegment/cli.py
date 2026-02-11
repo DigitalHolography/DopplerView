@@ -100,9 +100,13 @@ def main():
     pulse_results = analyze_pulse(preprocessed_frames, vessel_mask, config.get('pulse_analysis', {}))
     
     # Save pulse analysis results
+    # Extract only JSON-serializable data
+    pulse_output_data = {
+        'vessel_metrics': pulse_results.get('vessel_metrics', [])
+    }
     pulse_output_path = output_dir / "pulse_results.json"
     with open(pulse_output_path, 'w') as f:
-        json.dump(pulse_results, f, indent=2)
+        json.dump(pulse_output_data, f, indent=2)
     if args.verbose:
         print(f"Saved pulse analysis results to {pulse_output_path}")
     
