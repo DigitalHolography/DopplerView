@@ -6,11 +6,13 @@ import argparse
 import json
 import sys
 from pathlib import Path
+import numpy as np
 
-from .loading.reader import HoloReader
-from .preprocessing import preprocess_frames
-from .segmentation.artery_vein_segmentation import binary_segmentation, semantic_segmentation
-from .segmentation.pulse_analysis import analyze_pulse
+from loading.reader import HoloReader
+from preprocessing import preprocess_frames
+from segmentation.artery_vein_segmentation import artery_vein_segmentation
+from segmentation import binary_segmentation
+from segmentation.pulse_analysis import analyze_pulse
 
 
 def load_config(config_path):
@@ -89,7 +91,7 @@ def main():
     
     # Save binary segmentation results
     binary_output_path = output_dir / "vessel_mask.npy"
-    import numpy as np
+    
     np.save(binary_output_path, vessel_mask)
     if args.verbose:
         print(f"Saved vessel mask to {binary_output_path}")
@@ -112,8 +114,8 @@ def main():
     
     # Step 5: Semantic segmentation (artery/vein)
     if args.verbose:
-        print("Performing semantic segmentation (artery/vein)")
-    semantic_mask = semantic_segmentation(preprocessed_frames, vessel_mask, pulse_results, config.get('semantic_segmentation', {}))
+        print("Performing artery / vein segmentation (artery/vein)")
+    semantic_mask = artery_vein_segmentation(preprocessed_frames, vessel_mask, pulse_results, config.get('semantic_segmentation', {}))
     
     # Save semantic segmentation results
     semantic_output_path = output_dir / "artery_vein_mask.npy"
