@@ -1,154 +1,50 @@
-"""
-Reader module for .holo files with header and footer
-"""
-
-import struct
+import os
+import h5py
 import numpy as np
-from pathlib import Path
 
+def read_hdf5(self):
+    dir_path_raw = os.path.join(self.directory, "raw")
 
-class HoloReader:
-    """
-    Reader for .holo files containing doppler hologram data.
-    
-    The .holo format consists of:
-    - Header: metadata about the file
-    - Data: raw frame data
-    - Footer: additional metadata
-    """
-    
-    def __init__(self, filepath):
-        """
-        Initialize HoloReader
-        
-        Args:
-            filepath: Path to .holo file
-        """
-        self.filepath = Path(filepath)
-        self.header = {}
-        self.footer = {}
-        
-    def read_header(self, file_handle):
-        """
-        Read header from .holo file
-        
-        Expected header format:
-        - Magic number (4 bytes): 'HOLO'
-        - Version (4 bytes): uint32
-        - Width (4 bytes): uint32
-        - Height (4 bytes): uint32
-        - Num frames (4 bytes): uint32
-        - Data type (4 bytes): uint32 (0=uint8, 1=uint16, 2=float32, 3=float64)
-        - Header size (4 bytes): uint32
-        
-        Args:
-            file_handle: Open file handle
-        """
-        # Read magic number
-        magic = file_handle.read(4).decode('ascii')
-        if magic != 'HOLO':
-            raise ValueError(f"Invalid .holo file: magic number '{magic}' != 'HOLO'")
-        
-        # Read header fields
-        version, width, height, num_frames, data_type, header_size = struct.unpack('<6I', file_handle.read(24))
-        
-        self.header = {
-            'magic': magic,
-            'version': version,
-            'width': width,
-            'height': height,
-            'num_frames': num_frames,
-            'data_type': data_type,
-            'header_size': header_size,
-        }
-        
-        # Skip remaining header bytes if any
-        remaining = header_size - 28  # 4 bytes for magic + 24 bytes for fields
-        if remaining > 0:
-            file_handle.read(remaining)
-        
-        return self.header
-    
-    def read_footer(self, file_handle):
-        """
-        Read footer from .holo file
-        
-        Expected footer format:
-        - Footer size (4 bytes): uint32
-        - Timestamp (8 bytes): float64
-        - Checksum (4 bytes): uint32
-        
-        Args:
-            file_handle: Open file handle
-        """
-        # Read footer size first
-        footer_size_bytes = file_handle.read(4)
-        if len(footer_size_bytes) < 4:
-            # No footer or incomplete
-            return {}
-        
-        footer_size = struct.unpack('<I', footer_size_bytes)[0]
-        
-        # Read timestamp and checksum
-        if footer_size >= 16:
-            timestamp, checksum = struct.unpack('<dI', file_handle.read(12))
-            self.footer = {
-                'footer_size': footer_size,
-                'timestamp': timestamp,
-                'checksum': checksum,
-            }
-        
-        return self.footer
-    
-    def get_dtype(self, data_type):
-        """Convert data type code to numpy dtype"""
-        dtype_map = {
-            0: np.uint8,
-            1: np.uint16,
-            2: np.float32,
-            3: np.float64,
-        }
-        return dtype_map.get(data_type, np.float32)
-    
-    def read_frames(self):
-        """
-        Read all frames from .holo file
-        
-        Returns:
-            numpy array of shape (num_frames, height, width) containing frame data
-        """
-        with open(self.filepath, 'rb') as f:
-            # Read header
-            header = self.read_header(f)
-            
-            # Get frame dimensions
-            width = header['width']
-            height = header['height']
-            num_frames = header['num_frames']
-            dtype = self.get_dtype(header['data_type'])
-            
-            # Calculate expected data size
-            frame_size = width * height
-            total_size = frame_size * num_frames
-            
-            # Read frame data
-            data = np.fromfile(f, dtype=dtype, count=total_size)
-            
-            # Reshape to frames
-            frames = data.reshape(num_frames, height, width)
-            
-            # Try to read footer
-            try:
-                self.read_footer(f)
-            except Exception:
-                # Footer is optional
-                pass
-        
-        return frames
-    
-    def get_metadata(self):
-        """Get header and footer metadata"""
-        return {
-            'header': self.header,
-            'footer': self.footer,
-        }
+    # Search for all .h5 files in the folder
+    h5_files = [f for f in os.listdir(dir_path_raw) if f.endswith(".h5")]
+
+    if len(h5_files) == 0:
+        raise FileNotFoundError(f"No HDF5 file was found in the folder: {dir_path_raw}")
+
+    # Takes the first .h5 file found
+    ref_raw_file_path = os.path.join(dir_path_raw, h5_files[0])
+
+    print(f"    - Reading the HDF5 file: {h5_files[0]}")
+
+    try:
+        with h5py.File(ref_raw_file_path, "r") as f:
+
+            dataset_names = list(f.keys())
+
+            if "moment0" in dataset_names:
+                print("    - Reading the M0 data")
+                self.M0 = np.squeeze(f["moment0"][()])
+            else:
+                print("Warning: moment0 dataset not found")
+
+            if "moment1" in dataset_names:
+                print("    - Reading the M1 data")
+                self.M1 = np.squeeze(f["moment1"][()])
+            else:
+                print("Warning: moment1 dataset not found")
+
+            if "moment2" in dataset_names:
+                print("    - Reading the M2 data")
+                self.M2 = np.squeeze(f["moment2"][()])
+            else:
+                print("Warning: moment2 dataset not found")
+
+            if "SH" in dataset_names:
+                print("    - Reading the SH data")
+                self.SH = np.squeeze(f["SH"][()])
+            else:
+                print("Warning: SH dataset not found")
+
+    except Exception as e:
+        print(f"ID: {type(e).__name__}")
+        raise
