@@ -7,14 +7,19 @@ Cache for storing intermediate results during segmentation to speed up processin
 
 import numpy as np
 import torch
-import holosegment.loading.load_model as load_model
+import models.loader as loader
 
 class SegmentationCache:
     def __init__(self):
-        self.preprocessed_frames = None  # Cache for preprocessed frames
+        self.M0 = None  # Cache for preprocessed M0 data
+        self.M0_ff_video = None  # Cache for flatfield-corrected M0 video
+        self.M0_ff_image = None  # Cache for flatfield-corrected M0 image
+
+        self.M1 = None  # Cache for M1 data if needed
+        self.M2 = None  # Cache for M2 data if needed
+
         self.segmentation_models = {}    # Cache for loaded segmentation models
         self.intermediate_masks = {}     # Cache for intermediate segmentation masks (e.g., vessel masks, artery masks)
-
 
     def get_preprocessed_frames(self, raw_frames):
         if self.preprocessed_frames is None:
@@ -38,7 +43,7 @@ class SegmentationCache:
 
         model_name = model_name_dict.get((use_correlation, use_diasys))
         if model_name not in self.segmentation_models:
-            self.segmentation_models[model_name] = load_model.load_pt_model(model_name)
+            self.segmentation_models[model_name] = loader.load_pt_model(model_name)
         return self.segmentation_models[model_name]
 
     def cache_intermediate_mask(self, mask_name, mask):

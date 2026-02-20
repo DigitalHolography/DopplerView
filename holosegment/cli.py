@@ -6,10 +6,12 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from holosegment.cache import SegmentationCache
 import numpy as np
 
-from loading.reader import HoloReader
-from preprocessing import preprocess_frames
+from pipeline import Pipeline
+from holosegment.io.read_moments import H5Reader
+from preprocess.preprocessing import preprocess_frames
 from segmentation.artery_vein_segmentation import artery_vein_segmentation
 from segmentation import binary_segmentation
 from segmentation.pulse_analysis import analyze_pulse
@@ -32,9 +34,9 @@ def main():
         help='Path to JSON configuration file'
     )
     parser.add_argument(
-        'holo_file',
+        'h5_file',
         type=str,
-        help='Path to .holo input file'
+        help='Path to .h5 input file'
     )
     parser.add_argument(
         '-o', '--output',
@@ -52,15 +54,15 @@ def main():
     
     # Validate input files
     config_path = Path(args.config)
-    holo_path = Path(args.holo_file)
+    h5_path = Path(args.h5_file)
     output_dir = Path(args.output)
     
     if not config_path.exists():
         print(f"Error: Configuration file not found: {config_path}", file=sys.stderr)
         sys.exit(1)
     
-    if not holo_path.exists():
-        print(f"Error: Holo file not found: {holo_path}", file=sys.stderr)
+    if not h5_path.exists():
+        print(f"Error: h5 file not found: {h5_path}", file=sys.stderr)
         sys.exit(1)
     
     # Create output directory
@@ -70,19 +72,17 @@ def main():
     if args.verbose:
         print(f"Loading configuration from {config_path}")
     config = load_config(config_path)
-    
-    # Step 1: Read .holo file
-    if args.verbose:
-        print(f"Reading hologram data from {holo_path}")
-    reader = HoloReader(holo_path)
-    frames = reader.read_frames()
-    if args.verbose:
-        print(f"Read {len(frames)} frames")
+
+    cache = SegmentationCache()
+
+    pipeline = Pipeline(config, cache)
+
+    pipeline.run(h5_path)
     
     # Step 2: Preprocessing (normalization and registration)
     if args.verbose:
         print("Preprocessing frames (normalization and registration)")
-    preprocessed_frames = preprocess_frames(frames, config.get('preprocessing', {}))
+    preprocessed_frames = preprocess_frames(reader.M0, config.get('preprocessing', {}))
     
     # Step 3: Binary segmentation
     if args.verbose:
