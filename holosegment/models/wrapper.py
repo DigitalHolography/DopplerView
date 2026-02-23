@@ -38,6 +38,9 @@ class BaseModelWrapper(ABC):
         if act == "softmax":
             exp = np.exp(output - np.max(output, axis=1, keepdims=True))
             return exp / np.sum(exp, axis=1, keepdims=True)
+        
+        if act == "argmax":
+            return np.argmax(output, axis=1)
 
         return output
 
@@ -53,7 +56,7 @@ class TorchModelWrapper(BaseModelWrapper):
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
 
         # SAFER: assume state_dict unless you explicitly allow full model loading
-        checkpoint = torch.load(self.model_path, map_location=self.device)
+        checkpoint = torch.load(self.model_path, map_location=self.device, weights_only=False)
 
         if isinstance(checkpoint, dict) and "state_dict" in checkpoint:
             checkpoint = checkpoint["state_dict"]
@@ -73,7 +76,7 @@ class TorchModelWrapper(BaseModelWrapper):
 
     @torch.no_grad()
     def _forward(self, x):
-        x = torch.from_numpy(x).float().unsqueeze(0).unsqueeze(0).to(self.device)
+        x = torch.from_numpy(x).float().unsqueeze(0).to(self.device)
         y = self.model(x)
         return y.cpu().numpy()
 

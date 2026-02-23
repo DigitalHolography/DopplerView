@@ -6,3 +6,12 @@ iternet5_vesselness:
   input_norm: minmax
   output_activation: sigmoid
   revision: main
+
+nnwnet_av_corr_diasys:
+  task: artery_vein_segmentation
+  hf_repo: DigitalHolography/nnwnet_av_corr_diasys
+  filename: nnwnet_av_corr_diasys
+  format: pt
+  input_norm: minmax
+  output_activation: argmax
+  revision: main

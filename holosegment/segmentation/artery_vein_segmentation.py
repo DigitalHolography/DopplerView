@@ -10,23 +10,8 @@ import holosegment.utils.model_utils as model_utils
 
 def deep_segmentation(M0_ff_video, M0_ff_image, pre_artery_mask, config, cache):
     # Extract configuration
-    use_correlation = config.get('AVCorrelationSegmentationNet', True)
-    use_diasys = config.get('AVDiasysSegmentationNet', True)
 
-    # Using this pre-artery mask, compute correlation map and diasys map if configured
-    correlation_map = pulse_analysis.compute_correlation_map(M0_ff_video, pre_artery_mask) if use_correlation else None
-    diasys_map = pulse_analysis.compute_diasys_image(M0_ff_video, pre_artery_mask) if use_diasys else None
 
-    if correlation_map is not None:
-        if diasys_map is not None:
-            print("Using both correlation map and diasys map for artery mask segmentation.")
-            model_input = np.stack([M0_ff_image, correlation_map, diasys_map], axis=-1)
-        else:
-            print("Using correlation map for artery mask segmentation.")
-            model_input = np.stack([M0_ff_image, correlation_map], axis=-1)
-    elif diasys_map is not None:
-        print("Using diasys map for artery mask segmentation.")
-        model_input = np.stack([M0_ff_image, diasys_map], axis=-1)
 
     artery_mask, vein_mask = model_utils.run_model(model_input, cache.get_av_segmentation_model(config), preprocess=True)
 

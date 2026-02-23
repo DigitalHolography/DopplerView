@@ -4,8 +4,9 @@ from holosegment.input_output.read_moments import Moments
 from holosegment.preprocessing.preprocessing import Preprocessor
 from holosegment.segmentation import artery_vein_segmentation
 from holosegment.segmentation import binary_segmentation
-from holosegment.segmentation.pulse_analysis import compute_correlation, compute_diasys
-
+from holosegment.segmentation.pulse_analysis import compute_correlation, compute_diasys_image
+import numpy as np
+import torch
 
 class Pipeline:
     def __init__(self, config, model_registry):
@@ -112,6 +113,29 @@ class PreprocessStep:
         self.pipeline.cache["M0_ff_image"] = pre.M0_ff_image
         print(self.pipeline.cache["M0_ff_image"] is None)
 
+class BinarySegmentationStep:
+    requires = ["M0_ff_image"]
+    produces = ["vessel_mask"]
+
+    def __init__(self, pipeline):
+        self.pipeline = pipeline
+
+    def run(self):
+        method = self.pipeline.config.get("BinarySegmentationMethod", "AI")
+        image = self.pipeline.cache["M0_ff_image"]
+
+        if method == "AI":
+            # model_name = self.pipeline.config["Mask"]["VesselSegmentationMethod"]
+            model_name = "iternet5_vesselness"
+            model = self.pipeline.get_model(model_name)
+            mask = model.predict(image)
+            mask = np.squeeze(mask)  # Remove channel dimension if present
+
+        else:
+            raise NotImplementedError
+
+        self.pipeline.cache["vessel_mask"] = mask
+
 class PulseAnalysisStep:
     requires = ["M0_ff_video", "vessel_mask"]
     produces = ["temporal_cues"]
@@ -131,31 +155,9 @@ class PulseAnalysisStep:
             temporal_cues["correlation"] = compute_correlation(video, vessel_mask)
 
         if "diasys" in cues_requested:
-            temporal_cues["diasys"] = compute_diasys(video, vessel_mask)
+            temporal_cues["diasys"] = compute_diasys_image(video, vessel_mask)
 
         self.pipeline.cache["temporal_cues"] = temporal_cues
-
-class BinarySegmentationStep:
-    requires = ["M0_ff_image"]
-    produces = ["vessel_mask"]
-
-    def __init__(self, pipeline):
-        self.pipeline = pipeline
-
-    def run(self):
-        method = self.pipeline.config.get("BinarySegmentationMethod", "AI")
-        image = self.pipeline.cache["M0_ff_image"]
-
-        if method == "AI":
-            # model_name = self.pipeline.config["Mask"]["VesselSegmentationMethod"]
-            model_name = "iternet5_vesselness"
-            model = self.pipeline.get_model(model_name)
-            mask = model.predict(image)
-
-        else:
-            raise NotImplementedError
-
-        self.pipeline.cache["vessel_mask"] = mask
 
 class AVSegmentationStep:
     requires = ["M0_ff_video", "M0_ff_image", "temporal_cues"]
@@ -171,17 +173,25 @@ class AVSegmentationStep:
 
         if self.pipeline.config.get("AVSegmentationMethod", "AI") == "AI":
 
-            model_name = self.pipeline.config["models"]["av"]
+            # model_name = self.pipeline.config["models"]["av"]
+            model_name = "nnwnet_av_corr_diasys"
             model = self.pipeline.get_model(model_name)
 
-            artery_mask, vein_mask = artery_vein_segmentation.deep_segmentation(
-                video, image, cues, model
-            )
+            print(image.shape, cues["correlation"].shape, cues["diasys"].shape)
+
+            input = np.stack([image, cues["correlation"], cues["diasys"]], axis=0)  # shape (3, H, W)
+
+            print(input.shape)
+
+            mask = model.predict(input)
+            mask = np.squeeze(mask)  # Remove channel dimension if present
+
+            if model.spec.output_activation == "argmax":
+                self.pipeline.cache["artery_mask"], self.pipeline.cache["vein_mask"] = np.stack([np.where((mask==1) | (mask==3), 1, 0), np.where((mask==2) | (mask==3), 1, 0)], axis=0)
+            else:
+                self.pipeline.cache["artery_mask"], self.pipeline.cache["vein_mask"] = mask[0], mask[1]
 
         else:
-            artery_mask, vein_mask = artery_vein_segmentation.handmade_segmentation(
+            self.pipeline.cache["artery_mask"], self.pipeline.cache["vein_mask"] = artery_vein_segmentation.handmade_segmentation(
                 video, image, cues
             )
-
-        self.pipeline.cache["artery_mask"] = artery_mask
-        self.pipeline.cache["vein_mask"] = vein_mask
