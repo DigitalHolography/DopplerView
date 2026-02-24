@@ -5,8 +5,8 @@ Preprocessing class
 import numpy as np
 from .remove_outliers import remove_outliers
 from .registration import register_video
-from .resize import resize_video, crop_video, interpolate_video
-from .normalization import normalize_video, flat_field_correction
+from . import resize
+from . import normalization
 
 class Preprocessor:
     def __init__(self, config, moments):
@@ -48,19 +48,18 @@ class Preprocessor:
         print(f"Cropping frames from {firstFrame} to {endFrame}")
         # Implement cropping logic based on self.config
         if self.M0 is not None:
-            self.M0 = crop_video(self.M0, first_frame=firstFrame, end_frame=endFrame)
+            self.M0 = resize.crop_video(self.M0, first_frame=firstFrame, end_frame=endFrame)
         if self.M1 is not None:
-            self.M1 = crop_video(self.M1, first_frame=firstFrame, end_frame=endFrame)
+            self.M1 = resize.crop_video(self.M1, first_frame=firstFrame, end_frame=endFrame)
         if self.M2 is not None:
-            self.M2 = crop_video(self.M2, first_frame=firstFrame, end_frame=endFrame)
+            self.M2 = resize.crop_video(self.M2, first_frame=firstFrame, end_frame=endFrame)
         if self.SH is not None:
-            self.SH = crop_video(self.SH, first_frame=firstFrame, end_frame=endFrame)
+            self.SH = resize.crop_video(self.SH, first_frame=firstFrame, end_frame=endFrame)
 
     def normalize(self):
         # Implement normalization logic based on self.config
         gaussian_blur_ratio = self.config['FlatFieldCorrection']['GWRatio']
-        print(self.M0.shape)
-        self.M0_ff_video = flat_field_correction(self.M0, gaussian_blur_ratio)
+        self.M0_ff_video = normalization.compute_M0_ff(self.M0, gaussian_blur_ratio)
 
         return
     
@@ -77,26 +76,26 @@ class Preprocessor:
         return
 
     def preprocess(self):
-        # Step 1: Register
-        self.register()
+        # # Step 1: Register
+        # self.register()
 
-        # Step 2: Crop frames
-        self.crop()
+        # # Step 2: Crop frames
+        # self.crop()
 
         # Step 3: Normalize 
         self.normalize()
 
-        # Step 4: Resize
-        self.resize()
+        # # Step 4: Resize
+        # self.resize()
 
-        # Step 5: Non-rigid registration
-        self.nonrigid_register()
+        # # Step 5: Non-rigid registration
+        # self.nonrigid_register()
 
-        # Step 6: Interpolate
-        self.interpolate()
+        # # Step 6: Interpolate
+        # self.interpolate()
 
-        # Step 7: Remove outliers 
-        self.remove_outliers()
+        # # Step 7: Remove outliers 
+        # self.remove_outliers()
 
         self.M0_ff_image = np.mean(self.M0_ff_video, axis=0)
         return 

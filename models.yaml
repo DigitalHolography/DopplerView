@@ -15,3 +15,4 @@ nnwnet_av_corr_diasys:
   input_norm: minmax
   output_activation: argmax
   revision: main
+

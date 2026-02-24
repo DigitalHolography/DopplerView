@@ -9,35 +9,107 @@ from scipy.ndimage import gaussian_filter
 import math
 
 
-def flat_field_correction(video, gaussian_blur_ratio, border_amount=0.0):
-    video = video.astype(np.float32, copy=False)
+def flat_field_correction(image, correction_params, border_amount=0):
+    """
+    Flat-field correction using Gaussian blur.
 
-    T, H, W = video.shape
+    Parameters:
+        image (np.ndarray): 2D input image
+        correction_params (float): Gaussian blur sigma (gw)
+        border_amount (float): fraction of border to exclude (0–0.5)
 
-    # Blur spatially only (no blur across time)
-    blurred = gaussian_filter(video, sigma=(0, gaussian_blur_ratio, gaussian_blur_ratio))
-    blurred[blurred == 0] = 1e-8
+    Returns:
+        corrected_image (np.ndarray)
+    """
 
-    corrected = video / blurred
+    image = image.astype(np.float32)
 
-    if border_amount != 0:
-        a = int(math.ceil(H * border_amount))
-        b = int(math.floor(H * (1 - border_amount)))
-        c = int(math.ceil(W * border_amount))
-        d = int(math.floor(W * (1 - border_amount)))
+    # --- Check normalization ---
+    Im_min = np.min(image)
+    Im_max = np.max(image)
+
+    if Im_min < 0 or Im_max > 1:
+        if Im_max > Im_min:
+            image = (image - Im_min) / (Im_max - Im_min)
+        else:
+            image = np.zeros_like(image)
+        flag = True
     else:
-        a, b, c, d = 0, H, 0, W
+        flag = False
 
-    ms = np.sum(video[:, a:b, c:d], axis=(1, 2))
-    ms2 = np.sum(corrected[:, a:b, c:d], axis=(1, 2))
+    H, W = image.shape
 
-    scale = np.ones_like(ms)
-    valid = ms2 != 0
-    scale[valid] = ms[valid] / ms2[valid]
+    # --- Define non-border region ---
+    if border_amount == 0:
+        a, b = 0, H
+        c, d = 0, W
+    else:
+        a = int(np.ceil(H * border_amount))
+        b = int(np.floor(H * (1 - border_amount)))
+        c = int(np.ceil(W * border_amount))
+        d = int(np.floor(W * (1 - border_amount)))
 
-    corrected *= scale[:, None, None]
+    # --- Sum of intensities in region ---
+    ms = np.sum(image[a:b, c:d])
 
-    return corrected
+    # --- Gaussian blur correction ---
+    gw = correction_params
+    blurred = gaussian_filter(image, sigma=gw)
+
+    # avoid division by zero
+    eps = 1e-8
+    image_corr = image / (blurred + eps)
+
+    # --- Rescale to preserve energy ---
+    ms2 = np.sum(image_corr[a:b, c:d])
+    corrected_image = (ms / (ms2 + eps)) * image_corr
+
+    # --- Restore original scale if needed ---
+    if flag:
+        corrected_image = Im_min + (Im_max - Im_min) * corrected_image
+
+    return corrected_image
+
+def compute_M0_ff(M0, gw_ratio=0.07, border=0.15):
+    """
+    Compute the flat-field corrected M0 (M0_ff).
+
+    Parameters:
+        M0 (np.ndarray): shape (numFrames, numX, numY)
+        gw_ratio (float): Gaussian width ratio
+        border (float): border fraction
+
+    Returns:
+        M0_ff (np.ndarray)
+    """
+
+    M0 = M0.astype(np.float32)
+    numFrames, numX, numY  = M0.shape
+
+    # --- flat-field correction ---
+    gw = int(np.ceil(gw_ratio * numX))
+
+    # Apply frame-wise flat field correction
+    M0_ff = np.zeros_like(M0, dtype=np.float32)
+
+    for i in range(numFrames):
+        M0_ff[i, :, :] = flat_field_correction(
+            M0[i, :, :],
+            correction_params=gw,
+            border_amount=border
+        )
+
+    # --- Global mean / std over full volume ---
+    mu = np.mean(M0_ff)
+    sigma = np.std(M0_ff)
+
+    # Clip extreme values to ±5σ
+    upper = mu + 5 * sigma
+    lower = mu - 5 * sigma
+
+    M0_ff = np.clip(M0_ff, lower, upper)
+
+    return M0_ff
 
 
 def normalize_video(frames, method='zscore'):

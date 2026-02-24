@@ -6,10 +6,9 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from holosegment.cache import SegmentationCache
 import numpy as np
 
-from holosegment.pipeline import Pipeline
+from holosegment.pipeline.pipeline import Pipeline
 from holosegment.segmentation.artery_vein_segmentation import artery_vein_segmentation
 from holosegment.models.registry import ModelRegistryConfig
 
@@ -71,7 +70,9 @@ def main():
     config = load_config(config_path)
 
     registry = ModelRegistryConfig(Path("models.yaml"))
-    pipeline = Pipeline(config, registry)
+    pipeline = Pipeline(config, registry, output_dir=output_dir, debug=args.verbose)
+
+    
 
     pipeline.run_all(h5_path)
     

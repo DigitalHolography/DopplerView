@@ -23,19 +23,19 @@ class Moments:
 
                 if "moment0" in dataset_names:
                     print("    - Reading the M0 data")
-                    self.M0 = np.squeeze(f["moment0"][()])
+                    self.M0 = np.transpose(np.squeeze(f["moment0"][()]), (0, 2, 1))
                 else:
                     print("Warning: moment0 dataset not found")
 
                 if "moment1" in dataset_names:
                     print("    - Reading the M1 data")
-                    self.M1 = np.squeeze(f["moment1"][()])
+                    self.M1 = np.transpose(np.squeeze(f["moment1"][()]), (0, 2, 1))
                 else:
                     print("Warning: moment1 dataset not found")
 
                 if "moment2" in dataset_names:
                     print("    - Reading the M2 data")
-                    self.M2 = np.squeeze(f["moment2"][()])
+                    self.M2 = np.transpose(np.squeeze(f["moment2"][()]), (0, 2, 1))
                 else:
                     print("Warning: moment2 dataset not found")
 

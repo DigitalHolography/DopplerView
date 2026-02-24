@@ -492,7 +492,7 @@ def compute_diasys(video, mask):
     # sum over H,W for each frame, normalized by mask area
     mask_nnz = np.count_nonzero(mask)
     print(mask.shape, mask_nnz)
-    pulse_artery = np.nansum(video[:, mask.astype(bool)], axis=(0)) / max(mask_nnz, 1)
+    pulse_artery = np.nansum(video[:, mask.astype(bool)], axis=(1)) / max(mask_nnz, 1)
 
     # --- Filter pulse_artery to remove high frequency noise ---
     stride = 512
@@ -568,6 +568,8 @@ def compute_diasys(video, mask):
     sysindexes = sorted(set(i for i in sysindexes if 0 <= i < numFrames))
     diasindexes = sorted(set(i for i in diasindexes if 0 <= i < numFrames))
 
+    print(f"Identified {len(sysindexes)} systole frames and {len(diasindexes)} diastole frames.")
+
     if len(sysindexes) == 0:
         sysindexes = [0]
     if len(diasindexes) == 0:
@@ -576,12 +578,13 @@ def compute_diasys(video, mask):
     # --- Mean images ---
     M0_Systole_img, M0_Diastole_img = np.nanmean(video[sysindexes], axis=0), np.nanmean(video[diasindexes], axis=0), 
 
-    return M0_Systole_img, M0_Diastole_img, sysindexes, diasindexes
+    return M0_Systole_img, M0_Diastole_img, sysindexes, diasindexes, fullPulse
 
 def compute_diasys_image(video, mask):
-    M0_Systole_img, M0_Diastole_img, _, _ = compute_diasys(video, mask)
+    M0_Systole_img, M0_Diastole_img, _, _, fullPulse = compute_diasys(video, mask)
+
     sys = image_utils.normalize_image(M0_Systole_img)
     dias = image_utils.normalize_image(M0_Diastole_img)
     diasys_image = image_utils.normalize_image(sys - dias)
-    return diasys_image
+    return diasys_image, M0_Systole_img, M0_Diastole_img, fullPulse
  

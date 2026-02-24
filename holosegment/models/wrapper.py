@@ -19,15 +19,22 @@ class BaseModelWrapper(ABC):
         y = self._forward(x)
         y = self._postprocess(y)
         return y
-
-    def _preprocess(self, image):
+    
+    def _preprocess_channel(self, channel):
         if self.spec.input_norm == "zscore":
-            return (image - image.mean()) / (image.std() + 1e-8)
+            return (channel - channel.mean()) / (channel.std() + 1e-8)
 
         if self.spec.input_norm == "minmax":
-            return (image - image.min()) / (image.max() - image.min() + 1e-8)
+            return (channel - channel.min()) / (channel.max() - channel.min() + 1e-8)
 
-        return image
+        if self.spec.input_norm == "rescale":
+            return channel / 255.0
+
+    def _preprocess(self, image):
+        if image.ndim == 2:
+            return self._preprocess_channel(image)
+        if image.ndim == 3:
+            return np.stack([self._preprocess_channel(image[i]) for i in range(image.shape[0])], axis=0)
 
     def _postprocess(self, output):
         act = self.spec.output_activation
