@@ -2,6 +2,8 @@
 Pulse analysis module for analyzing temporal pulsatility in vessels
 """
 
+from unittest import signals
+
 import numpy as np
 from scipy import fft
 from scipy.signal import butter, filtfilt, find_peaks
@@ -10,7 +12,7 @@ from scipy.ndimage import uniform_filter1d
 
 from skimage.measure import label
 from skimage import measure
-from holosegment.segmentation.process_masks import get_labeled_vesselness
+from holosegment.segmentation import process_masks
 from holosegment.utils import image_utils
 
 
@@ -124,6 +126,8 @@ def compute_idx0(signals_n, sampling_frequency):
     P1 = P2[:num_frames//2 + 1]
     P1[1:-1] *= 2
 
+    print(f"FFT computed. P1 length: {len(P1)}")
+
     # Frequency vector
     f = sampling_frequency * np.arange(len(P1)) / num_frames
 
@@ -131,6 +135,9 @@ def compute_idx0(signals_n, sampling_frequency):
     f_range = (f > 0.5) & (f < 2) # 30 - 120 bpm
     f_sel = f[f_range]
     P_sel = P1[f_range]
+
+    print(f"Selected frequencies in range: {f_sel}")
+    print(f"Corresponding power values: {P_sel}")
 
     f0 = f_sel[np.argmax(P_sel)]
     t0 = 1 / f0
@@ -217,13 +224,15 @@ def check_validity(signal, sampling_frequency):
 
     return bool(is_valid)
 
-def compute_pre_artery_mask(video, vessel_mask, optic_disc_center, sampling_frequency, step_mask_folder):
+def compute_pre_artery_mask(video, vessel_mask, optic_disc_center, sampling_frequency, output_manager):
     """
     Compute a preliminary artery mask based on pulse analysis of the video frames within the vessel mask
     """
     # Step 1: Separate mask into branches
-    labeled_vessels = process_masks.get_labeled_vesselness(vessel_mask, *optic_disc_center)
-    image_utils.save_array_as_image(labeled_vessels, "all_20_label_Vesselness.png", foldername=step_mask_folder)
+    labeled_vessels, _ = process_masks.get_labeled_vesselness(vessel_mask, *optic_disc_center)
+    output_manager.save("pulse_analysis", "labeled_vessels", labeled_vessels, "png")
+
+    # image_utils.save_array_as_image(labeled_vessels, "all_20_label_Vesselness.png", foldername=step_mask_folder)
     num_branches = labeled_vessels.max()
     num_frames = video.shape[0]
 
@@ -231,27 +240,22 @@ def compute_pre_artery_mask(video, vessel_mask, optic_disc_center, sampling_freq
     signals = np.zeros((num_branches, num_frames))
 
     # Design low-pass Butterworth filter
-    b, a = butter(4, 15/(sampling_frequency/2), 'low')
-    moving_window = int(round(sampling_frequency * 0.1))
+    b, a = butter(4, 15 / (sampling_frequency / 2), btype='low')
 
-    for i in range(1, num_branches+1):
-        mask = labeled_vessels == i
-        pixels = video[:, mask].reshape(-1, num_frames)
-
-        if pixels.size == 0:
-            continue
-
-        sig = pixels.mean(axis=0)
-        sig = filtfilt(b, a, sig)
-        sig = moving_mean(sig, moving_window)
-
-        signals[i-1] = sig
+    for i in range(1, num_branches + 1):
+        branch_mask = (labeled_vessels == i)
+        # Extract pixels for this branch over time
+        branch_pixels = video[:, branch_mask]
+        branch_mean = np.mean(branch_pixels, axis=1)
+        # Apply zero-phase filtering
+        signals[i - 1, :] = filtfilt(b, a, branch_mean)
+        output_manager.save_plot("pulse_analysis", f"branch_{i}_signal", signals[i - 1, :], title=f"Branch {i} Temporal Signal")
 
     signals_n = (signals - signals.mean(axis=1, keepdims=True)) / signals.std(axis=1, keepdims=True)
 
     # Step 3: Select regular peaks to classify arteries vs veins
-    idx0 = compute_idx0(signals_n, sampling_frequency)
-    s_idx, locs_n = select_regular_peaks(signals_n, "minmax", idx0)
+    # idx0 = compute_idx0(signals_n, sampling_frequency)
+    s_idx  = select_regular_peaks(signals_n, "minmax")
 
     is_pure = np.array([check_validity(sig, sampling_frequency) for sig in signals_n])
     if not is_pure.any():
@@ -269,7 +273,7 @@ def compute_pre_artery_mask(video, vessel_mask, optic_disc_center, sampling_freq
         else:
             pre_mask_vein |= labeled_vessels == i
 
-    return pre_mask_artery, pre_mask_vein, locs_n
+    return pre_mask_artery, pre_mask_vein
 
 # ================================ Correlation ============================================== #
 

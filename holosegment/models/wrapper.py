@@ -4,9 +4,11 @@ Supports .pt (state_dict recommended) and .onnx.
 """
 
 from abc import ABC, abstractmethod
+from email.mime import image
 import numpy as np
 import torch
 import onnxruntime as ort
+from holosegment.utils.image_utils import normalize_to_uint8
 
 
 class BaseModelWrapper(ABC):
@@ -29,6 +31,9 @@ class BaseModelWrapper(ABC):
 
         if self.spec.input_norm == "rescale":
             return channel / 255.0
+
+        if self.spec.input_norm == "none":
+            return normalize_to_uint8(channel)
 
     def _preprocess(self, image):
         if image.ndim == 2:
@@ -102,6 +107,20 @@ class ONNXModelWrapper(BaseModelWrapper):
         self.input_name = self.session.get_inputs()[0].name
 
     def _forward(self, x):
-        x = x.astype(np.float32)[None, None, :, :]
+        b, c, h, w = self.session.get_inputs()[0].shape
+
+        # Handle single image input and ensure it matches expected shape
+        if x.ndim == 2:
+            if c > 1:
+                x = np.stack([x] * c, axis=0)
+            else:
+                x = x[None, :, :]
+        if h != x.shape[1] or w != x.shape[2]:
+            raise ValueError(f"Input shape {x.shape} does not match model expected shape (C, H, W) = ({c}, {h}, {w})")
+
+        x = x.astype(np.float32)[None, :, :, :]
         outputs = self.session.run(None, {self.input_name: x})
+
+        print(f"{len(outputs)=}, {outputs[0].shape=}")
+        
         return outputs[0]

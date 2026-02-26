@@ -12,7 +12,7 @@ from scipy.ndimage import rotate
 from skimage.measure import label
 from skimage import exposure
 
-def disk_mask(numX, numY, R1, R2=None, center=(0.5, 0.5)):
+def disk_mask(numX, numY, R1, center=(0.5, 0.5), R2=None):
     """
     Creates a binary disk-shaped mask on a normalized grid.
 
@@ -45,13 +45,33 @@ def disk_mask(numX, numY, R1, R2=None, center=(0.5, 0.5)):
 
     return mask.astype(bool)
 
+def bwareafilt_largest(binary_mask, connectivity=2):
+    """
+    Equivalent to MATLAB: bwareafilt(binary_mask, 1, 8)
+
+    connectivity:
+        1 → 4-connectivity
+        2 → 8-connectivity (MATLAB 8)
+    """
+    labeled = label(binary_mask, connectivity=connectivity)
+    
+    if labeled.max() == 0:
+        return np.zeros_like(binary_mask, dtype=bool)
+
+    # Count pixels per label
+    counts = np.bincount(labeled.ravel())
+    counts[0] = 0  # ignore background
+
+    largest_label = counts.argmax()
+    return labeled == largest_label
+
 def get_labeled_vesselness(mask, x_center, y_center, r1=0.1, r2=0.35, numCircles=10):
     numX, numY = mask.shape
     dr = (r2 - r1) / numCircles
 
     # Skeletonize and remove central circle
     skel = skeletonize(mask)
-    circle_mask = disk_mask(numX, numY, r1, center=(y_center / numY, x_center/ numX))
+    circle_mask = disk_mask(numX, numY, R1=r1, center=(y_center / numY, x_center/ numX))
     skel = skel & ~circle_mask
 
     # Remove branch points

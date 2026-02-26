@@ -8,15 +8,6 @@ import holosegment.segmentation.pulse_analysis as pulse_analysis
 import holosegment.utils.model_utils as model_utils
   
 
-def deep_segmentation(M0_ff_video, M0_ff_image, pre_artery_mask, config, cache):
-    # Extract configuration
-
-
-
-    artery_mask, vein_mask = model_utils.run_model(model_input, cache.get_av_segmentation_model(config), preprocess=True)
-
-    return artery_mask, vein_mask
-
 def handmade_segmentation(M0_ff_video, M0_ff_image, pre_artery_mask, config, cache):
     pass
 

@@ -65,8 +65,9 @@ class Moments:
             ref_raw_file_path = os.path.join(dir_path_raw, holo_files[0])
             raise NotImplementedError("Holo file format is not supported yet. Please provide an HDF5 (.h5) file.")
 
-        # Takes the first .h5 file found
-        ref_raw_file_path = os.path.join(dir_path_raw, h5_files[0])
+        # If expected .h5 file is not found, take the first .h5 file found
+        raw_h5_filename = self.directory.name + "_raw.h5"
+        ref_raw_file_path = os.path.join(dir_path_raw, raw_h5_filename) if raw_h5_filename in h5_files else os.path.join(dir_path_raw, h5_files[0])
         self.read_hdf5(ref_raw_file_path)
 
 class LoadMomentsStep:

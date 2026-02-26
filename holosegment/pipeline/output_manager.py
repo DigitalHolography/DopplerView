@@ -3,6 +3,7 @@ from pathlib import Path
 import imageio
 import cv2
 import matplotlib.pyplot as plt
+from holosegment.utils.image_utils import normalize_to_uint8
 
 class OutputManager:
     def __init__(self, output_dir, enabled=True, formats=("npy",)):
@@ -35,18 +36,8 @@ class OutputManager:
             plt.title(title)
         
         plt.savefig(self.output_dir / f"{step_name}_{key}.png", bbox_inches='tight')
+        plt.close()
 
-def normalize_to_uint8(arr):
-    if arr.dtype == bool:
-        return arr.astype(np.uint8) * 255
-    if arr.dtype == np.uint8:
-        return arr
-
-    arr_min = np.min(arr)
-    arr_max = np.max(arr)
-
-    norm = (arr - arr_min) / (arr_max - arr_min + 1e-8)
-    return (norm * 255).astype(np.uint8)
 
 def save_numpy_as_avi(video: np.ndarray, filename: str, fps: int = 30):
     """
@@ -81,6 +72,36 @@ def save_numpy_as_avi(video: np.ndarray, filename: str, fps: int = 30):
 
     out.release()
     print(f"Saved video to {filename}")
+
+
+def save_bounding_box(image, x_center, y_center, diameter_x, diameter_y, output_path):
+    plt.figure(figsize=(6, 6))
+    plt.imshow(image, cmap='gray')
+
+    a = diameter_x / 2
+    b = diameter_y / 2
+
+    # Generate ellipse points
+    angle = np.linspace(0, 2 * np.pi, 360)
+    x_ellipsis = x_center + a * np.cos(angle)
+    y_ellipsis = y_center + b * np.sin(angle)
+    plt.plot(x_ellipsis, y_ellipsis, "r", linewidth=2, label="Ellipse")
+
+    # Bounding box coordinates
+    x_min = x_center - a
+    y_min = y_center - b
+
+    # Create a rectangle patch
+    plt.gca().add_patch(
+        plt.Rectangle((x_min, y_min), diameter_x, diameter_y, 
+                  fill=False, edgecolor="lime", linewidth=2, label="Box"))
+
+    # Add the rectangle to the Axes
+
+    plt.legend()
+    plt.savefig(output_path)
+    plt.close()
+
 
 #  def _normalize_uint8(self, array):
 #         array = array.astype(float)

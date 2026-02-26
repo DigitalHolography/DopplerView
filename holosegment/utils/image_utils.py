@@ -39,3 +39,15 @@ def normalize_image(image_array):
         Normalized image array with values in the range [0, 1]
     """
     return (image_array - image_array.min()) / (image_array.max() - image_array.min() + 1e-8)
+
+def normalize_to_uint8(arr):
+    if arr.dtype == bool:
+        return arr.astype(np.uint8) * 255
+    if arr.dtype == np.uint8:
+        return arr
+
+    arr_min = np.min(arr)
+    arr_max = np.max(arr)
+
+    norm = (arr - arr_min) / (arr_max - arr_min + 1e-8)
+    return (norm * 255).astype(np.uint8)

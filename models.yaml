@@ -16,3 +16,11 @@ nnwnet_av_corr_diasys:
   output_activation: argmax
   revision: main
 
+optic_disc_detector:
+  task: optic_disc_detection
+  hf_repo: DigitalHolography/EyeFlow_OpticDiscDetectorV2
+  filename: opticdisc.onnx
+  format: onnx
+  input_norm: minmax
+  output_activation: none
+  revision: main
