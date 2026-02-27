@@ -69,16 +69,3 @@ class Moments:
         raw_h5_filename = self.directory.name + "_raw.h5"
         ref_raw_file_path = os.path.join(dir_path_raw, raw_h5_filename) if raw_h5_filename in h5_files else os.path.join(dir_path_raw, h5_files[0])
         self.read_hdf5(ref_raw_file_path)
-
-class LoadMomentsStep:
-    name = "load_moments"
-    produces = ["moments"]
-
-    def __init__(self, pipeline):
-        self.pipeline = pipeline
-
-    def run(self):
-        input_path = self.pipeline.cache["input_path"]
-        reader = Moments(input_path)
-        reader.read_moments()
-        self.pipeline.cache["moments"] = reader

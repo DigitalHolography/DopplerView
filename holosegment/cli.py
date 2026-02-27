@@ -9,7 +9,6 @@ from pathlib import Path
 import numpy as np
 
 from holosegment.pipeline.pipeline import Pipeline
-from holosegment.segmentation.artery_vein_segmentation import artery_vein_segmentation
 from holosegment.models.registry import ModelRegistryConfig
 
 

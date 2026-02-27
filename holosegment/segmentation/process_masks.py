@@ -108,3 +108,31 @@ def get_labeled_vesselness(mask, x_center, y_center, r1=0.1, r2=0.35, numCircles
     labeled_vessels *= ~circle_mask
 
     return labeled_vessels, edges
+
+def clean_vessel_mask(
+    raw_mask,
+    image_shape,
+    optic_disc_center,
+    diaphragm_radius,
+    crop_radius,
+):
+    height, width = image_shape
+
+    mask_diaphragm = disk_mask(
+        height, width, R1=diaphragm_radius
+    )
+
+    mask_center = disk_mask(
+        height, width,
+        R1=crop_radius,
+        center=optic_disc_center
+    )
+
+    largest_component = bwareafilt_largest(
+        raw_mask & ~mask_center,
+        connectivity=2,
+    )
+
+    clean = raw_mask & largest_component & mask_diaphragm
+
+    return clean

@@ -70,7 +70,7 @@ def flat_field_correction(image, correction_params, border_amount=0):
 
     return corrected_image
 
-def compute_M0_ff(M0, gw_ratio=0.07, border=0.15):
+def compute_moment_ff(M0, gw_ratio=0.07, border=0.15):
     """
     Compute the flat-field corrected M0 (M0_ff).
 

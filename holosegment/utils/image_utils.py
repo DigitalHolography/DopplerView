@@ -4,6 +4,7 @@ Utils for handling images, such as loading, saving, and preprocessing.
 
 import numpy as np
 from PIL import Image
+import matplotlib.pyplot as plt
 
 def load_image_as_array(image_path):
     """
@@ -51,3 +52,31 @@ def normalize_to_uint8(arr):
 
     norm = (arr - arr_min) / (arr_max - arr_min + 1e-8)
     return (norm * 255).astype(np.uint8)
+
+def save_bounding_box(image, x_center, y_center, diameter_x, diameter_y, output_path):
+    plt.figure(figsize=(6, 6))
+    plt.imshow(image, cmap='gray')
+
+    a = diameter_x / 2
+    b = diameter_y / 2
+
+    # Generate ellipse points
+    angle = np.linspace(0, 2 * np.pi, 360)
+    x_ellipsis = x_center + a * np.cos(angle)
+    y_ellipsis = y_center + b * np.sin(angle)
+    plt.plot(x_ellipsis, y_ellipsis, "r", linewidth=2, label="Ellipse")
+
+    # Bounding box coordinates
+    x_min = x_center - a
+    y_min = y_center - b
+
+    # Create a rectangle patch
+    plt.gca().add_patch(
+        plt.Rectangle((x_min, y_min), diameter_x, diameter_y, 
+                  fill=False, edgecolor="lime", linewidth=2, label="Box"))
+
+    # Add the rectangle to the Axes
+
+    plt.legend()
+    plt.savefig(output_path)
+    plt.close()
