@@ -1,3 +1,4 @@
+from holosegment.pipeline.dag import DAGEngine
 from holosegment.models.manager import ModelManager
 from holosegment.models.builder import build_model_wrapper
 from holosegment.pipeline.output_manager import OutputManager
@@ -64,42 +65,49 @@ class Pipeline:
 
         # Register steps
         self.steps = {
-            "load_moments": LoadMomentsStep(),
-            "preprocess": PreprocessStep(),
-            "optic_disc_detection": OpticDiscDetectionStep(),
-            "binary_segmentation": BinarySegmentationStep(),
-            "pulse_analysis": PulseAnalysisStep(),
-            "av_segmentation": AVSegmentationStep(),
+            LoadMomentsStep(),
+            PreprocessStep(),
+            OpticDiscDetectionStep(),
+            BinarySegmentationStep(),
+            PulseAnalysisStep(),
+            AVSegmentationStep(),
         }
 
-    def run_all(self, input_path):
+        self.engine = DAGEngine(self.steps)
+
+    def run(self, input_path, targets=None):
         self.ctx.cache["input_path"] = input_path
+        self.engine.run(self.ctx, targets)
+        return self.ctx.cache
 
-        for name in self.steps:
-            self.run_step(name)
+    # def run_all(self, input_path):
+    #     self.ctx.cache["input_path"] = input_path
 
-        return (
-            self.ctx.cache.get("artery_mask"),
-            self.ctx.cache.get("vein_mask"),
-        )
+    #     for name in self.steps:
+    #         self.run_step(name)
 
-    def run_step(self, step_name):
-        step = self.steps[step_name]
+    #     return (
+    #         self.ctx.cache.get("artery_mask"),
+    #         self.ctx.cache.get("vein_mask"),
+    #     )
 
-        # Check dependencies
-        for dep in getattr(step, "requires", []):
-            if dep not in self.ctx.cache:
-                raise RuntimeError(
-                    f"Step '{step_name}' requires '{dep}' but it is missing."
-                )
+    # def run_step(self, step_name):
+    #     step = self.steps[step_name]
 
-        print(f"Running step: {step_name}")
-        step.run(self.ctx)
+    #     # Check dependencies
+    #     for dep in getattr(step, "requires", []):
+    #         if dep not in self.ctx.cache:
+    #             raise RuntimeError(
+    #                 f"Step '{step_name}' requires '{dep}' but it is missing."
+    #             )
 
-    def run_from(self, step_name):
-        run = False
-        for name in self.steps:
-            if name == step_name:
-                run = True
-            if run:
-                self.run_step(name)
+    #     print(f"Running step: {step_name}")
+    #     step.run(self.ctx)
+
+    # def run_from(self, step_name):
+    #     run = False
+    #     for name in self.steps:
+    #         if name == step_name:
+    #             run = True
+    #         if run:
+    #             self.run_step(name)

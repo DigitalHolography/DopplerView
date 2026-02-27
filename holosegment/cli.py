@@ -71,9 +71,7 @@ def main():
     registry = ModelRegistryConfig(Path("models.yaml"))
     pipeline = Pipeline(config, registry, output_dir=output_dir, debug=args.verbose)
 
-    
-
-    pipeline.run_all(h5_path)
+    pipeline.run(h5_path)
     
     # # Step 2: Preprocessing (normalization and registration)
     # if args.verbose:
