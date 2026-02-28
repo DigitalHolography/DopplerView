@@ -1,4 +1,4 @@
-from holosegment.steps.step import BaseStep
+from holosegment.pipeline.step import BaseStep
 from holosegment.utils.image_utils import save_bounding_box
 
 import numpy as np

@@ -1,4 +1,4 @@
-from holosegment.steps.step import BaseStep
+from holosegment.pipeline.step import BaseStep
 from holosegment.segmentation.process_masks import clean_vessel_mask
 import numpy as np
 from skimage.filters import frangi

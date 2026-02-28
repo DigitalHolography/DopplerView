@@ -1,4 +1,4 @@
-from holosegment.steps.step import BaseStep
+from holosegment.pipeline.step import BaseStep
 
 from holosegment.preprocessing.registration import register_video
 from holosegment.preprocessing import normalization, resize

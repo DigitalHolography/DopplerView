@@ -1,4 +1,4 @@
-from holosegment.steps.step import BaseStep
+from holosegment.pipeline.step import BaseStep
 import numpy as np
 
 class AVSegmentationStep(BaseStep):

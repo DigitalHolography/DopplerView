@@ -1,4 +1,4 @@
-from holosegment.steps.step import BaseStep
+from holosegment.pipeline.step import BaseStep
 from holosegment.input_output.read_moments import Moments
 
 class LoadMomentsStep(BaseStep):

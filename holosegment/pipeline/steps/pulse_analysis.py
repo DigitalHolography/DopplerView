@@ -1,4 +1,4 @@
-from holosegment.steps.step import BaseStep, NestedStep
+from holosegment.pipeline.step import BaseStep, NestedStep
 from holosegment.segmentation import pulse_analysis
 
 class PulseAnalysisStep(NestedStep):
