@@ -52,6 +52,8 @@ def main():
 
     registry = ModelRegistryConfig(Path("models.yaml"))
     pipeline = Pipeline(registry)
+    if args.config:
+        pipeline.load_eyeflow_config(args.config)
     pipeline.load_input(input_folder)
 
     pipeline.run(debug=debug)

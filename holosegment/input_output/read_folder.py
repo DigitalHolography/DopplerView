@@ -24,7 +24,6 @@ class HolodopplerFolder:
             config_file = shutil.copy("DefaultEyeflowParams.json", os.path.join(json_path, "input_EF_params.json"))
         else:
             config_file = os.path.join(json_path, json_files[0])
-        print(f"Using Eyeflow config file: {config_file}")
         return config_file
 
     def get_HD_config(self):
@@ -33,7 +32,6 @@ class HolodopplerFolder:
         if len(json_files) == 0:
             raise FileNotFoundError(f"No JSON configuration file found in {self.directory}")
         json_path = os.path.join(self.directory, config_name) if config_name in json_files else os.path.join(self.directory, json_files[0])
-        print(f"Using Holodoppler config file: {json_path}")
         if not os.path.exists(json_path):
             raise FileNotFoundError(f"Holodoppler config file not found: {json_path}")
         return json_path

@@ -40,11 +40,15 @@ class Context:
 
     def load_eyeflow_config(self, config_path):
         self.eyeflow_config = json.load(open(config_path))
+        print(f"Using Eyeflow config file: {config_path}")
+
 
     def load_input_folder(self, folder_path):
         self.folder = HolodopplerFolder(folder_path)
         self.cache["input_path"] = folder_path
         self.holodoppler_config = json.load(open(self.folder.holodoppler_config))
+        print(f"Using Holodoppler config file: {self.folder.holodoppler_config}")
+
         if self.eyeflow_config is None:
             # Load configs from folder if not already loaded
             self.load_eyeflow_config(self.folder.eyeflow_config)
