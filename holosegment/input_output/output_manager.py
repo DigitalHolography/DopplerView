@@ -101,38 +101,3 @@ def save_bounding_box(image, x_center, y_center, diameter_x, diameter_y, output_
     plt.legend()
     plt.savefig(output_path)
     plt.close()
-
-
-#  def _normalize_uint8(self, array):
-#         array = array.astype(float)
-#         array -= array.min()
-#         if array.max() > 0:
-#             array /= array.max()
-#         return (array * 255).astype("uint8")
-
-
-# class OutputManager:
-#     def __init__(self, output_dir=None, enabled=False):
-#         self.enabled = enabled
-#         if enabled:
-#             self.output_dir = Path(output_dir)
-#             self.output_dir.mkdir(parents=True, exist_ok=True)
-
-#     def save(self, step_name, outputs):
-#         if not self.enabled:
-#             return
-
-#         for key, value in outputs.items():
-#             filename = self.output_dir / f"{step_name}_{key}"
-
-#             if isinstance(value, np.ndarray):
-#                 np.save(str(filename) + ".npy", value)
-
-#                 # Save 2D arrays as PNG for visualization
-#                 if value.ndim == 2:
-#                     imageio.imwrite(
-#                         str(filename) + ".png",
-#                         self._normalize_uint8(value)
-#                     )
-
-   

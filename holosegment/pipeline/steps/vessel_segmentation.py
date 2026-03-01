@@ -9,7 +9,7 @@ class VesselSegmentation(BaseStep):
     produces = ["vessel_mask"]
 
     def _relevant_config(self, ctx):
-        params = ctx.config["Mask"]
+        params = ctx.eyeflow_config["Mask"]
         d = { "VesselSegmentationMethod": params.get("VesselSegmentationMethod", "AI"),
                  "DiaphragmRadius": params.get("DiaphragmRadius", 0.1),
                  "CropChoroidRadius": params.get("CropChoroidRadius", 0.45),
@@ -42,7 +42,7 @@ class VesselSegmentation(BaseStep):
         return mask
 
     def get_vessel_mask(self, ctx):
-        method = ctx.config.get("Mask", "").get("VesselSegmentationMethod", "AI")
+        method = ctx.eyeflow_config.get("Mask", "").get("VesselSegmentationMethod", "AI")
 
         if method == "AI":
             print("Using deep learning model for vessel segmentation.")
@@ -60,7 +60,7 @@ class VesselSegmentation(BaseStep):
         raw_mask = self.get_vessel_mask(ctx)
 
         # ---- Postprocessing ----
-        params = ctx.config["Mask"]
+        params = ctx.eyeflow_config["Mask"]
 
         clean_mask = clean_vessel_mask(
             raw_mask,

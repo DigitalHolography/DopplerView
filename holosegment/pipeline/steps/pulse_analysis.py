@@ -44,7 +44,7 @@ class ComputeTemporalCuesStep(BaseStep):
         video = ctx.cache["M0_ff_video"]
         pre_artery_mask = ctx.cache["pre_artery_mask"]
 
-        params = ctx.config["Mask"]
+        params = ctx.eyeflow_config["Mask"]
 
 
         vessel_mask = ctx.cache["vessel_mask"]

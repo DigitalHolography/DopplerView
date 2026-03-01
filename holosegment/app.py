@@ -9,7 +9,7 @@ import json
 from holosegment.pipeline.pipeline import Pipeline
 from holosegment.models.registry import ModelRegistryConfig
 
-def load_config():
+def load_eyeflow_config():
     config_path = select_file()
     if config_path is None or not Path(config_path).exists():
         st.warning("Please select a valid configuration file.")
@@ -52,7 +52,7 @@ def overlay_masks(image, artery_mask=None, vein_mask=None):
 
 def init_session():
     if "pipeline" not in st.session_state:
-        st.session_state.pipeline = Pipeline(model_registry=ModelRegistryConfig(Path("models.yaml")), output_dir=Path("output"), debug=True)
+        st.session_state.pipeline = Pipeline(model_registry=ModelRegistryConfig(Path("models.yaml")))
 
     if "input_folder" not in st.session_state:
         st.session_state.input_folder = None
@@ -77,9 +77,9 @@ optic_disc_model = st.selectbox("Selected optic disk detection model", options=s
 st.session_state.pipeline.ctx.change_model_for_task("optic_disc_detection", optic_disc_model)
 
 if st.button("Load config"):
-    config_path = load_config()
+    config_path = load_eyeflow_config()
     if config_path is not None:
-        st.session_state.pipeline.load_config(config_path)
+        st.session_state.pipeline.load_eyeflow_config(config_path)
         st.success("Config loaded.")
 
 # 1. BROWSER BUTTON
@@ -95,15 +95,6 @@ if st.button("Browse Folder"):
     else:
         st.session_state.pipeline.load_input(selected_path)
         st.success("Folder loaded.")
-
-        if st.session_state.pipeline.ctx.config is not None:
-            st.session_state.pipeline.run(targets=[
-                "load_moments",
-                "preprocess"
-            ])
-
-            image = st.session_state.pipeline.ctx.get("M0_ff_image")
-            st.session_state.image = image
 
 
 if st.button("Run Full Pipeline"):

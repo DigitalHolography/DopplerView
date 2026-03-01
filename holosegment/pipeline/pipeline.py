@@ -14,6 +14,7 @@ from holosegment.pipeline.steps.optic_disc import OpticDiscDetectionStep
 from holosegment.pipeline.steps.vessel_segmentation import VesselSegmentation
 from holosegment.pipeline.steps.pulse_analysis import PulseAnalysisStep
 from holosegment.pipeline.steps.av_segmentation import AVSegmentationStep
+from holosegment.input_output.read_folder import HolodopplerFolder
 
 class Context:
     """
@@ -25,21 +26,29 @@ class Context:
         - services (models, output, etc.)
     """
 
-
-    def __init__(self, config, model_manager, output_manager):
-        self.config = config
-        self.output_manager = output_manager
+    def __init__(self, config, model_manager):
+        self.eyeflow_config = config
         self.model_manager = model_manager
         self.model_instances = {}
         self.metadata = {
             "step_hashes": {}
         }
+        self.folder = None
+        self.output_manager = None
 
         # Runtime data storage
         self.cache: Dict[str, Any] = {}
 
-    def load_config(self, config_path):
-        self.config = json.load(open(config_path))
+    def load_eyeflow_config(self, config_path):
+        self.eyeflow_config = json.load(open(config_path))
+
+    def load_input_folder(self, folder_path):
+        self.folder = HolodopplerFolder(folder_path)
+        self.cache["input_path"] = folder_path
+        self.holodoppler_config = json.load(open(self.folder.holodoppler_config))
+        if self.eyeflow_config is None:
+            # Load configs from folder if not already loaded
+            self.load_eyeflow_config(self.folder.eyeflow_config)
 
     def get(self, key: str):
         return self.cache.get(key)
@@ -58,6 +67,12 @@ class Context:
     def get_current_model_for_task(self, task_name):
         model_name = self.model_manager.get_current_model_name_for_task(task_name)
         return self.get_model(model_name)
+    
+    def create_output_folder(self, debug=True):
+        if self.folder is None:
+            raise RuntimeError("Input folder not loaded. Cannot determine output folder.")
+        # Create a new output folder with an incremented index
+        self.output_manager = OutputManager(output_dir=self.folder.create_output_folder(), enabled=debug)
 
     def set(self, key: str, value: Any):
         self.cache[key] = value
@@ -74,11 +89,10 @@ class Context:
         self.cache.clear()
 
 class Pipeline:
-    def __init__(self, model_registry, config=None, output_dir=None, debug=False):
+    def __init__(self, model_registry, config=None):
         self.ctx = Context(
             config=config,
             model_manager=ModelManager(model_registry),
-            output_manager=OutputManager(output_dir=output_dir, enabled=debug)
         )
 
         # Register steps
@@ -93,50 +107,17 @@ class Pipeline:
 
         self.engine = DAGEngine(self.steps)
 
-    
-
-    def load_config(self, config_path):
-        self.ctx.load_config(config_path)
+    def load_eyeflow_config(self, config_path):
+        self.ctx.load_eyeflow_config(config_path)
 
     def load_input(self, input_path):
-        self.ctx.set("input_path", input_path)
+        self.ctx.load_input_folder(input_path)
 
-    def run(self, targets=None):
+    def run(self, targets=None, debug=True):
         if not self.ctx.has("input_path"):
             raise RuntimeError("Input path not set. Please load input folder before running the pipeline.")
-        if self.ctx.config is None:
+        if self.ctx.eyeflow_config is None:
             raise RuntimeError("Configuration not loaded. Please load a configuration file before running the pipeline.")
+        self.ctx.create_output_folder(debug=debug)
         self.engine.run(self.ctx, targets)
         return self.ctx.cache
-
-    # def run_all(self, input_path):
-    #     self.ctx.cache["input_path"] = input_path
-
-    #     for name in self.steps:
-    #         self.run_step(name)
-
-    #     return (
-    #         self.ctx.cache.get("artery_mask"),
-    #         self.ctx.cache.get("vein_mask"),
-    #     )
-
-    # def run_step(self, step_name):
-    #     step = self.steps[step_name]
-
-    #     # Check dependencies
-    #     for dep in getattr(step, "requires", []):
-    #         if dep not in self.ctx.cache:
-    #             raise RuntimeError(
-    #                 f"Step '{step_name}' requires '{dep}' but it is missing."
-    #             )
-
-    #     print(f"Running step: {step_name}")
-    #     step.run(self.ctx)
-
-    # def run_from(self, step_name):
-    #     run = False
-    #     for name in self.steps:
-    #         if name == step_name:
-    #             run = True
-    #         if run:
-    #             self.run_step(name)

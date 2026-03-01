@@ -38,7 +38,7 @@ class BaseStep:
         Override in steps if needed.
         By default use entire config.
         """
-        return ctx.config
+        return ctx.eyeflow_config
 
     def _input_signature(self, ctx):
         sig = {}
