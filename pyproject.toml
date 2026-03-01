@@ -1,15 +1,40 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+
 [project]
 name = "holosegment"
-version = "0.1.0"
-description = "Holosegment pipeline"
-authors = [{name="Marius Dubosc"}]
-requires-python = ">= 3.8"
-dynamic = ["dependencies"]
+version = "0.2.0"
+description = "CLI and Streamlit application for artery/vein segmentation from Doppler holograms"
+authors = [{ name = "Marius Dubosc" }]
+readme = "README.md"
+requires-python = ">=3.8"
+
+dependencies = [
+    "numpy",
+    "scipy",
+    "scikit-image",
+    "scikit-learn",
+    "opencv-python",
+    "matplotlib",
+    "pillow",
+    "pandas",
+    "tqdm",
+    "PyYAML",
+    "h5py",
+    "onnxruntime",
+    "torch",
+    "torchvision",
+    "streamlit",
+    "typer",
+]
+
 
 [project.scripts]
-cli = "cli:main"
+holosegment = "holosegment.cli:main"
 
 
-[build-system]
-requires = ["setuptools"]
-build-backend = "setuptools.build_meta"
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["holosegment*"]
