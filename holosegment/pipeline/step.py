@@ -58,3 +58,11 @@ class NestedStep(BaseStep):
     def run(self, ctx):
         for step in self.substeps:
             step.run(ctx)
+    
+    def _relevant_config(self, ctx):
+        """By default, combine relevant config from all substeps.
+        """
+        d = {}
+        for step in self.substeps:
+            d.update(step._relevant_config(ctx))
+        return d

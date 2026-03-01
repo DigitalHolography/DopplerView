@@ -489,7 +489,7 @@ def find_systole_index(
         sys_min_list,
     )
 
-def compute_diasys(video, mask):
+def compute_diasys(video, mask, stride=512, sampling_frequency=37.037):
     numFrames, H, W  = video.shape
 
     # --- Pulse artery signal ---
@@ -498,9 +498,7 @@ def compute_diasys(video, mask):
     pulse_artery = np.nansum(video[:, mask.astype(bool)], axis=(1)) / max(mask_nnz, 1)
 
     # --- Filter pulse_artery to remove high frequency noise ---
-    stride = 512
-    fs = 37.037
-    fs = fs * 1000 / stride  # Hz
+    fs = sampling_frequency * 1000 / stride  # Hz
     b, a = butter(4, 15 / (fs / 2), btype='low')
     pulse_artery = filtfilt(b, a, pulse_artery)
 
@@ -583,8 +581,8 @@ def compute_diasys(video, mask):
 
     return M0_Systole_img, M0_Diastole_img, sysindexes, diasindexes, fullPulse
 
-def compute_diasys_image(video, mask):
-    M0_Systole_img, M0_Diastole_img, _, _, fullPulse = compute_diasys(video, mask)
+def compute_diasys_image(video, mask, stride=512, sampling_frequency=37.037):
+    M0_Systole_img, M0_Diastole_img, _, _, fullPulse = compute_diasys(video, mask, stride=stride, sampling_frequency=sampling_frequency)
 
     sys = image_utils.normalize_image(M0_Systole_img)
     dias = image_utils.normalize_image(M0_Diastole_img)
