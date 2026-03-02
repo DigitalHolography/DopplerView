@@ -1,10 +1,3 @@
-Here is a fully rewritten and updated `README.md` aligned with your current architecture (DAG pipeline, folder-based input, model registry, Streamlit GUI, fingerprinting, etc.).
-It removes outdated `.holo` file usage and old CLI syntax.
-
-You can copy this directly.
-
----
-
 # HoloSegment
 
 Modular artery/vein segmentation pipeline for Doppler holography retinal imaging.
