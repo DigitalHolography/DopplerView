@@ -64,13 +64,14 @@ class Preprocessor:
         gaussian_blur_ratio = self.eyeflow_config['FlatFieldCorrection']['GWRatio']
 
         if self.M0 is not None:
-            self.M0_ff_video = normalization.compute_moment_ff(self.M0, gaussian_blur_ratio)
+            numx = self.M0.shape[2]
+            self.M0_ff_video = normalization.flat_field_correction_3d(self.M0, gaussian_blur_ratio * numx)
 
         if self.M1 is not None:
-            self.M1_ff_video = normalization.compute_moment_ff(self.M1, gaussian_blur_ratio)
+            self.M1_ff_video = normalization.flat_field_correction_3d(self.M1, gaussian_blur_ratio)
 
         if self.M2 is not None:
-            self.M2_ff_video = normalization.compute_moment_ff(self.M2, gaussian_blur_ratio)
+            self.M2_ff_video = normalization.flat_field_correction_3d(self.M2, gaussian_blur_ratio)
 
         return
     
@@ -121,11 +122,11 @@ class PreprocessStep(BaseStep):
     def _relevant_config(self, ctx):
         return {
             "Preprocess": {
-                "Register": ctx.eyeflow_config.get("Preprocess", {}).get("Register", {}),
-                "Crop": ctx.eyeflow_config.get("Preprocess", {}).get("Crop", {})
+                "Register": ctx.eyeflow_config["Preprocess"]["Register"],
+                "Crop": ctx.eyeflow_config["Preprocess"]["Crop"]
             },
             "FlatFieldCorrection": {
-                "GWRatio": ctx.eyeflow_config.get("FlatFieldCorrection", {}).get("GWRatio", 0.07)
+                "GWRatio": ctx.eyeflow_config["FlatFieldCorrection"]["GWRatio"]
             }
         }
 

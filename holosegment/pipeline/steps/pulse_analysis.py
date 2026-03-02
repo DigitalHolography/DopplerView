@@ -48,16 +48,14 @@ class ComputeTemporalCuesStep(BaseStep):
         video = ctx.cache["M0_ff_video"]
         pre_artery_mask = ctx.cache["pre_artery_mask"]
 
-        vessel_mask = ctx.cache["vessel_mask"]
-
-        correlation = pulse_analysis.compute_correlation(video, vessel_mask)
+        correlation = pulse_analysis.compute_correlation(video, pre_artery_mask)
         ctx.set("correlation", correlation)
         ctx.output_manager.save(self.name, "correlation_map", correlation, "png")
 
         sampling_frequency = ctx.holodoppler_config["fs"]
         stride = ctx.holodoppler_config["batch_stride"]
 
-        diasys, M0_Systole_img, M0_Diastole_img, fullPulse = pulse_analysis.compute_diasys_image(video, vessel_mask, sampling_frequency=sampling_frequency, stride=stride)
+        diasys, M0_Systole_img, M0_Diastole_img, fullPulse = pulse_analysis.compute_diasys_image(video, pre_artery_mask, sampling_frequency=sampling_frequency, stride=stride)
         ctx.output_manager.save(self.name, "diasys_image", diasys, "png")
         ctx.output_manager.save(self.name, "M0_Systole_img", M0_Systole_img, "png")
         ctx.output_manager.save(self.name, "M0_Diastole_img", M0_Diastole_img, "png")
