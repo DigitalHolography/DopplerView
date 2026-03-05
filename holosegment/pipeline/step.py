@@ -2,8 +2,9 @@ from typing import List
 import hashlib
 import json
 import numpy as np
+from abc import ABC
 
-class BaseStep:
+class BaseStep(ABC):
     """
     Base class for pipeline steps.
 
@@ -51,6 +52,14 @@ class BaseStep:
         if isinstance(val, np.ndarray):
             return hashlib.sha256(val.tobytes()).hexdigest()
         return str(val)
+    
+    def export(self, ctx):
+        """
+        Export step outputs using the output manager.
+        """
+        for key in self.produces:
+            if key in ctx.cache:
+                ctx.output_manager.save(self.name, key, ctx.cache[key])
     
 class NestedStep(BaseStep):
     substeps: List[BaseStep] = []

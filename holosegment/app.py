@@ -52,7 +52,7 @@ def overlay_masks(image, artery_mask=None, vein_mask=None):
 
 def init_session():
     if "pipeline" not in st.session_state:
-        st.session_state.pipeline = Pipeline(model_registry=ModelRegistryConfig(Path("models.yaml")))
+        st.session_state.pipeline = Pipeline(model_registry=ModelRegistryConfig(Path("models.yaml")), h5_schema=Path("h5_schema.json"), debug_config=Path("debug_config.json"))
 
     if "input_folder" not in st.session_state:
         st.session_state.input_folder = None

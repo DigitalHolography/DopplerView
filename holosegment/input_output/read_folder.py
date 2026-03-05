@@ -67,8 +67,11 @@ class HolodopplerFolder:
     def create_output_folder(self):
         _, index = self.get_output_folder()
         new_output_folder = os.path.join(self.directory, "holosegment", f"output_{index + 1}")
+        debug_folder = os.path.join(new_output_folder, "debug")
+        h5_folder = os.path.join(new_output_folder, "h5")
+        os.makedirs(debug_folder, exist_ok=True)
+        os.makedirs(h5_folder, exist_ok=True)
         
-        os.makedirs(new_output_folder)
         print(f"Created output folder: {new_output_folder}")
         self.output_folder = new_output_folder
         return new_output_folder

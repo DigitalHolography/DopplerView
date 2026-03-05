@@ -146,6 +146,7 @@ class DAGEngine:
             if step_name in invalidated:
                 print(f"[DAG] Running (invalidated): {step.name}")
                 step.run(ctx)
+                step.export(ctx)
                 ctx.metadata["step_hashes"][step.name] = step.fingerprint(ctx)
                 continue
 

@@ -1,0 +1,14 @@
+{
+  "binary_segmentation": {
+    "vessel_mask": "mask",
+    "vessel_logits": "image"
+  },
+
+  "pulse_analysis": {
+    "pulse_signal": "signal"
+  },
+
+  "optic_disc_detection": {
+    "optic_disc_overlay": "optic_disc"
+  }
+}

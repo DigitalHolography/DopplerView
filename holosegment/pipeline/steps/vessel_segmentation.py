@@ -35,8 +35,6 @@ class RetinalVesselSegmentationStep(VesselSegmentationStep):
         vesselness = frangi(image)
         mask = ~vesselness.astype(bool)
 
-        ctx.output_manager.save(self.name, "frangi_vesselness", vesselness, "png")
-
         return mask
 
     def deep_segmentation(self, ctx):
@@ -46,7 +44,7 @@ class RetinalVesselSegmentationStep(VesselSegmentationStep):
         logits = np.squeeze(model.predict(input))
         mask = logits > 0.5
 
-        ctx.output_manager.save(self.name, "vessel_logits", logits, "png")
+        ctx.output_manager.debug(self.name, "vessel_segmentation_logits", ctx.cache, "image")
 
         return mask
     
@@ -80,13 +78,11 @@ class RetinalVesselSegmentationStep(VesselSegmentationStep):
     def run(self, ctx):
         # ---- Segmentation ----
         raw_mask = self.get_vessel_mask(ctx)
-        ctx.output_manager.save(self.name, "vessel_mask", raw_mask, "png")
 
         # ---- Postprocessing ----
         clean_mask = self.clean_vessel_mask(raw_mask, ctx)
 
         ctx.set("retinal_vessel_mask", clean_mask)
-        ctx.output_manager.save(self.name, "vessel_mask_clean", clean_mask, "png")
 
 
 class ChoroidalVesselSegmentationStep(VesselSegmentationStep):
@@ -105,8 +101,6 @@ class ChoroidalVesselSegmentationStep(VesselSegmentationStep):
         image = ctx.require("M0_ff_image")
         vesselness = frangi(image)
         mask = ~vesselness.astype(bool)
-
-        ctx.output_manager.save(self.name, "frangi_vesselness", vesselness, "png")
 
         return mask
     
@@ -132,10 +126,8 @@ class ChoroidalVesselSegmentationStep(VesselSegmentationStep):
     def run(self, ctx):
         # ---- Segmentation ----
         raw_mask = self.get_vessel_mask(ctx)
-        ctx.output_manager.save(self.name, "vessel_mask", raw_mask, "png")
 
         # ---- Postprocessing ----
         clean_mask = self.clean_vessel_mask(raw_mask, ctx)
 
         ctx.set("choroidal_vessel_mask", clean_mask)
-        ctx.output_manager.save(self.name, "vessel_mask_clean", clean_mask, "png")

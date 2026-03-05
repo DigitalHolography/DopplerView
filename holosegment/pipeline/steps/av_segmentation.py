@@ -38,5 +38,3 @@ class AVSegmentationStep(BaseStep):
             print("Use hand-made heuristics for artery vein segmentation.")
             ctx.cache["artery_mask"], ctx.cache["vein_mask"] = self.handmade_segmentation(ctx)
         
-        ctx.output_manager.save(self.name, "artery_mask", ctx.cache["artery_mask"], "png")
-        ctx.output_manager.save(self.name, "vein_mask", ctx.cache["vein_mask"], "png")

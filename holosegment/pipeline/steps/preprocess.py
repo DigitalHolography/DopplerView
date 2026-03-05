@@ -132,25 +132,18 @@ class PreprocessStep(BaseStep):
 
     def run(self, ctx):
         moments = ctx.cache["moments"]
-        ctx.output_manager.save(self.name, "M0_video", moments.M0, format="avi")
 
         pre = Preprocessor(ctx.eyeflow_config, moments)
         pre.preprocess()
 
         if pre.M0_ff_image is not None:
             ctx.cache["M0_ff_video"] = pre.M0_ff_video
-            # ctx.output_manager.save(self.name, "M0_ff_video", pre.M0_ff_video, format="avi")
             ctx.cache["M0_ff_image"] = pre.M0_ff_image
-            ctx.output_manager.save(self.name, "M0_ff_image", pre.M0_ff_image, format="png")
 
         if pre.M1_ff_image is not None:
             ctx.cache["M1_ff_video"] = pre.M1_ff_video
-            # ctx.output_manager.save(self.name, "M1_ff_video", pre.M1_ff_video, format="avi")
             ctx.cache["M1_ff_image"] = pre.M1_ff_image
-            ctx.output_manager.save(self.name, "M1_ff_image", pre.M1_ff_image, format="png")
 
         if pre.M2_ff_image is not None:
             ctx.cache["M2_ff_video"] = pre.M2_ff_video
-            # ctx.output_manager.save(self.name, "M2_ff_video", pre.M2_ff_video, format="avi")
             ctx.cache["M2_ff_image"] = pre.M2_ff_image
-            ctx.output_manager.save(self.name, "M2_ff_image", pre.M2_ff_image, format="png")

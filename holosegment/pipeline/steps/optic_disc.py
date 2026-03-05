@@ -5,7 +5,7 @@ import numpy as np
 
 class OpticDiscDetectionStep(BaseStep):
     requires = ["M0_ff_image", "M1_ff_image"]
-    produces = ["optic_disc_center"]
+    produces = ["optic_disc_center", "optic_disc_axes"]
     name = "optic_disc_detection"
 
     def _relevant_config(self, ctx):
@@ -30,8 +30,6 @@ class OpticDiscDetectionStep(BaseStep):
         center = (int(x_center), int(y_center))
 
         print(f"Optic disc center detected at: {center}")
-
-        save_bounding_box(input, x_center, y_center, diameter_x, diameter_y, ctx.output_manager.output_dir / f"{self.name}")
 
         return (x_center, y_center), diameter_x, diameter_y
     
@@ -66,3 +64,4 @@ class OpticDiscDetectionStep(BaseStep):
             center = (M0.shape[1] // 2, M0.shape[0] // 2)  # Fallback to image center if no model is used
 
         ctx.cache["optic_disc_center"] = center
+        ctx.cache["optic_disc_axes"] = (diameter_x, diameter_y)

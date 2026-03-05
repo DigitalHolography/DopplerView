@@ -5,6 +5,7 @@ Utils for handling images, such as loading, saving, and preprocessing.
 import numpy as np
 from PIL import Image
 import matplotlib.pyplot as plt
+import cv2
 
 def load_image_as_array(image_path):
     """
@@ -83,3 +84,37 @@ def save_bounding_box(image, x_center, y_center, diameter_x, diameter_y, output_
     plt.legend()
     plt.savefig(output_path)
     plt.close()
+
+def save_numpy_as_avi(video: np.ndarray, filename: str, fps: int = 30):
+    """
+    Saves a NumPy video array to an AVI file using OpenCV.
+
+    Parameters:
+        video (np.ndarray): Shape (T, H, W) for grayscale, or (T, H, W, 3) for RGB.
+        filename (str): Path to output .avi file.
+        fps (int): Frame rate.
+    """
+    T = video.shape[0]
+    is_color = video.ndim == 4
+
+    H, W = video.shape[1:3]
+    fourcc = cv2.VideoWriter_fourcc(*'XVID')
+    out = cv2.VideoWriter(filename, fourcc, fps, (W, H), isColor=True)
+
+    for t in range(T):
+        frame = video[t]
+        
+        # Normalize and convert to uint8 if needed
+        if frame.dtype != np.uint8:
+            frame = normalize_to_uint8(frame)
+        
+        # Convert grayscale to BGR
+        if not is_color:
+            frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+        else:
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+
+        out.write(frame)
+
+    out.release()
+    print(f"Saved video to {filename}")
