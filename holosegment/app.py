@@ -69,10 +69,10 @@ def init_session():
 
 init_session()
 
-binary_seg_model = st.selectbox("Selected binary segmentation model", options=st.session_state.pipeline.ctx.model_manager.get_model_name_list_for_task("vessel_segmentation"))
-st.session_state.pipeline.ctx.change_model_for_task("vessel_segmentation", binary_seg_model)
-av_seg_model = st.selectbox("Selected artery/vein segmentation model", options=st.session_state.pipeline.ctx.model_manager.get_model_name_list_for_task("artery_vein_segmentation"))
-st.session_state.pipeline.ctx.change_model_for_task("artery_vein_segmentation", av_seg_model)
+binary_seg_model = st.selectbox("Selected binary segmentation model", options=st.session_state.pipeline.ctx.model_manager.get_model_name_list_for_task("retinal_vessel_segmentation"))
+st.session_state.pipeline.ctx.change_model_for_task("retinal_vessel_segmentation", binary_seg_model)
+av_seg_model = st.selectbox("Selected artery/vein segmentation model", options=st.session_state.pipeline.ctx.model_manager.get_model_name_list_for_task("retinal_artery_vein_segmentation"))
+st.session_state.pipeline.ctx.change_model_for_task("retinal_artery_vein_segmentation", av_seg_model)
 optic_disc_model = st.selectbox("Selected optic disk detection model", options=st.session_state.pipeline.ctx.model_manager.get_model_name_list_for_task("optic_disc_detection"))
 st.session_state.pipeline.ctx.change_model_for_task("optic_disc_detection", optic_disc_model)
 
