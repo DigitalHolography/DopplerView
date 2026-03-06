@@ -248,6 +248,7 @@ def compute_pre_artery_mask(video, vessel_mask, optic_disc_center, sampling_freq
         branch_mean = np.mean(branch_pixels, axis=1)
         # Apply zero-phase filtering
         signals[i - 1, :] = filtfilt(b, a, branch_mean)
+        # output_manager.debug("pulse_analysis", f"branch_{i}_signal", signals[i - 1, :], title=f"Branch {i} Temporal Signal")
 
     signals_n = (signals - signals.mean(axis=1, keepdims=True)) / signals.std(axis=1, keepdims=True)
 

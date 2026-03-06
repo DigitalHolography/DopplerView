@@ -78,7 +78,7 @@ class Context:
         if self.folder is None:
             raise RuntimeError("Input folder not loaded. Cannot determine output folder.")
         # Create a new output folder with an incremented index
-        self.output_manager = OutputManager(output_dir=self.folder.create_output_folder(), schema=self.h5_schema, debug_config=self.debug_config)
+        self.output_manager = OutputManager(output_folder=self.folder.create_output_folder(), schema=self.h5_schema, debug_config=self.debug_config)
 
     def set(self, key: str, value: Any):
         self.cache[key] = value

@@ -115,8 +115,8 @@ class Preprocessor:
         return 
 
 class PreprocessStep(BaseStep):
-    requires = ["moments"]
-    produces = ["M0_ff_video", "M0_ff_image", "M1_ff_image"]
+    requires = {"moments"}
+    produces = {"M0_ff_video", "M0_ff_image", "M1_ff_image"}
     name = "preprocess"
 
     def _relevant_config(self, ctx):

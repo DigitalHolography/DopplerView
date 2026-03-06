@@ -3,7 +3,7 @@ from holosegment.input_output.read_moments import Moments
 
 class LoadMomentsStep(BaseStep):
     name = "load_moments"
-    produces = ["moments"]
+    produces = {"moments"}
 
     def _relevant_config(self, ctx):
         # No specific config for this step, but we include input path for fingerprinting

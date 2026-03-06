@@ -25,7 +25,7 @@ class VideoRenderer(DebugRenderer):
 
 class OpticDiscRenderer(DebugRenderer):
     def render(self, key, cache, path):
-        image = cache.get("M0_image")
+        image = cache.get("M0_ff_image")
         center = cache.get("optic_disc_center")
         axes = cache.get("optic_disc_axes")
 

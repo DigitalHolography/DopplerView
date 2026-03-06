@@ -16,8 +16,8 @@ class VesselSegmentationStep(BaseStep):
 
 class RetinalVesselSegmentationStep(VesselSegmentationStep):
     name = "retinal_vessel_segmentation"
-    requires = ["M0_ff_image", "optic_disc_center"]
-    produces = ["retinal_vessel_mask"]
+    requires = {"M0_ff_image", "optic_disc_center"}
+    produces = {"retinal_vessel_mask"}
 
     def _relevant_config(self, ctx):
         params = ctx.eyeflow_config["Mask"]
@@ -87,8 +87,8 @@ class RetinalVesselSegmentationStep(VesselSegmentationStep):
 
 class ChoroidalVesselSegmentationStep(VesselSegmentationStep):
     name = "choroidal_vessel_segmentation"
-    requires = ["M0_ff_image", "retinal_vessel_mask", "optic_disc_center"]
-    produces = ["choroidal_vessel_mask"]
+    requires = {"M0_ff_image", "retinal_vessel_mask", "optic_disc_center"}
+    produces = {"choroidal_vessel_mask"}
 
     def _relevant_config(self, ctx):
         params = ctx.eyeflow_config["Mask"]

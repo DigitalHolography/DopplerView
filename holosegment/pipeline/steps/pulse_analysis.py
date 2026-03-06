@@ -2,8 +2,6 @@ from holosegment.pipeline.step import BaseStep, NestedStep
 from holosegment.segmentation import pulse_analysis
 
 class PulseAnalysisStep(NestedStep):
-    requires = ["M0_ff_video", "retinal_vessel_mask"]
-    produces = ["correlation", "diasys_image"]
     name = "pulse_analysis"
 
     def __init__(self):
@@ -11,14 +9,11 @@ class PulseAnalysisStep(NestedStep):
             PreArteryMaskStep(),
             ComputeTemporalCuesStep()
         ]
-
-    def run(self, ctx):
-        for step in self.substeps:
-            step.run(ctx)
+        super().__init__()
             
 class PreArteryMaskStep(BaseStep):
-    requires = ["M0_ff_video", "retinal_vessel_mask", "optic_disc_center"]
-    produces = ["pre_artery_mask"]
+    requires = {"M0_ff_video", "retinal_vessel_mask", "optic_disc_center"}
+    produces = {"pre_artery_mask"}
     name = "pre_artery_mask"
 
     def _relevant_config(self, ctx):
@@ -35,8 +30,8 @@ class PreArteryMaskStep(BaseStep):
         ctx.cache["pre_vein_mask"] = pre_vein_mask
 
 class ComputeTemporalCuesStep(BaseStep):
-    requires = ["M0_ff_video", "pre_artery_mask", "choroidal_vessel_mask"]
-    produces = ["correlation", "diasys_image"]
+    requires = {"M0_ff_video", "pre_artery_mask", "choroidal_vessel_mask"}
+    produces = {"correlation", "diasys_image", "retinal_arterial_pulse", "choroidal_pulse"}
     name = "temporal_cues"
 
     def _relevant_config(self, ctx):
@@ -58,4 +53,6 @@ class ComputeTemporalCuesStep(BaseStep):
         diasys, M0_Systole_img, M0_Diastole_img, fullPulse = pulse_analysis.compute_diasys_image(video, pre_artery_mask, sampling_frequency=sampling_frequency, stride=stride)
         choroid_diasys, choroid_systole, choroid_diastole, choroid_fullPulse = pulse_analysis.compute_diasys_image(video, choroidal_vessel_mask, sampling_frequency=sampling_frequency, stride=stride)
 
+        ctx.set("retinal_arterial_pulse", fullPulse)
+        ctx.set("choroidal_pulse", choroid_fullPulse)
         ctx.set("diasys_image", diasys)

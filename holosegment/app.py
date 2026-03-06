@@ -60,10 +60,10 @@ def init_session():
     if "image" not in st.session_state:
         st.session_state.image = None
 
-    if "artery_mask" not in st.session_state:
+    if "retinal_artery_mask" not in st.session_state:
         st.session_state.artery_mask = None
 
-    if "vein_mask" not in st.session_state:
+    if "retinal_vein_mask" not in st.session_state:
         st.session_state.vein_mask = None
 
 
@@ -109,8 +109,8 @@ if st.button("Run Full Pipeline"):
         )
 
         st.session_state.image = pipeline.ctx.get("M0_ff_image")
-        st.session_state.artery_mask = pipeline.ctx.get("artery_mask")
-        st.session_state.vein_mask = pipeline.ctx.get("vein_mask")
+        st.session_state.artery_mask = pipeline.ctx.get("retinal_artery_mask")
+        st.session_state.vein_mask = pipeline.ctx.get("retinal_vein_mask")
 
         st.success("Pipeline completed.")
 

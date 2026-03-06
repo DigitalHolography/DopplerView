@@ -1,23 +1,21 @@
 {
-  "moments": {
-    "M0_video": "preprocessing/M0/video",
-    "M0_ff_video": "preprocessing/M0_ff/video",
-    "M0_ff_image": "preprocessing/M0_ff/image"
-  },
-
-  "segmentation": {
-    "Retina": {
-        "vessel_mask": "segmentation/Retina/binary/mask",
-        "artery_mask": "segmentation/Retina/av/artery",
-        "vein_mask": "segmentation/Retina/av/vein"
+    "moments": {
+        "M0_ff_image": "preprocessing/M0_ff/image"
     },
-    "Choroid": {
-        "vessel_mask": "segmentation/Choroid/binary/mask",
-        "artery_mask": "segmentation/Choroid/av/artery",
-        "vein_mask": "segmentation/Choroid/av/vein"
-    },
-    "OpticDisc": {
-        "optic_disc_center": "segmentation/OpticDisc/center"
+    "segmentation": {
+        "Retina": {
+            "retinal_vessel_mask": "segmentation/Retina/binary/vessel_mask",
+            "retinal_artery_mask": "segmentation/Retina/av/artery_mask",
+            "retinal_vein_mask": "segmentation/Retina/av/vein_mask"
+        },
+        "Choroid": {
+            "choroidal_vessel_mask": "segmentation/Choroid/binary/vessel_mask",
+            "choroidal_artery_mask": "segmentation/Choroid/av/artery_mask",
+            "choroidal_vein_mask": "segmentation/Choroid/av/vein_mask"
+        },
+        "OpticDisc": {
+            "optic_disc_center": "segmentation/OpticDisc/center",
+            "optic_disc_axes": "segmentation/OpticDisc/width_height"
+        }
     }
-  }
 }

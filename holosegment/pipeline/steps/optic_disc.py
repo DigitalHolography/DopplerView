@@ -4,8 +4,8 @@ from holosegment.utils.image_utils import save_bounding_box
 import numpy as np
 
 class OpticDiscDetectionStep(BaseStep):
-    requires = ["M0_ff_image", "M1_ff_image"]
-    produces = ["optic_disc_center", "optic_disc_axes"]
+    requires = {"M0_ff_image", "M1_ff_image"}
+    produces = {"optic_disc_center", "optic_disc_axes"}
     name = "optic_disc_detection"
 
     def _relevant_config(self, ctx):
