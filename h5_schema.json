@@ -1,6 +1,7 @@
 {
     "moments": {
-        "M0_ff_image": "preprocessing/M0_ff/image"
+        "M0_ff_image": "preprocessing/M0_ff/image",
+        "M0_ff_video": "preprocessing/M0_ff/signal"
     },
     "segmentation": {
         "Retina": {

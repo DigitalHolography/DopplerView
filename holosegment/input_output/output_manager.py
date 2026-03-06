@@ -11,11 +11,11 @@ class OutputManager:
     def __init__(
         self,
         output_folder,
+        h5_path,
         schema,
         debug_config=None,
     ):
-        self.h5_path = Path(os.path.join(output_folder, "h5", "output.h5"))
-        self.h5 = h5py.File(self.h5_path, "a")
+        self.h5 = h5py.File(h5_path, "a")
         self.schema = self._flatten_schema(schema)
 
         self.debug_dir = Path(os.path.join(output_folder, "debug"))

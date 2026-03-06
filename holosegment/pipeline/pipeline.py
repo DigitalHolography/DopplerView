@@ -48,7 +48,7 @@ class Context:
 
     def load_input_folder(self, folder_path):
         self.folder = HolodopplerFolder(folder_path)
-        self.cache["input_path"] = folder_path
+        self.cache["h5_file"] = self.folder.h5_file
         self.holodoppler_config = json.load(open(self.folder.holodoppler_config))
         print(f"Using Holodoppler config file: {self.folder.holodoppler_config}")
 
@@ -78,7 +78,7 @@ class Context:
         if self.folder is None:
             raise RuntimeError("Input folder not loaded. Cannot determine output folder.")
         # Create a new output folder with an incremented index
-        self.output_manager = OutputManager(output_folder=self.folder.create_output_folder(), schema=self.h5_schema, debug_config=self.debug_config)
+        self.output_manager = OutputManager(output_folder=self.folder.create_output_folder(), h5_path=self.folder.h5_file, schema=self.h5_schema, debug_config=self.debug_config)
 
     def set(self, key: str, value: Any):
         self.cache[key] = value
@@ -131,7 +131,7 @@ class Pipeline:
         self.ctx.load_input_folder(input_path)
 
     def run(self, targets=None, debug=True):
-        if not self.ctx.has("input_path"):
+        if not self.ctx.has("h5_file"):
             raise RuntimeError("Input path not set. Please load input folder before running the pipeline.")
         if self.ctx.eyeflow_config is None:
             raise RuntimeError("Configuration not loaded. Please load a configuration file before running the pipeline.")

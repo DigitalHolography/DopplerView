@@ -3,8 +3,8 @@ import h5py
 import numpy as np
 
 class Moments:
-    def __init__(self, directory):
-        self.directory = directory
+    def __init__(self, h5_file_path):
+        self.h5_file_path = h5_file_path
         self.M0 = None
         self.M1 = None
         self.M2 = None
@@ -50,22 +50,4 @@ class Moments:
             raise
 
     def read_moments(self):
-        dir_path_raw = os.path.join(self.directory, "raw")
-
-        # Search for all .h5 files in the folder
-        h5_files = [f for f in os.listdir(dir_path_raw) if f.endswith(".h5")]
-
-        if len(h5_files) == 0:
-            holo_files = [f for f in os.listdir(dir_path_raw) if f.endswith(".holo")]
-
-            if len(holo_files) == 0:
-                raise FileNotFoundError(f"No HDF5 or Holo file was found in the folder: {dir_path_raw}")
-            
-            # Takes the first .holo file found
-            ref_raw_file_path = os.path.join(dir_path_raw, holo_files[0])
-            raise NotImplementedError("Holo file format is not supported yet. Please provide an HDF5 (.h5) file.")
-
-        # If expected .h5 file is not found, take the first .h5 file found
-        raw_h5_filename = self.directory.name + "_raw.h5"
-        ref_raw_file_path = os.path.join(dir_path_raw, raw_h5_filename) if raw_h5_filename in h5_files else os.path.join(dir_path_raw, h5_files[0])
-        self.read_hdf5(ref_raw_file_path)
+        self.read_hdf5(self.h5_file_path)
