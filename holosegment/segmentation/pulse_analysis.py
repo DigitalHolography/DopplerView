@@ -224,45 +224,43 @@ def check_validity(signal, sampling_frequency):
 
     return bool(is_valid)
 
-def compute_pre_artery_mask(video, vessel_mask, optic_disc_center, sampling_frequency, output_manager):
+def get_filtered_branch_signals(video, labeled_vessels, sampling_frequency):
     """
-    Compute a preliminary artery mask based on pulse analysis of the video frames within the vessel mask
+    Get mean temporal signal for each branch in the labeled vessel mask.
     """
-    # Step 1: Separate mask into branches
-    labeled_vessels, _ = process_masks.get_labeled_vesselness(vessel_mask, *optic_disc_center)
-
-    # image_utils.save_array_as_image(labeled_vessels, "all_20_label_Vesselness.png", foldername=step_mask_folder)
-    num_branches = labeled_vessels.max()
     num_frames = video.shape[0]
-
-    # Step 2: Compute mean temporal signal for each branch
+    num_branches = labeled_vessels.max()
     signals = np.zeros((num_branches, num_frames))
-
-    # Design low-pass Butterworth filter
     b, a = butter(4, 15 / (sampling_frequency / 2), btype='low')
 
     for i in range(1, num_branches + 1):
         branch_mask = (labeled_vessels == i)
-        # Extract pixels for this branch over time
         branch_pixels = video[:, branch_mask]
         branch_mean = np.mean(branch_pixels, axis=1)
-        # Apply zero-phase filtering
+
         signals[i - 1, :] = filtfilt(b, a, branch_mean)
-        # output_manager.debug("pulse_analysis", f"branch_{i}_signal", signals[i - 1, :], title=f"Branch {i} Temporal Signal")
 
-    signals_n = (signals - signals.mean(axis=1, keepdims=True)) / signals.std(axis=1, keepdims=True)
 
-    # Step 3: Select regular peaks to classify arteries vs veins
-    # idx0 = compute_idx0(signals_n, sampling_frequency)
-    s_idx  = select_regular_peaks(signals_n, "minmax")
+    return signals
 
-    is_pure = np.array([check_validity(sig, sampling_frequency) for sig in signals_n])
+
+def compute_pre_masks(signals, labeled_vessels, sampling_frequency):
+    """
+    Compute a preliminary artery mask based on pulse analysis of the video frames within the vessel mask
+    """
+
+    # idx0 = compute_idx0(signals, sampling_frequency)
+    s_idx  = select_regular_peaks(signals, "minmax")
+
+    is_pure = np.array([check_validity(sig, sampling_frequency) for sig in signals])
     if not is_pure.any():
         is_pure[:] = True
 
     # Step 4: Combine into artery / vein masks
-    pre_mask_artery = np.zeros_like(vessel_mask, bool)
-    pre_mask_vein = np.zeros_like(vessel_mask, bool)
+    pre_mask_artery = np.zeros_like(labeled_vessels, bool)
+    pre_mask_vein = np.zeros_like(labeled_vessels, bool)
+
+    num_branches = labeled_vessels.max()
 
     for i in range(1, num_branches+1):
         if not is_pure[i-1]:

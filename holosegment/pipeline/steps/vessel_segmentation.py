@@ -17,7 +17,7 @@ class VesselSegmentationStep(BaseStep):
 class RetinalVesselSegmentationStep(VesselSegmentationStep):
     name = "retinal_vessel_segmentation"
     requires = {"M0_ff_image", "optic_disc_center"}
-    produces = {"retinal_vessel_mask"}
+    produces = {"retinal_vessel_mask", "vessel_segmentation_logits"}
 
     def _relevant_config(self, ctx):
         params = ctx.eyeflow_config["Mask"]
@@ -44,7 +44,7 @@ class RetinalVesselSegmentationStep(VesselSegmentationStep):
         logits = np.squeeze(model.predict(input))
         mask = logits > 0.5
 
-        ctx.output_manager.debug(self.name, "vessel_segmentation_logits", ctx.cache, "image")
+        ctx.cache["vessel_segmentation_logits"] = logits
 
         return mask
     

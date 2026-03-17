@@ -1,5 +1,8 @@
+from unittest import signals
+
 from holosegment.pipeline.step import BaseStep, NestedStep
-from holosegment.segmentation import pulse_analysis
+from holosegment.segmentation import process_masks, pulse_analysis
+import numpy as np
 
 class PulseAnalysisStep(NestedStep):
     name = "pulse_analysis"
@@ -13,7 +16,7 @@ class PulseAnalysisStep(NestedStep):
             
 class PreArteryMaskStep(BaseStep):
     requires = {"M0_ff_video", "retinal_vessel_mask", "optic_disc_center"}
-    produces = {"pre_artery_mask"}
+    produces = {"labeled_vessels", "pre_artery_mask", "filtered_branch_signals"}
     name = "pre_artery_mask"
 
     def _relevant_config(self, ctx):
@@ -22,10 +25,22 @@ class PreArteryMaskStep(BaseStep):
     def run(self, ctx):
         video = ctx.cache["M0_ff_video"]
         vessel_mask = ctx.cache["retinal_vessel_mask"]
-
         sampling_frequency = ctx.holodoppler_config["fs"]
+        optic_disc_center = ctx.cache["optic_disc_center"]
 
-        pre_artery_mask, pre_vein_mask = pulse_analysis.compute_pre_artery_mask(video, vessel_mask, ctx.cache["optic_disc_center"], sampling_frequency, ctx.output_manager)
+        # --- Step 1: Separate mask into branches ---
+        labeled_vessels, _ = process_masks.get_labeled_vesselness(vessel_mask, *optic_disc_center)
+        ctx.set("labeled_vessels", labeled_vessels)
+
+        # --- Step 2: Compute mean temporal signal for each branch ---
+        signals = pulse_analysis.get_filtered_branch_signals(video, labeled_vessels, sampling_frequency)
+        for i in range(1, labeled_vessels.max() + 1):
+            ctx.output_manager.debug("pulse_analysis", f"branch_{i}_signal", signals[i - 1, :], "signal")
+        signals_n = (signals - signals.mean(axis=1, keepdims=True)) / signals.std(axis=1, keepdims=True)
+        ctx.cache["filtered_branch_signals"] = signals_n
+
+        # --- Step 3: Select regular peaks to classify arteries vs veins ---
+        pre_artery_mask, pre_vein_mask = pulse_analysis.compute_pre_masks(signals_n, labeled_vessels, sampling_frequency)
         ctx.cache["pre_artery_mask"] = pre_artery_mask
         ctx.cache["pre_vein_mask"] = pre_vein_mask
 
