@@ -38,6 +38,12 @@ def main():
         type=str,
         help='Path to JSON configuration file'
     )
+
+    parser.add_argument(
+        '-b', '--batch',
+        action='store_true',
+        help='Process multiple folders. Folders are either listed in a text file (one folder path per line) or provided as subfolders of the specified path.'
+    )
     
     args = parser.parse_args()
     
@@ -54,9 +60,13 @@ def main():
     pipeline = Pipeline(registry, h5_schema=json.load(open("h5_schema.json")), debug_config=json.load(open("debug_config.json")))
     if args.config:
         pipeline.load_eyeflow_config(args.config)
-    pipeline.load_input(input_folder)
 
-    pipeline.run(debug=debug)
+    if args.batch:
+        pipeline.load_folder_list(input_folder)
+        pipeline.run_batch(debug=debug)
+    else:
+        pipeline.load_input(input_folder)
+        pipeline.run(debug=debug)
 
     return 0
 
