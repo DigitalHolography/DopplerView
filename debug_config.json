@@ -6,6 +6,7 @@
     "retinal_artery_mask": "mask",
     "retinal_vein_mask": "mask",
     "correlation": "image",
+    "correlation_vein": "image",
     "diasys_image": "image",
 
     "pre_artery_mask": "mask",

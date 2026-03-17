@@ -63,8 +63,10 @@ class ComputeTemporalCuesStep(BaseStep):
 
         # --- Compute correlation map with filtered pulses ---
 
-        correlation = pulse_analysis.compute_correlation(video, pre_artery_mask)
-        ctx.set("correlation", correlation)
+        correlation_artery = pulse_analysis.compute_correlation(video, arterial_pulse_filtered)
+        # correlation_vein = pulse_analysis.compute_correlation(video, venous_pulse_filtered)
+        ctx.set("correlation", correlation_artery)
+        # ctx.set("correlation_vein", correlation_vein)
 
         # --- Accumulate frames at the systolic and diastolic peaks of the filtered pulses ---
 

@@ -316,7 +316,7 @@ def interpolate_outlier_frames(video, outlier_frames_mask):
     return video_cleaned
 
 
-def compute_correlation(video, mask):
+def compute_correlation(video, signal):
     """
     Compute the zero-lag correlation between the video signal and the average signal in the mask.
 
@@ -329,9 +329,9 @@ def compute_correlation(video, mask):
     """
     
     # --- 1) Compute first correlation ---
-    # compute signal in 3 dimensions for correlation in the mask
-    signal = np.nansum(video * mask[np.newaxis, :, :], axis=(1, 2))
-    signal = signal / np.count_nonzero(mask)
+    # # compute signal in 3 dimensions for correlation in the mask
+    # signal = np.nansum(video * mask[np.newaxis, :, :], axis=(1, 2))
+    # signal = signal / np.count_nonzero(mask)
 
     # # Detect outliers using a moving median and threshold
     # def detect_outliers_moving_median(x, window=5, threshold_factor=2.0):
@@ -344,16 +344,15 @@ def compute_correlation(video, mask):
     # outlier_frames_mask = detect_outliers_moving_median(signal, window=5, threshold_factor=2)
     # video = interpolate_outlier_frames(video, outlier_frames_mask)  # Needs to be defined
 
-    # Recompute signal after outlier interpolation
-    signal = np.nansum(video * mask[np.newaxis, :, :], axis=(1, 2))
-    signal = signal / np.count_nonzero(mask)
+    # # Recompute signal after outlier interpolation
+    # signal = np.nansum(video * mask[np.newaxis, :, :], axis=(1, 2))
+    # signal = signal / np.count_nonzero(mask)
 
     # compute local-to-average signal wave zero-lag correlation
     signal_centered = signal - np.nanmean(signal)
     video_centered = video - np.nanmean(video)
 
     numerator = np.nanmean(video_centered * signal_centered[:, np.newaxis, np.newaxis], axis=0)
-    print(f"Numerator shape: {numerator.shape}, Video centered shape: {video_centered.shape}, Signal centered shape: {signal_centered.shape}")
     denominator = np.nanstd(video_centered) * np.nanstd(signal_centered)
     
     R = numerator / denominator
