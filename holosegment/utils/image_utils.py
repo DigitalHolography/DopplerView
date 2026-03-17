@@ -4,6 +4,7 @@ Utils for handling images, such as loading, saving, and preprocessing.
 
 import numpy as np
 from PIL import Image
+from skimage.measure import regionprops
 import matplotlib.pyplot as plt
 import cv2
 
@@ -82,6 +83,45 @@ def save_bounding_box(image, x_center, y_center, diameter_x, diameter_y, output_
     # Add the rectangle to the Axes
 
     plt.legend()
+    plt.savefig(output_path)
+    plt.close()
+
+def save_labeled_branches(label_mask, output_path):
+    """
+    Display a labeled mask with the label ID written on each branch.
+
+    Parameters
+    ----------
+    label_mask : ndarray (H, W)
+        Image where each branch has a unique integer label.
+        Background must be 0.
+    """
+
+    fig, ax = plt.subplots(figsize=(8, 8))
+
+    # show mask
+    ax.imshow(label_mask, cmap="nipy_spectral")
+
+    # compute region properties
+    props = regionprops(label_mask)
+
+    for region in props:
+        y, x = region.centroid
+        label = region.label
+
+        ax.text(
+            x,
+            y,
+            str(label),
+            color="white",
+            fontsize=10,
+            ha="center",
+            va="center",
+            bbox=dict(facecolor="black", alpha=0.5, boxstyle="round")
+        )
+
+    ax.set_axis_off()
+    plt.tight_layout()
     plt.savefig(output_path)
     plt.close()
 

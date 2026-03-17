@@ -1,5 +1,8 @@
+from unittest import signals
+
 from holosegment.pipeline.step import BaseStep, NestedStep
-from holosegment.segmentation import pulse_analysis
+from holosegment.segmentation import process_masks, pulse_analysis
+import numpy as np
 
 class PulseAnalysisStep(NestedStep):
     name = "pulse_analysis"
@@ -13,7 +16,7 @@ class PulseAnalysisStep(NestedStep):
             
 class PreArteryMaskStep(BaseStep):
     requires = {"M0_ff_video", "retinal_vessel_mask", "optic_disc_center"}
-    produces = {"pre_artery_mask"}
+    produces = {"labeled_vessels", "pre_artery_mask", "branch_signals"}
     name = "pre_artery_mask"
 
     def _relevant_config(self, ctx):
@@ -22,16 +25,28 @@ class PreArteryMaskStep(BaseStep):
     def run(self, ctx):
         video = ctx.cache["M0_ff_video"]
         vessel_mask = ctx.cache["retinal_vessel_mask"]
-
         sampling_frequency = ctx.holodoppler_config["fs"]
+        optic_disc_center = ctx.cache["optic_disc_center"]
 
-        pre_artery_mask, pre_vein_mask = pulse_analysis.compute_pre_artery_mask(video, vessel_mask, ctx.cache["optic_disc_center"], sampling_frequency, ctx.output_manager)
+        # --- Step 1: Separate mask into branches ---
+        labeled_vessels, _ = process_masks.get_labeled_vesselness(vessel_mask, *optic_disc_center)
+        ctx.set("labeled_vessels", labeled_vessels)
+
+        # --- Step 2: Compute mean temporal signal for each branch ---
+        signals = pulse_analysis.get_filtered_branch_signals(video, labeled_vessels, sampling_frequency)
+        for i in range(1, labeled_vessels.max() + 1):
+            ctx.output_manager.debug("pulse_analysis", f"branch_{i}_signal", signals[i - 1, :], "signal")
+        signals_n = (signals - signals.mean(axis=1, keepdims=True)) / signals.std(axis=1, keepdims=True)
+        ctx.cache["branch_signals"] = signals_n
+
+        # --- Step 3: Select regular peaks to classify arteries vs veins ---
+        pre_artery_mask, pre_vein_mask = pulse_analysis.compute_pre_masks(signals_n, labeled_vessels, sampling_frequency)
         ctx.cache["pre_artery_mask"] = pre_artery_mask
         ctx.cache["pre_vein_mask"] = pre_vein_mask
 
 class ComputeTemporalCuesStep(BaseStep):
     requires = {"M0_ff_video", "pre_artery_mask", "choroidal_vessel_mask"}
-    produces = {"correlation", "diasys_image", "retinal_arterial_pulse", "choroidal_pulse"}
+    produces = {"correlation", "diasys_image", "retinal_arterial_pulse", "choroidal_pulse", "retinal_arterial_pulse_filtered", "choroidal_pulse_filtered"}
     name = "temporal_cues"
 
     def _relevant_config(self, ctx):
@@ -41,18 +56,39 @@ class ComputeTemporalCuesStep(BaseStep):
     def run(self, ctx):
         video = ctx.require("M0_ff_video")
         pre_artery_mask = ctx.require("pre_artery_mask")
+        pre_vein_mask = ctx.require("pre_vein_mask")
         choroidal_vessel_mask = ctx.require("choroidal_vessel_mask")
 
-        correlation, pulse = pulse_analysis.compute_correlation(video, pre_artery_mask)
-        correlation_choroidal, pulse_choroidal = pulse_analysis.compute_correlation(video, choroidal_vessel_mask)
-        ctx.set("correlation", correlation)
+        # --- Get pulses from masks ---
 
-        sampling_frequency = ctx.holodoppler_config["fs"]
+        arterial_pulse = pulse_analysis.get_pulse_from_mask(video, pre_artery_mask)
+        venous_pulse = pulse_analysis.get_pulse_from_mask(video, pre_vein_mask)
+        choroidal_pulse = pulse_analysis.get_pulse_from_mask(video, choroidal_vessel_mask)
+
+        # --- Filter pulses to remove high frequency noise ---
+
+        fs = ctx.holodoppler_config["fs"]
         stride = ctx.holodoppler_config["batch_stride"]
 
-        diasys, M0_Systole_img, M0_Diastole_img, fullPulse = pulse_analysis.compute_diasys_image(video, pre_artery_mask, sampling_frequency=sampling_frequency, stride=stride)
-        choroid_diasys, choroid_systole, choroid_diastole, choroid_fullPulse = pulse_analysis.compute_diasys_image(video, choroidal_vessel_mask, sampling_frequency=sampling_frequency, stride=stride)
+        sampling_frequency = pulse_analysis.get_effective_sampling_freqency(fs, stride)
 
-        ctx.set("retinal_arterial_pulse", fullPulse)
-        ctx.set("choroidal_pulse", choroid_fullPulse)
+        arterial_pulse_filtered = pulse_analysis.get_filtered_pulse(arterial_pulse, sampling_frequency)
+        venous_pulse_filtered = pulse_analysis.get_filtered_pulse(venous_pulse, sampling_frequency)
+        choroidal_pulse_filtered = pulse_analysis.get_filtered_pulse(choroidal_pulse, sampling_frequency)
+
+        # --- Compute correlation map with filtered pulses ---
+
+        correlation_artery = pulse_analysis.compute_correlation(video, arterial_pulse_filtered)
+        # correlation_vein = pulse_analysis.compute_correlation(video, venous_pulse_filtered)
+        ctx.set("correlation", correlation_artery)
+        # ctx.set("correlation_vein", correlation_vein)
+
+        # --- Accumulate frames at the systolic and diastolic peaks of the filtered pulses ---
+
+        diasys, M0_Systole_img, M0_Diastole_img = pulse_analysis.compute_diasys_image(video, arterial_pulse_filtered, sampling_frequency)
+
+        ctx.set("retinal_arterial_pulse", arterial_pulse)
+        ctx.set("choroidal_pulse", choroidal_pulse)
+        ctx.set("retinal_arterial_pulse_filtered", arterial_pulse_filtered)
+        ctx.set("choroidal_pulse_filtered", choroidal_pulse_filtered)
         ctx.set("diasys_image", diasys)

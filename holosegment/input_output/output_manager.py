@@ -27,7 +27,8 @@ class OutputManager:
             "mask": debug_renderer.ImageRenderer(),
             "signal": debug_renderer.SignalRenderer(),
             "video": debug_renderer.VideoRenderer(),
-            "optic_disc": debug_renderer.OpticDiscRenderer()
+            "optic_disc": debug_renderer.OpticDiscRenderer(),
+            "labeled_mask": debug_renderer.LabeledMaskRenderer()
         }
 
 
@@ -59,8 +60,8 @@ class OutputManager:
         value = cache.get(key)
         self.h5.create_dataset(path, data=value)
 
-    def debug(self, step_name, key, cache, type=None):
-        if key not in self.debug_config:
+    def debug_cache(self, step_name, key, cache, type=None):
+        if key not in self.debug_config or key not in cache:
             return
         
         if type is None:
@@ -75,10 +76,23 @@ class OutputManager:
         if renderer:
             renderer.render(key, cache, path)
 
+    def debug(self, step_name, filename, value, type=None):
+        if type is None:
+            Warning(f"No debug type specified for key '{step_name}', skipping debug output.")
+            return
+
+        step_dir = self.debug_dir / step_name
+        step_dir.mkdir(exist_ok=True)
+
+        path = step_dir / f"{filename}.png"
+        renderer = self.renderers.get(type)
+
+        if renderer:
+            renderer.render("value", {"value": value}, path)
 
     def save(self, step_name, key, cache):
         self.save_h5(key, cache)
-        self.debug(step_name, key, cache)
+        self.debug_cache(step_name, key, cache)
 
     def close(self):
         self.h5.close()

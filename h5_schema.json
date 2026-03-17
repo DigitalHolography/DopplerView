@@ -2,7 +2,10 @@
     "segmentation": {
         "Retina": {
             "binary": {
-                "vessel_mask": "retinal_vessel_mask"
+                "vessel_mask": "retinal_vessel_mask",
+                "labeled_vessels": "labeled_vessels",
+                "vessel_segmentation_logits": "vessel_segmentation_logits",
+                "branch_signals": "branch_signals"
             },
             "av": {
                 "artery_mask": "retinal_artery_mask",
