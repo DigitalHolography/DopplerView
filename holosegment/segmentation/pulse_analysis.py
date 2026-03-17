@@ -47,24 +47,24 @@ def select_regular_peaks(signals_n, method, threshold=0.1, tolerance=0.3):
     """
 
     stride = 512
-    fs = 37.037
-    dt = stride / fs / 1000.0  # seconds per frame
-    fs = 1.0 / dt
+    sampling_freq = 37.037
+    dt = stride / sampling_freq / 1000.0  # seconds per frame
+    sampling_freq = 1.0 / dt
     gradient_n = np.gradient(signals_n, axis=1)
 
     if method == "minmax":
-        return _select_minmax(signals_n, gradient_n, fs, dt)
+        return _select_minmax(signals_n, gradient_n, sampling_freq, dt)
     # elif method == "regular":
     #     return _select_regular(gradient_n, threshold, tolerance)
     # elif method == "kmeans_cosine":
-    #     return _select_kmeans(signals_n, "cosine", fs, dt)
+    #     return _select_kmeans(signals_n, "cosine", sampling_freq, dt)
     # else:
     #     raise ValueError(f"Unknown method: {method}")
 
 
 # === Subfunctions ===
 
-def _select_minmax(signals_n, gradient_n, fs, dt):
+def _select_minmax(signals_n, gradient_n, sampling_freq, dt):
     num_branches, num_frames = signals_n.shape
 
     # Average normalized signal across all branches
@@ -79,7 +79,7 @@ def _select_minmax(signals_n, gradient_n, fs, dt):
     if len(P1) > 2:
         P1[1:-1] *= 2
 
-    f = fs * np.arange(len(P1)) / num_frames
+    f = sampling_freq * np.arange(len(P1)) / num_frames
 
     f_range = (f > 0.5) & (f < 5)  # 30–300 bpm
     if not np.any(f_range):
@@ -388,15 +388,16 @@ def get_filtered_pulse():
 
 def find_systole_index(
     pulse_artery,
-    pulseVein=None,
-    lowpass_freq=15
+    sampling_freq,
+    pulse_vein=None,
+    lowpass_freq=15,
 ):
     """
     FIND_SYSTOLE_INDEX Identifies systole peaks in the pulse signal.
 
     Inputs:
         pulse_artery : 1D numpy array
-        pulseVein    : optional 1D numpy array
+        pulse_vein    : optional 1D numpy array
         savepng      : bool
         lowpass_freq : float
 
@@ -407,19 +408,16 @@ def find_systole_index(
         sys_min_list
     """
 
-    fs = 37.037  # Hz (original sampling frequency)
-    stride = 512  # ms (original stride)
-    fs = fs * 1000 / stride  # Hz
-    dt = 1.0 / fs
+    dt = 1.0 / sampling_freq
 
-    flagVein = pulseVein is not None and len(pulseVein) > 0
+    flagVein = pulse_vein is not None and len(pulse_vein) > 0
 
     # ---------------- Step 1: Extract pulse signal ----------------
-    b, a = butter(4, lowpass_freq / (fs / 2), btype="low")
+    b, a = butter(4, lowpass_freq / (sampling_freq / 2), btype="low")
     pulse_artery_filtered = filtfilt(b, a, pulse_artery)
 
     if flagVein:
-        pulse_vein_filtered = filtfilt(b, a, pulseVein)
+        pulse_vein_filtered = filtfilt(b, a, pulse_vein)
 
     # ---------------- Step 2: Compute derivative ----------------
     diff_artery_signal = np.gradient(pulse_artery_filtered)
@@ -503,12 +501,12 @@ def compute_diasys(video, mask, stride=512, sampling_frequency=37.037):
     pulse_artery = np.nansum(video[:, mask.astype(bool)], axis=(1)) / max(mask_nnz, 1)
 
     # --- Filter pulse_artery to remove high frequency noise ---
-    fs = sampling_frequency * 1000 / stride  # Hz
-    b, a = butter(4, 15 / (fs / 2), btype='low')
+    sampling_freq = sampling_frequency * 1000 / stride  # Hz
+    b, a = butter(4, 15 / (sampling_freq / 2), btype='low')
     pulse_artery = filtfilt(b, a, pulse_artery)
 
     sys_index_list, fullPulse, _, _ = find_systole_index(
-        pulse_artery
+        pulse_artery, sampling_freq=sampling_freq
     )
 
     fullPulse = np.asarray(fullPulse).ravel()
