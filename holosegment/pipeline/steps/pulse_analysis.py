@@ -16,7 +16,7 @@ class PulseAnalysisStep(NestedStep):
             
 class PreArteryMaskStep(BaseStep):
     requires = {"M0_ff_video", "retinal_vessel_mask", "optic_disc_center"}
-    produces = {"labeled_vessels", "pre_artery_mask", "filtered_branch_signals"}
+    produces = {"labeled_vessels", "pre_artery_mask", "branch_signals"}
     name = "pre_artery_mask"
 
     def _relevant_config(self, ctx):
@@ -37,7 +37,7 @@ class PreArteryMaskStep(BaseStep):
         for i in range(1, labeled_vessels.max() + 1):
             ctx.output_manager.debug("pulse_analysis", f"branch_{i}_signal", signals[i - 1, :], "signal")
         signals_n = (signals - signals.mean(axis=1, keepdims=True)) / signals.std(axis=1, keepdims=True)
-        ctx.cache["filtered_branch_signals"] = signals_n
+        ctx.cache["branch_signals"] = signals_n
 
         # --- Step 3: Select regular peaks to classify arteries vs veins ---
         pre_artery_mask, pre_vein_mask = pulse_analysis.compute_pre_masks(signals_n, labeled_vessels, sampling_frequency)
