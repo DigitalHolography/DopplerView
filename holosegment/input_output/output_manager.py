@@ -32,15 +32,15 @@ class OutputManager:
 
 
     def _flatten_schema(self, schema):
-
         flat = {}
 
-        def walk(node):
+        def walk(node, path=""):
             for k, v in node.items():
+                new_path = os.path.join(path, k) if path else k
                 if isinstance(v, dict):
-                    walk(v)
+                    walk(v, new_path)
                 else:
-                    flat[k] = v
+                    flat[v] = new_path
 
         walk(schema)
         return flat
@@ -50,6 +50,8 @@ class OutputManager:
             return
 
         path = self.schema[key]
+
+        path = path.replace("\\", "/")  # Ensure consistent path format
 
         if path in self.h5:
             del self.h5[path]
