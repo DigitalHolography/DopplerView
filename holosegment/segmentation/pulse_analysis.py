@@ -24,94 +24,62 @@ def moving_mean(sig, window):
     kernel = np.ones(window) / window
     return np.convolve(sig, kernel, mode="same")
 
+def movmean(x, k):
+    x = np.asarray(x, dtype=float)
+    n = len(x)
+    y = np.empty(n)
 
-def select_regular_peaks(signals_n, method, threshold=0.1, tolerance=0.3):
-    """
-    Select signals with regular or periodic derivative peaks.
+    half = k // 2
 
-    Parameters
-    ----------
-    signals_n : np.ndarray
-        Normalized signals (num_branches x num_frames)
-    method : str
-        One of {'regular', 'minmax', 'kmeans_cosine'}
-    params : dict
-        Dictionary with optional fields:
-            'threshold': float (used for 'regular' method)
-            'tolerance': float in (0, 1) (used for 'regular' method)
+    for i in range(n):
+        start = max(0, i - half)
+        end = min(n, i + half + 1)
+        y[i] = np.mean(x[start:end])
 
-    Returns
-    -------
-    s_idx : np.ndarray
-        1D array of length num_branches, with 1 = artery, 0 = vein
-    """
+    return y
 
-    stride = 512
-    sampling_freq = 37.037
-    dt = stride / sampling_freq / 1000.0  # seconds per frame
-    sampling_freq = 1.0 / dt
+def select_regular_peaks(signals_n, method, idx0, threshold=0.1, tolerance=0.3):
     gradient_n = np.gradient(signals_n, axis=1)
 
     if method == "minmax":
-        return _select_minmax(signals_n, gradient_n, sampling_freq, dt)
-    # elif method == "regular":
-    #     return _select_regular(gradient_n, threshold, tolerance)
-    # elif method == "kmeans_cosine":
-    #     return _select_kmeans(signals_n, "cosine", sampling_freq, dt)
-    # else:
-    #     raise ValueError(f"Unknown method: {method}")
+        return _select_minmax(signals_n, gradient_n, idx0)
 
+    raise NotImplementedError
 
-# === Subfunctions ===
+def _select_minmax(signals_n, gradient_n, idx0):
+    """
+    Python equivalent of MATLAB select_minmax
+    """
 
-def _select_minmax(signals_n, gradient_n, sampling_freq, dt):
-    num_branches, num_frames = signals_n.shape
+    num_branches = signals_n.shape[0]
 
-    # Average normalized signal across all branches
-    avg_signal = np.mean(signals_n, axis=0)
-
-    # --- FFT analysis ---
-    Y = fft.fft(avg_signal)
-    P2 = np.abs(Y / num_frames)
-
-    half = num_frames // 2
-    P1 = P2[:half + 1]
-    if len(P1) > 2:
-        P1[1:-1] *= 2
-
-    f = sampling_freq * np.arange(len(P1)) / num_frames
-
-    f_range = (f > 0.5) & (f < 5)  # 30–300 bpm
-    if not np.any(f_range):
-        return np.zeros(num_branches, dtype=int)
-
-    P1_sel = P1[f_range]
-    f_sel = f[f_range]
-    f0 = f_sel[np.argmax(P1_sel)]
-    idx0 = int(round(f0 / dt))
-
-    # --- Peak-based classification ---
     s_idx = np.zeros(num_branches, dtype=int)
+    locs_n = []
 
     for i in range(num_branches):
-        locs, _ = find_peaks(np.abs(gradient_n[i, :]), distance=0.6 * idx0)
-        peaks = np.abs(gradient_n[i, locs])
-        print(peaks, locs)
-        if len(peaks) == 0 or len(locs) == 0:
-            continue
+        # --- find peaks in |gradient| ---
+        peaks, properties = find_peaks(
+            np.abs(gradient_n[i]),
+            distance=int(0.8 * idx0),
+            prominence=1e-6   # helps avoid spurious peaks
+        )
 
-        # Ensure both arrays are numpy arrays
-        locs = np.asarray(locs)
-        peaks = np.asarray(peaks)
+        locs = peaks  # MATLAB locs = indices
 
-        loc_ind = int(np.argmax(peaks))  # safest conversion
-        loc = int(locs[loc_ind])         # ensure Python int
+        # values of gradient at peak positions
+        peaks_v = gradient_n[i, locs]
 
-        print(f"Branch {i+1}: f0 = {f0:.2f} Hz, peak at index {loc} with value {gradient_n[i, loc]:.4f}")
+        # count positive peaks
+        c = np.sum(peaks_v > 0)
 
-        s_idx[i] = 1 if gradient_n[i, loc] > 0 else 0
+        if c > len(locs) / 2:
+            s_idx[i] = 1
+        else:
+            s_idx[i] = 0
 
-    return s_idx
+        locs_n.append(locs)
+
+    return s_idx, locs_n
 
 def compute_idx0(signals_n, sampling_frequency):
     """""
@@ -126,8 +94,6 @@ def compute_idx0(signals_n, sampling_frequency):
     P1 = P2[:num_frames//2 + 1]
     P1[1:-1] *= 2
 
-    print(f"FFT computed. P1 length: {len(P1)}")
-
     # Frequency vector
     f = sampling_frequency * np.arange(len(P1)) / num_frames
 
@@ -135,9 +101,6 @@ def compute_idx0(signals_n, sampling_frequency):
     f_range = (f > 0.5) & (f < 2) # 30 - 120 bpm
     f_sel = f[f_range]
     P_sel = P1[f_range]
-
-    print(f"Selected frequencies in range: {f_sel}")
-    print(f"Corresponding power values: {P_sel}")
 
     f0 = f_sel[np.argmax(P_sel)]
     t0 = 1 / f0
@@ -232,6 +195,7 @@ def get_filtered_branch_signals(video, labeled_vessels, sampling_frequency):
     num_branches = labeled_vessels.max()
     signals = np.zeros((num_branches, num_frames))
     b, a = butter(4, 15 / (sampling_frequency / 2), btype='low')
+    moving_window = round(sampling_frequency * 0.1)
 
     for i in range(1, num_branches + 1):
         branch_mask = (labeled_vessels == i)
@@ -240,6 +204,8 @@ def get_filtered_branch_signals(video, labeled_vessels, sampling_frequency):
 
         signals[i - 1, :] = filtfilt(b, a, branch_mean)
 
+        if moving_window > 1:
+            signals[i - 1, :] = movmean(signals[i - 1, :], moving_window)
 
     return signals
 
@@ -249,8 +215,8 @@ def compute_pre_masks(signals, labeled_vessels, sampling_frequency):
     Compute a preliminary artery mask based on pulse analysis of the video frames within the vessel mask
     """
 
-    # idx0 = compute_idx0(signals, sampling_frequency)
-    s_idx  = select_regular_peaks(signals, "minmax")
+    idx0 = compute_idx0(signals, sampling_frequency)
+    s_idx, _ = select_regular_peaks(signals, "minmax", idx0)
 
     is_pure = np.array([check_validity(sig, sampling_frequency) for sig in signals])
     if not is_pure.any():
