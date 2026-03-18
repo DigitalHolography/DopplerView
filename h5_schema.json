@@ -27,6 +27,11 @@
         }
     },
     "analysis": {
-        "retinal_velocity_array": "retinal_vessel_velocity"
+        "retinal_velocity_array": "retinal_vessel_velocity",
+        "retinal_artery_velocity_signal": "retinal_artery_velocity_signal",
+        "retinal_vein_velocity_signal" : "retinal_vein_velocity_signal",
+        "velocity_map_avg": "velocity_map_avg",
+        "fRMS_avg": "fRMS_avg",
+        "fRMS_bkg_avg": "fRMS_bkg_avg"
     }
 }

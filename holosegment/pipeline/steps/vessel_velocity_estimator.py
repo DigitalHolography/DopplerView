@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 class VesselVelocityEstimatorStep(BaseStep):
     name = "retinal_vessel_velocity_estimator"
     requires = {"moments", "retinal_artery_mask", "retinal_vein_mask", "optic_disc_center"}
-    produces = {"retinal_vessel_velocity"}
+    produces = {"retinal_vessel_velocity","velocity_map_avg","fRMS_avg","fRMS_bkg_avg","retinal_artery_velocity_signal","retinal_vein_velocity_signal"}
 
     def run(self, ctx):
         # ---- Requires ----
@@ -34,7 +34,7 @@ class VesselVelocityEstimatorStep(BaseStep):
         A = fRMS**2 - fRMSbkg**2
         deltafRMS = np.sign(A) * np.sqrt(np.abs(A))
 
-        velocity_map = 2 * 852e-9 / np.sin(0.25) * deltafRMS * 1e3 #mm/s
+        velocity_map = 2 * 852e-9 / np.sin(0.25) * deltafRMS * 1e6 #mm/s
 
         # num_bins = 256  # for 8-bit grayscale
         # hist_matrix = np.zeros((velocity_map.shape[2], num_bins))
@@ -46,9 +46,10 @@ class VesselVelocityEstimatorStep(BaseStep):
         #     hist_matrix[i,:] = hist
 
         # ctx.set("hist_matrix", hist_matrix)
-        # ctx.set("velocity_map_avg", np.mean(velocity_map,axis=2))
-        # ctx.set("fRMS_avg", np.mean(fRMS,axis=2))
-        # ctx.set("fRMS_bkg_avg", np.mean(fRMS,axis=2))
+        print("setting debug variables")
+        ctx.set("velocity_map_avg", np.mean(velocity_map,axis=0))
+        ctx.set("fRMS_avg", np.mean(fRMS,axis=0))
+        ctx.set("fRMS_bkg_avg", np.mean(fRMSbkg,axis=0))
 
         def _elliptical_mask(ny, nx, radius_frac, center = None):
             radius_frac = max(0.0, min(1.0, float(radius_frac)))
