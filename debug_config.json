@@ -15,8 +15,8 @@
     "choroidal_vessel_mask": "mask",
     "choroidal_artery_mask": "mask",
     "choroidal_vein_mask": "mask",
-    "retinal_arterial_pulse": "signal",
-    "retinal_arterial_pulse_filtered": "signal",
+    "pre_arterial_pulse": "signal",
+    "pre_arterial_pulse_filtered": "signal",
     "choroidal_pulse": "signal",
     "choroidal_pulse_filtered": "signal"
 }

@@ -25,8 +25,12 @@ class PreArteryMaskStep(BaseStep):
     def run(self, ctx):
         video = ctx.cache["M0_ff_video"]
         vessel_mask = ctx.cache["retinal_vessel_mask"]
-        sampling_frequency = ctx.holodoppler_config["fs"]
         optic_disc_center = ctx.cache["optic_disc_center"]
+
+        fs = ctx.holodoppler_config["fs"]
+        stride = ctx.holodoppler_config["batch_stride"]
+
+        sampling_frequency = pulse_analysis.get_effective_sampling_freqency(fs, stride)
 
         # --- Step 1: Separate mask into branches ---
         labeled_vessels, _ = process_masks.get_labeled_vesselness(vessel_mask, *optic_disc_center)
@@ -87,8 +91,8 @@ class ComputeTemporalCuesStep(BaseStep):
 
         diasys, M0_Systole_img, M0_Diastole_img = pulse_analysis.compute_diasys_image(video, arterial_pulse_filtered, sampling_frequency)
 
-        ctx.set("retinal_arterial_pulse", arterial_pulse)
+        ctx.set("pre_arterial_pulse", arterial_pulse)
         ctx.set("choroidal_pulse", choroidal_pulse)
-        ctx.set("retinal_arterial_pulse_filtered", arterial_pulse_filtered)
+        ctx.set("pre_arterial_pulse_filtered", arterial_pulse_filtered)
         ctx.set("choroidal_pulse_filtered", choroidal_pulse_filtered)
         ctx.set("diasys_image", diasys)
