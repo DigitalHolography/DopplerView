@@ -4,6 +4,7 @@ Read a holodoppler folder
 
 import os
 import shutil
+from pathlib import Path
 
 class HolodopplerFolder:
     def __init__(self, directory):
@@ -99,5 +100,3 @@ class HolodopplerFolder:
         self.holodoppler_config = self.get_HD_config()
         self.output_folder = self.get_output_folder()
         self.h5_file = self.find_h5_file()
-
-    

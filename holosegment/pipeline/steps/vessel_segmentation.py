@@ -17,7 +17,7 @@ class VesselSegmentationStep(BaseStep):
 class RetinalVesselSegmentationStep(VesselSegmentationStep):
     name = "retinal_vessel_segmentation"
     requires = {"M0_ff_image", "optic_disc_center"}
-    produces = {"retinal_vessel_mask"}
+    produces = {"retinal_vessel_mask", "vessel_segmentation_logits"}
 
     def _relevant_config(self, ctx):
         params = ctx.eyeflow_config["Mask"]
@@ -44,7 +44,7 @@ class RetinalVesselSegmentationStep(VesselSegmentationStep):
         logits = np.squeeze(model.predict(input))
         mask = logits > 0.5
 
-        ctx.output_manager.debug(self.name, "vessel_segmentation_logits", ctx.cache, "image")
+        ctx.cache["vessel_segmentation_logits"] = logits
 
         return mask
     
@@ -68,11 +68,11 @@ class RetinalVesselSegmentationStep(VesselSegmentationStep):
         method = ctx.eyeflow_config.get("Mask", "").get("VesselSegmentationMethod", "AI")
 
         if method == "AI":
-            print("Using deep learning model for vessel segmentation.")
+            print("    - Use deep learning model for vessel segmentation.")
             return self.deep_segmentation(ctx)
 
         if method == "frangi":
-            print("Using Frangi filter for vessel segmentation.")
+            print("    - Use Frangi filter for vessel segmentation.")
             return self.frangi_segmentation(ctx)
         
     def run(self, ctx):

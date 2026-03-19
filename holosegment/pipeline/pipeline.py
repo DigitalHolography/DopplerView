@@ -4,8 +4,9 @@ from holosegment.models.manager import ModelManager
 from holosegment.input_output.output_manager import OutputManager
 from typing import Any, Dict
 import json
-from holosegment.utils.json_utils import ordered
+from holosegment.utils import json_utils
 from pathlib import Path
+import os
 
 
 from holosegment.pipeline.steps.load_moments import LoadMomentsStep
@@ -33,6 +34,7 @@ class Context:
         self.metadata = {
             "step_hashes": {}
         }
+        self.input_folder_list = []
         self.folder = None
         self.output_manager = None
         self.h5_schema = h5_schema
@@ -42,9 +44,9 @@ class Context:
         self.cache: Dict[str, Any] = {}
 
     def load_eyeflow_config(self, config_path):
-        self.eyeflow_config = json.load(open(config_path))
+        eyeflow_config = json.load(open(config_path))
+        self.eyeflow_config = json_utils.remove_spaces_from_keys(eyeflow_config) 
         print(f"Using Eyeflow config file: {config_path}")
-
 
     def load_input_folder(self, folder_path):
         self.folder = HolodopplerFolder(folder_path)
@@ -55,6 +57,18 @@ class Context:
         if self.eyeflow_config is None:
             # Load configs from folder if not already loaded
             self.load_eyeflow_config(self.folder.eyeflow_config)
+
+    def load_folder_list(self, folder_list_path):
+        if not os.path.exists(folder_list_path):
+            raise FileNotFoundError(f"Folder list file not found: {folder_list_path}")
+        
+        if os.path.isfile(folder_list_path):
+            with open(folder_list_path, "r") as f:
+                self.input_folder_list = [line.strip() for line in f.readlines()]
+        elif os.path.isdir(folder_list_path):
+            # Load all subdirectories as folders
+            subdirs = [d for d in os.listdir(folder_list_path) if os.path.isdir(os.path.join(folder_list_path, d))]
+            self.input_folder_list = [Path(os.path.join(folder_list_path, d)) for d in subdirs]
 
     def get(self, key: str):
         return self.cache.get(key)
@@ -124,11 +138,30 @@ class Pipeline:
 
         self.engine = DAGEngine(self.steps)
 
+    def get_step_names(self):
+        return self.engine.execution_order
+    
+    def resolve_execution_graph(self, targets=None):
+        if targets == []:
+            return []
+
+        if targets is None:
+            return self.engine.execution_order
+
+        required_steps = self.engine._resolve_required_steps(targets)
+        return required_steps
+    
+    def get_downstream_steps(self, step_name):
+        return self.engine._collect_downstream(step_name)
+
     def load_eyeflow_config(self, config_path):
         self.ctx.load_eyeflow_config(config_path)
 
     def load_input(self, input_path):
         self.ctx.load_input_folder(input_path)
+
+    def load_folder_list(self, folder_list_path):
+        self.ctx.load_folder_list(folder_list_path)
 
     def run(self, targets=None, debug=True):
         if not self.ctx.has("h5_file"):
@@ -138,3 +171,12 @@ class Pipeline:
         self.ctx.create_output_folder(debug=debug)
         self.engine.run(self.ctx, targets)
         return self.ctx.cache
+    
+    def run_batch(self, targets=None, debug=True):
+        for folder in self.ctx.input_folder_list:
+            try:
+                print(f"Processing folder: {folder}")
+                self.load_input(folder)
+                self.run(targets=targets, debug=debug)
+            except Exception as e:
+                print(f"Error processing folder {folder}: {e}")

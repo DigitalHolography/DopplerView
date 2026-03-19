@@ -100,7 +100,52 @@ if st.button("Browse Folder"):
         st.success("Folder loaded.")
 
 
-if st.button("Run Full Pipeline"):
+st.subheader("Pipeline Steps")
+
+pipeline = st.session_state.pipeline
+all_steps = pipeline.get_step_names()
+
+if "ui_steps_initialized" not in st.session_state:
+    for step in all_steps:
+        st.session_state[f"ui_{step}"] = True
+    st.session_state.selected_targets = list(all_steps)
+    st.session_state.ui_steps_initialized = True
+
+
+def on_step_toggle(step):
+    pipeline = st.session_state.pipeline
+
+    selected = [
+        s for s in pipeline.get_step_names()
+        if st.session_state[f"ui_{s}"]
+    ]
+
+    if step in selected:
+        resolved = pipeline.resolve_execution_graph(selected)
+
+        for s in pipeline.get_step_names():
+            st.session_state[f"ui_{s}"] = s in resolved
+    else:
+        downstream = pipeline.get_downstream_steps(step)
+        for s in downstream:
+            st.session_state[f"ui_{s}"] = False
+
+    st.session_state.selected_targets = [
+        s for s in pipeline.get_step_names()
+        if st.session_state[f"ui_{s}"]
+    ]
+
+
+for step in all_steps:
+    st.checkbox(
+        step,
+        key=f"ui_{step}",
+        on_change=on_step_toggle,
+        args=(step,)
+    )
+
+
+if st.button("Run Pipeline"):
 
     pipeline = st.session_state.pipeline
 
@@ -108,7 +153,7 @@ if st.button("Run Full Pipeline"):
         st.warning("Load a folder first.")
     else:
         pipeline.run(
-            targets=None  # full pipeline
+            targets=st.session_state.selected_targets
         )
 
         st.session_state.image = pipeline.ctx.get("M0_ff_image")

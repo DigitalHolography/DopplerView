@@ -1,5 +1,5 @@
 import imageio
-from holosegment.utils.image_utils import normalize_to_uint8, save_numpy_as_avi
+from holosegment.utils.image_utils import normalize_to_uint8, save_numpy_as_avi, save_labeled_branches
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -56,4 +56,9 @@ class OpticDiscRenderer(DebugRenderer):
         )
 
         plt.savefig(path)
+        plt.close()
+
+class LabeledMaskRenderer(DebugRenderer):
+    def render(self, key, cache, path):
+        save_labeled_branches(cache.get(key), path)
         plt.close()
