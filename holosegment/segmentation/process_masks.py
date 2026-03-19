@@ -45,6 +45,21 @@ def disk_mask(numX, numY, R1, center=(0.5, 0.5), R2=None):
 
     return mask.astype(bool)
 
+def elliptical_mask(ny, nx, radius_frac, center = None):
+    radius_frac = max(0.0, min(1.0, float(radius_frac)))
+    a = (nx / 2) * radius_frac
+    b = (ny / 2) * radius_frac
+
+    Y, X = np.ogrid[:ny, :nx]
+
+    if center is None:
+        cy, cx = ny / 2, nx / 2
+    else:
+        cy, cx = center
+
+    mask = ((X - cx) / a) ** 2 + ((Y - cy) / b) ** 2 <= 1.0
+    return mask
+
 def bwareafilt_largest(binary_mask, connectivity=2):
     """
     Equivalent to MATLAB: bwareafilt(binary_mask, 1, 8)
@@ -134,7 +149,7 @@ def clean_vessel_mask(
     height, width = image_shape
 
     if diaphragm_radius is not None:
-        print(f"Applying diaphragm mask with radius {diaphragm_radius}")
+        print(f"    - Applying diaphragm mask with radius {diaphragm_radius}")
         mask_diaphragm = disk_mask(
             height, width, R1=diaphragm_radius
         )

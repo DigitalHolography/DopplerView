@@ -16,6 +16,8 @@ from holosegment.pipeline.steps.vessel_segmentation import RetinalVesselSegmenta
 from holosegment.pipeline.steps.pulse_analysis import PulseAnalysisStep
 from holosegment.pipeline.steps.av_segmentation import AVSegmentationStep
 from holosegment.input_output.read_folder import HolodopplerFolder
+from holosegment.pipeline.steps.vessel_velocity_estimator import VesselVelocityEstimatorStep
+from holosegment.pipeline.steps.arterial_waveform_analysis import ArterialWaveformAnalysisStep
 
 class Context:
     """
@@ -134,6 +136,8 @@ class Pipeline:
             ChoroidalVesselSegmentationStep(),
             PulseAnalysisStep(),
             AVSegmentationStep(),
+            VesselVelocityEstimatorStep(),
+            ArterialWaveformAnalysisStep(),
         }
 
         self.engine = DAGEngine(self.steps)

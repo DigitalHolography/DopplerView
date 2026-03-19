@@ -1,4 +1,6 @@
 {
+    "M0_ff_image": "image",
+    
     "retinal_vessel_mask": "mask",
     "vessel_segmentation_logits": "image",
     "optic_disc_center": "optic_disc",
@@ -18,5 +20,10 @@
     "pre_arterial_pulse": "signal",
     "pre_arterial_pulse_filtered": "signal",
     "choroidal_pulse": "signal",
-    "choroidal_pulse_filtered": "signal"
+    "choroidal_pulse_filtered": "signal",
+    "retinal_artery_velocity_signal": "signal",
+    "retinal_vein_velocity_signal": "signal",
+    "velocity_map_avg": "image",
+    "fRMS_avg": "image",
+    "fRMS_bkg_avg": "image"
 }

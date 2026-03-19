@@ -25,5 +25,18 @@
             "center": "optic_disc_center",
             "axes": "optic_disc_axes"
         }
+    },
+    "analysis": {
+        "retinal_velocity_array": "retinal_vessel_velocity",
+        "retinal_artery_velocity_signal": "retinal_artery_velocity_signal",
+        "retinal_vein_velocity_signal" : "retinal_vein_velocity_signal",
+        "velocity_map_avg": "velocity_map_avg",
+        "fRMS_avg": "fRMS_avg",
+        "fRMS_bkg_avg": "fRMS_bkg_avg",
+        "velocitysignal_per_beat": "retinal_artery_velocity_signal_filtered_perbeat",
+        "velocitysignal_filtered": "retinal_artery_velocity_signal_filtered",
+        "beat_indices": "beat_indices",
+        "time_per_beat": "time_per_beat"
+
     }
 }

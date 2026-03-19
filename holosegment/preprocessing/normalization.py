@@ -6,10 +6,32 @@ import numpy as np
 
 import numpy as np
 from scipy.ndimage import gaussian_filter
-import math
+from functools import partial
+
+from holosegment.utils.parallelization_utils import run_in_parallel
 
 
-def flat_field_correction_3d(volume, gw=41, border_amount=0.15):
+def _flatfield(data, gw):
+    blurred = gaussian_filter(
+        data,
+        sigma=gw,
+        mode='reflect',
+        truncate=2.0
+    )
+    return data / (blurred + 1e-8)
+
+
+def flat_field_correction_3d(
+    volume,
+    gw=41,
+    border_amount=0.15,
+    n_jobs=-1,
+    parallel=True,
+    chunking=True
+):
+    """
+    Parallel version of flat field correction.
+    """
 
     volume = volume.astype(np.float64)
 
@@ -38,15 +60,16 @@ def flat_field_correction_3d(volume, gw=41, border_amount=0.15):
 
     ms = np.sum(volume[:, a:b, c:d])
 
-    blurred = gaussian_filter(
-        volume,
-        sigma=(0, gw, gw),
-        mode='reflect',
-        truncate=2.0
-    )
+    func = partial(_flatfield, gw=gw)
 
-    volume_corr = volume / blurred
+    if parallel:
+        # Use parallel processing to apply flat field correction to each frame
+        volume_corr = run_in_parallel(func, volume, n_jobs=n_jobs, chunking=chunking)
+    else:
+        # flat field correction without parallelization
+        volume_corr = _flatfield(volume, (0,gw,gw))
 
+    # Normalize globally -> breaks perfect parallelization but corrects for global intensity variations
     ms2 = np.sum(volume_corr[:, a:b, c:d])
     corrected = (ms / ms2) * volume_corr
 
@@ -54,38 +77,3 @@ def flat_field_correction_3d(volume, gw=41, border_amount=0.15):
         corrected = Im_min + (Im_max - Im_min) * corrected
 
     return corrected
-
-
-def normalize_video(frames, method='zscore'):
-    """
-    Normalize frame intensities
-    
-    Args:
-        frames: numpy array of shape (num_frames, height, width)
-        method: normalization method ('zscore', 'minmax', 'percentile')
-    
-    Returns:
-        Normalized frames
-    """
-    normalized = frames.copy().astype(np.float32)
-    
-    if method == 'zscore':
-        # Z-score normalization
-        mean = np.mean(normalized, axis=(1, 2), keepdims=True)
-        std = np.std(normalized, axis=(1, 2), keepdims=True)
-        normalized = (normalized - mean) / (std + 1e-8)
-        
-    elif method == 'minmax':
-        # Min-max normalization to [0, 1]
-        min_val = np.min(normalized, axis=(1, 2), keepdims=True)
-        max_val = np.max(normalized, axis=(1, 2), keepdims=True)
-        normalized = (normalized - min_val) / (max_val - min_val + 1e-8)
-        
-    elif method == 'percentile':
-        # Percentile-based normalization
-        p_low = np.percentile(normalized, 1, axis=(1, 2), keepdims=True)
-        p_high = np.percentile(normalized, 99, axis=(1, 2), keepdims=True)
-        normalized = np.clip(normalized, p_low, p_high)
-        normalized = (normalized - p_low) / (p_high - p_low + 1e-8)
-        
-    return normalized
