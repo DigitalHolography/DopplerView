@@ -3,6 +3,9 @@ from holosegment.pipeline.step import BaseStep
 from holosegment.preprocessing.registration import register_video
 from holosegment.preprocessing import normalization, resize
 from holosegment.utils import image_utils
+from holosegment.utils.parallelization_utils import run_in_parallel
+
+from functools import partial
 import numpy as np
 
 class Preprocessor:
@@ -61,17 +64,17 @@ class Preprocessor:
     def normalize(self):
         # Implement normalization logic based on self.eyeflow_config
         # print(self.eyeflow_config)
-        gaussian_blur_ratio = self.eyeflow_config['FlatFieldCorrection']['GWRatio']
+        gw = self.eyeflow_config['FlatFieldCorrection']['GWRatio']
 
         if self.M0 is not None:
             numx = self.M0.shape[2]
-            self.M0_ff_video = normalization.flat_field_correction_3d(self.M0, gaussian_blur_ratio * numx)
+            self.M0_ff_video = normalization.flat_field_correction_3d(self.M0, gw * numx, parallel=True) # TODO: add parameter for parallelization 
 
         if self.M1 is not None:
-            self.M1_ff_video = normalization.flat_field_correction_3d(self.M1, gaussian_blur_ratio)
+            self.M1_ff_video = normalization.flat_field_correction_3d(self.M1, gw * numx, parallel=True) # TODO: add parameter for parallelization 
 
         if self.M2 is not None:
-            self.M2_ff_video = normalization.flat_field_correction_3d(self.M2, gaussian_blur_ratio)
+            self.M2_ff_video = normalization.flat_field_correction_3d(self.M2, gw * numx, parallel=True) # TODO: add parameter for parallelization 
 
         return
     

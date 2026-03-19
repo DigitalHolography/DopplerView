@@ -48,7 +48,6 @@ class OutputManager:
 
     def save_h5(self, key, cache):
         if key not in self.schema:
-            print(f"Warning : {key} was not find in h5 schema")
             return
 
         path = self.schema[key]

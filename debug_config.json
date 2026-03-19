@@ -1,4 +1,6 @@
 {
+    "M0_ff_image": "image",
+    
     "retinal_vessel_mask": "mask",
     "vessel_segmentation_logits": "image",
     "optic_disc_center": "optic_disc",
