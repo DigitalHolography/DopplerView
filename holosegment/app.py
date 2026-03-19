@@ -137,8 +137,12 @@ def on_step_toggle(step):
 
 
 for step in all_steps:
+    if pipeline.is_cached(step):
+        label = f"🟢 {step}"
+    else:
+        label = f"🟡 {step}"
     st.checkbox(
-        step,
+        label,
         key=f"ui_{step}",
         on_change=on_step_toggle,
         args=(step,)
@@ -157,17 +161,19 @@ if st.button("Run Pipeline"):
         )
 
         st.session_state.image = pipeline.ctx.get("M0_ff_image")
-        st.session_state.artery_mask = pipeline.ctx.get("retinal_artery_mask")
-        st.session_state.vein_mask = pipeline.ctx.get("retinal_vein_mask")
+
+        print("Pipeline execution completed.")
 
         st.success("Pipeline completed.")
+
+        st.rerun()
 
 
 if st.session_state.image is not None:
     display_img = overlay_masks(
         st.session_state.image,
-        st.session_state.artery_mask,
-        st.session_state.vein_mask,
+        pipeline.ctx.get("retinal_artery_mask"),
+        pipeline.ctx.get("retinal_vein_mask")
     )
 
     st.image(display_img)

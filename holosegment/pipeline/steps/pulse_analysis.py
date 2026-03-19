@@ -50,7 +50,7 @@ class PreArteryMaskStep(BaseStep):
 
 class ComputeTemporalCuesStep(BaseStep):
     requires = {"M0_ff_video", "pre_artery_mask", "choroidal_vessel_mask"}
-    produces = {"correlation", "diasys_image", "retinal_arterial_pulse", "choroidal_pulse", "retinal_arterial_pulse_filtered", "choroidal_pulse_filtered"}
+    produces = {"correlation", "diasys_image", "pre_arterial_pulse", "choroidal_pulse", "pre_arterial_pulse_filtered", "choroidal_pulse_filtered"}
     name = "temporal_cues"
 
     def _relevant_config(self, ctx):
