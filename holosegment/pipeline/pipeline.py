@@ -68,10 +68,12 @@ class Context:
                 self.cache[key] = input_file[key][()]
 
     def load_input_folder(self, folder_path):
+        self.clear()  # Clear cache before loading new input
+
         self.folder = HolodopplerFolder(folder_path)
         self.cache["input_file"] = self.folder.input_file
         self.holodoppler_config = json.load(open(self.folder.holodoppler_config))
-        print(f"Using Holodoppler config file: {self.folder.holodoppler_config}")
+        print(f"[Pipeline] Using Holodoppler config file: {self.folder.holodoppler_config}")
 
         if self.eyeflow_config is None:
             # Load configs from folder if not already loaded
@@ -203,8 +205,10 @@ class Pipeline:
             raise RuntimeError("Input path not set. Please load input folder before running the pipeline.")
         if self.ctx.eyeflow_config is None:
             raise RuntimeError("Configuration not loaded. Please load a configuration file before running the pipeline.")
+        
         self.ctx.create_output_folder()
         print(f"[Pipeline] Created output folder: {self.ctx.output_manager.output_dir}")
+
         start_time = time.time()
         self.engine.run(self.ctx, targets)
         elapsed = time.time() - start_time
@@ -219,8 +223,8 @@ class Pipeline:
     def run_batch(self, targets=None):
         for folder in self.ctx.input_folder_list:
             try:
-                print(f"Processing folder: {folder}")
+                print(f"[Run Batch] Processing folder: {folder}")
                 self.load_input(folder)
                 self.run(targets=targets)
             except Exception as e:
-                print(f"Error processing folder {folder}: {e}")
+                print(f"[Run Batch] Error processing folder {folder}: {e}")

@@ -97,19 +97,8 @@ if st.button("Browse Folder"):
         st.warning("Please select a folder path.")
     else:
         st.session_state.pipeline.load_input(selected_path)
+        st.session_state.input_folder = selected_path
         st.success("Folder loaded.")
-
-
-st.subheader("Pipeline Steps")
-
-pipeline = st.session_state.pipeline
-all_steps = pipeline.get_step_names()
-
-if "ui_steps_initialized" not in st.session_state:
-    for step in all_steps:
-        st.session_state[f"ui_{step}"] = True
-    st.session_state.selected_targets = list(all_steps)
-    st.session_state.ui_steps_initialized = True
 
 
 def on_step_toggle(step):
@@ -136,37 +125,49 @@ def on_step_toggle(step):
     ]
 
 
-for step in all_steps:
-    if pipeline.is_cached(step):
-        label = f"🟢 {step}"
-    else:
-        label = f"🟡 {step}"
-    st.checkbox(
-        label,
-        key=f"ui_{step}",
-        on_change=on_step_toggle,
-        args=(step,)
-    )
-
-
-if st.button("Run Pipeline"):
+if st.session_state.input_folder is not None:
+    st.subheader("Pipeline Steps")
 
     pipeline = st.session_state.pipeline
+    all_steps = pipeline.get_step_names()
 
-    if pipeline is None:
-        st.warning("Load a folder first.")
-    else:
-        pipeline.run(
-            targets=st.session_state.selected_targets
+    if "ui_steps_initialized" not in st.session_state:
+        for step in all_steps:
+            st.session_state[f"ui_{step}"] = True
+        st.session_state.selected_targets = list(all_steps)
+        st.session_state.ui_steps_initialized = True
+
+    for step in all_steps:
+        if pipeline.is_cached(step):
+            label = f"🟢 {step}"
+        else:
+            label = f"🟡 {step}"
+        st.checkbox(
+            label,
+            key=f"ui_{step}",
+            on_change=on_step_toggle,
+            args=(step,)
         )
 
-        st.session_state.image = pipeline.ctx.get("M0_ff_image")
 
-        print("Pipeline execution completed.")
+    if st.button("Run Pipeline"):
 
-        st.success("Pipeline completed.")
+        pipeline = st.session_state.pipeline
 
-        st.rerun()
+        if pipeline is None:
+            st.warning("Load a folder first.")
+        else:
+            pipeline.run(
+                targets=st.session_state.selected_targets
+            )
+
+            st.session_state.image = pipeline.ctx.get("M0_ff_image")
+
+            print("Pipeline execution completed.")
+
+            st.success("Pipeline completed.")
+
+            st.rerun()
 
 
 if st.session_state.image is not None:

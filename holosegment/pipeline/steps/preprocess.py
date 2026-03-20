@@ -124,10 +124,10 @@ class PreprocessStep(BaseStep):
 
     def _relevant_config(self, ctx):
         return {
-            "Preprocess": {
-                "Register": ctx.eyeflow_config["Preprocess"]["Register"],
-                "Crop": ctx.eyeflow_config["Preprocess"]["Crop"]
-            },
+            # "Preprocess": {
+            #     "Register": ctx.eyeflow_config["Preprocess"]["Register"],
+            #     "Crop": ctx.eyeflow_config["Preprocess"]["Crop"]
+            # },
             "FlatFieldCorrection": {
                 "GWRatio": ctx.eyeflow_config["FlatFieldCorrection"]["GWRatio"]
             }
