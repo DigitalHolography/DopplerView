@@ -13,7 +13,7 @@ from scipy.interpolate import interp1d
 class ArterialWaveformAnalysisStep(BaseStep):
     name = "arterial_waveform_analysis"
     requires = {"retinal_artery_velocity_signal"}
-    produces = {"retinal_artery_velocity_signal_filtered","retinal_artery_velocity_signal_filtered_perbeat","beat_indices","time_per_beat"}
+    produces = {"retinal_artery_velocity_signal_filtered","retinal_artery_velocity_signal_filtered_perbeat","beat_indices","time_per_beat", "systole_indices", "diastole_indices", "ResistivityIndex"}
 
     def _relevant_config(self, ctx):
         return {"fs": ctx.holodoppler_config["fs"],
@@ -65,6 +65,25 @@ class ArterialWaveformAnalysisStep(BaseStep):
             sig_perbeat[i,:] = beat_sig_interp
         
         return sig_perbeat
+
+    def calculate_systole_diastole_indices(self, numpoints, peaks):
+            
+        diastoledef = np.array([-0.15,-0.10]) # TODO parametrize in percent of a cycle before and after the top of derivative
+        systoledef = np.array([-0.05,0.10])
+        pointperbeat = np.diff(peaks)
+        line = np.arange(numpoints)
+        systole_indices = np.zeros(numpoints)
+        diastole_indices = np.zeros(numpoints)
+
+        for b in range(len(peaks)-1):
+            sys_range = np.max(np.min(np.floor(systoledef * pointperbeat[b] + peaks[b]),numpoints-1),0)
+            dia_range = np.max(np.min(np.floor(diastoledef * pointperbeat[b] + peaks[b]),numpoints-1),0)
+            systole_indices[sys_range[0]:sys_range[1]] = 1
+            diastole_indices[dia_range[0]:dia_range[1]] = 1
+
+        systole_indices[sys_range[0]:sys_range[1]] = 1
+
+        return systole_indices, diastole_indices
     
     def run(self, ctx):
         # ---- Requires ----
@@ -73,10 +92,12 @@ class ArterialWaveformAnalysisStep(BaseStep):
         stride = ctx.holodoppler_config["batch_stride"]
 
         peaks, sig_filtered = self.find_systole_index(sig)
+        
+        time_per_beat = np.diff(peaks) * stride/fs
 
         sig_perbeat = self.slice_interp_beats(peaks, sig_filtered)
 
         ctx.set("retinal_artery_velocity_signal_filtered_perbeat",sig_perbeat)
         ctx.set("retinal_artery_velocity_signal_filtered",sig_filtered)
         ctx.set("beat_indices", peaks)
-        ctx.set("time_per_beat", np.diff(peaks) * stride/fs) # TODO parametrize look for params
+        ctx.set("time_per_beat", time_per_beat) 

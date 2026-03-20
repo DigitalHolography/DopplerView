@@ -23,6 +23,7 @@
     "choroidal_pulse_filtered": "signal",
     
     "retinal_artery_velocity_signal": "signal",
+    "retinal_artery_velocity_signal_filtered": "signal",
     "retinal_vein_velocity_signal": "signal",
     "velocity_map_avg": "imageandcolorbar",
     "fRMS_avg": "imageandcolorbar",
