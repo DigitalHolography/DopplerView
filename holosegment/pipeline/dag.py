@@ -194,6 +194,7 @@ class DAGEngine:
 
             if not self._should_run(step, ctx):
                 print(f"[DAG] Skipping (valid cache): {step.name}")
+                step.export(ctx)
                 continue
 
             print(f"[DAG] Running step: {step.name}")
