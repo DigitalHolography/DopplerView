@@ -117,9 +117,10 @@ class DAGEngine:
         if not should_run:
             # If outputs missing -> must run
             if not all(ctx.has(k) for k in step.produces):
-                for k in step.produces:
-                    if not ctx.has(k):
-                        print(f"    - Missing output '{k}' for step '{step.name}'. Marking for execution.")
+                if self.debug_mode:
+                    for k in step.produces:
+                        if not ctx.has(k):
+                            print(f"    - Missing output '{k}' for step '{step.name}'. Marking for execution.")
                 should_run = True
 
             new_hash = step.fingerprint(ctx)

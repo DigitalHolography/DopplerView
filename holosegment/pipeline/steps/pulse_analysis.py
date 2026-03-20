@@ -39,7 +39,7 @@ class PreArteryMaskStep(BaseStep):
         # --- Step 2: Compute mean temporal signal for each branch ---
         signals = pulse_analysis.get_filtered_branch_signals(video, labeled_vessels, sampling_frequency)
         for i in range(1, labeled_vessels.max() + 1):
-            ctx.output_manager.debug("pulse_analysis", f"branch_{i}_signal", signals[i - 1, :], "signal")
+            ctx.output_manager.output("pulse_analysis", f"branch_{i}_signal", signals[i - 1, :], "signal")
         signals_n = (signals - signals.mean(axis=1, keepdims=True)) / signals.std(axis=1, keepdims=True)
         ctx.cache["branch_signals"] = signals_n
 

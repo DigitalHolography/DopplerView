@@ -3,8 +3,8 @@ import h5py
 import numpy as np
 
 class Moments:
-    def __init__(self, h5_file_path):
-        self.h5_file_path = h5_file_path
+    def __init__(self, input_file_path):
+        self.input_file_path = input_file_path
         self.M0 = None
         self.M1 = None
         self.M2 = None
@@ -50,4 +50,4 @@ class Moments:
             raise
 
     def read_moments(self):
-        self.read_hdf5(self.h5_file_path)
+        self.read_hdf5(self.input_file_path)

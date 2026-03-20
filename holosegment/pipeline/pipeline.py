@@ -29,7 +29,7 @@ class Context:
         - services (models, output, etc.)
     """
 
-    def __init__(self, eyeflow_config, model_manager, h5_schema, debug_config=None, debug_mode=False):
+    def __init__(self, eyeflow_config, model_manager, h5_schema, output_config=None, debug_mode=False):
         self.eyeflow_config = eyeflow_config
         self.model_manager = model_manager
         self.model_instances = {}
@@ -40,7 +40,7 @@ class Context:
         self.folder = None
         self.output_manager = None
         self.h5_schema = h5_schema
-        self.debug_config = debug_config or {}
+        self.output_config = output_config or {}
         self.debug_mode = debug_mode
 
         # Runtime data storage
@@ -52,19 +52,23 @@ class Context:
         print(f"Using Eyeflow config file: {config_path}")
 
     def _read_h5_into_cache(self):
-        if "h5_file" not in self.cache:
-            raise RuntimeError("H5 file not loaded in context. Cannot read from H5.")
-        h5_file_path = self.cache["h5_file"]
-        h5_file = h5py.File(h5_file_path, "r")
+        if self.folder is None:
+            raise RuntimeError("Input folder not loaded. Cannot read cache file.")
+        cache_folder = self.folder.directory / "holosegment" / "cache"
+        h5_cache_path = cache_folder / "cache.h5"
 
-        schema = json_utils.flatten_schema(self.h5_schema)
-        for key, h5_path in schema.items():
-            if key not in self.cache and h5_path in h5_file:
-                self.cache[key] = h5_file[h5_path][()]
+        if not h5_cache_path.exists():
+            print(f"No cache file found at {h5_cache_path}. Skipping cache loading.")
+            return
+        
+        print(f"Reading cache from {h5_cache_path}")
+        with h5py.File(h5_cache_path, "r") as input_file:
+            for key in input_file.keys():
+                self.cache[key] = input_file[key][()]
 
     def load_input_folder(self, folder_path):
         self.folder = HolodopplerFolder(folder_path)
-        self.cache["h5_file"] = self.folder.h5_file
+        self.cache["input_file"] = self.folder.input_file
         self.holodoppler_config = json.load(open(self.folder.holodoppler_config))
         print(f"Using Holodoppler config file: {self.folder.holodoppler_config}")
 
@@ -75,7 +79,7 @@ class Context:
         if self.debug_mode:
             self._read_h5_into_cache()
 
-        reader = Moments(self.folder.h5_file)
+        reader = Moments(self.folder.input_file)
         reader.read_moments()
         self.cache["moment0"] = reader.M0
         self.cache["moment1"] = reader.M1
@@ -115,7 +119,7 @@ class Context:
         if self.folder is None:
             raise RuntimeError("Input folder not loaded. Cannot determine output folder.")
         # Create a new output folder with an incremented index
-        self.output_manager = OutputManager(output_folder=self.folder.create_output_folder(), h5_path=self.folder.h5_file, schema=self.h5_schema, debug_config=self.debug_config)
+        self.output_manager = OutputManager(output_folder=self.folder.create_output_folder(), h5_path=self.folder.input_file, schema=self.h5_schema, output_config=self.output_config, cache_folder=self.folder.get_cache_folder())
 
     def set(self, key: str, value: Any):
         self.cache[key] = value
@@ -132,13 +136,13 @@ class Context:
         self.cache.clear()
 
 class Pipeline:
-    def __init__(self, model_registry, h5_schema, debug_config=None, eyeflow_config=None, debug_mode=False):
+    def __init__(self, model_registry, h5_schema, output_config=None, eyeflow_config=None, debug_mode=False):
         """
         Initializes the pipeline with the given model registry and configuration.
         Args:
             model_registry: Configuration for available models.
             h5_schema: Schema defining how to store outputs in HDF5.
-            debug_config: Configuration for debug outputs (optional). If None, outputs are manually saved.
+            output_config: Configuration for debug outputs (optional). If None, outputs are manually saved.
             eyeflow_config: Eyeflow configuration dictionary (optional) If None, the eyeflow configuration found in the input folder will be used.
             debug_mode: If True, steps outputs are read from the .h5, and only targeted steps are re-run. This is useful for debugging specific steps without having to re-run the entire pipeline.
         """
@@ -146,7 +150,7 @@ class Pipeline:
             eyeflow_config=eyeflow_config,
             model_manager=ModelManager(model_registry),
             h5_schema=h5_schema,
-            debug_config=debug_config,
+            output_config=output_config,
             debug_mode=debug_mode
         )
 
@@ -194,12 +198,16 @@ class Pipeline:
         self.ctx.load_folder_list(folder_list_path)
 
     def run(self, targets=None):
-        if not self.ctx.has("h5_file"):
+        if not self.ctx.has("input_file"):
             raise RuntimeError("Input path not set. Please load input folder before running the pipeline.")
         if self.ctx.eyeflow_config is None:
             raise RuntimeError("Configuration not loaded. Please load a configuration file before running the pipeline.")
         self.ctx.create_output_folder()
         self.engine.run(self.ctx, targets)
+
+        # If in debug mode, save the entire cache to the H5 file after execution
+        if self.ctx.debug_mode:
+            self.ctx.output_manager.save_cache(self.ctx.cache)
         return self.ctx.cache
 
     def run_batch(self, targets=None):

@@ -69,7 +69,7 @@ def main():
         sys.exit(1)
 
     registry = ModelRegistryConfig(Path("models.yaml"))
-    pipeline = Pipeline(registry, h5_schema=json.load(open("h5_schema.json")), debug_config=json.load(open("debug_config.json")), debug_mode=debug)
+    pipeline = Pipeline(registry, h5_schema=json.load(open("h5_schema.json")), output_config=json.load(open("output_config.json")), debug_mode=debug)
     if args.config:
         pipeline.load_eyeflow_config(args.config)
 

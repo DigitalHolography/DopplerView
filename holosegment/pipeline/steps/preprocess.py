@@ -138,9 +138,13 @@ class PreprocessStep(BaseStep):
         moment1 = ctx.cache["moment1"]
         moment2 = ctx.cache["moment2"]
 
+        print(f"{moment0 is not None=}, {moment1 is not None=}, {moment2 is not None=}")
+
+
         pre = Preprocessor(ctx.eyeflow_config, moment0, moment1)
         pre.preprocess()
 
+        print(f"{pre.M0_ff_image is not None=}, {pre.M1_ff_image is not None=}, {pre.M2_ff_image is not None=}")
         if pre.M0_ff_image is not None:
             ctx.cache["M0_ff_video"] = pre.M0_ff_video
             ctx.cache["M0_ff_image"] = pre.M0_ff_image

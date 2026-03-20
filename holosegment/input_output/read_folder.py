@@ -13,6 +13,7 @@ class HolodopplerFolder:
         self.holodoppler_config = None
         self.output_folder = None
         self.raw_folder = None
+        self.cache_folder = None
 
         self.read()
 
@@ -68,35 +69,40 @@ class HolodopplerFolder:
     def create_output_folder(self):
         _, index = self.get_output_folder()
         new_output_folder = os.path.join(self.directory, "holosegment", f"output_{index + 1}")
-        debug_folder = os.path.join(new_output_folder, "debug")
-        # h5_folder = os.path.join(new_output_folder, "h5")
+        debug_folder = os.path.join(new_output_folder)
+        # input_folder = os.path.join(new_output_folder, "h5")
         os.makedirs(debug_folder, exist_ok=True)
-        # os.makedirs(h5_folder, exist_ok=True)
+        # os.makedirs(input_folder, exist_ok=True)
         
         print(f"Created output folder: {new_output_folder}")
         self.output_folder = new_output_folder
         return new_output_folder
-
+    
+    def get_cache_folder(self):
+        self.cache_folder = os.path.join(self.directory, "holosegment", "cache")
+        os.makedirs(self.cache_folder, exist_ok=True)
+        return self.cache_folder
+    
     def get_input_folder(self):
         self.raw_folder = os.path.join(self.directory, "raw")
         if not os.path.exists(self.raw_folder):
             raise FileNotFoundError(f"Raw folder not found in {self.directory}")
         return self.raw_folder
     
-    def find_h5_file(self):
-        raw_h5_filename = self.directory.name + "_raw.h5"
-        if os.path.exists(os.path.join(self.raw_folder, raw_h5_filename)):
-            return os.path.join(self.raw_folder, raw_h5_filename)
+    def find_input_file(self):
+        raw_input_filename = self.directory.name + "_raw.h5"
+        if os.path.exists(os.path.join(self.raw_folder, raw_input_filename)):
+            return os.path.join(self.raw_folder, raw_input_filename)
         
         # If expected .h5 file is not found, take the first .h5 file found
-        h5_files = [f for f in os.listdir(self.raw_folder) if f.endswith(".h5")]
-        if len(h5_files) == 0:
+        input_files = [f for f in os.listdir(self.raw_folder) if f.endswith(".h5")]
+        if len(input_files) == 0:
             raise FileNotFoundError(f"No HDF5 file found in {self.raw_folder}.")
-        return os.path.join(self.raw_folder, h5_files[0])
+        return os.path.join(self.raw_folder, input_files[0])
 
     def read(self):
         self.raw_folder = self.get_input_folder()
         self.eyeflow_config = self.get_EF_config()
         self.holodoppler_config = self.get_HD_config()
         self.output_folder = self.get_output_folder()
-        self.h5_file = self.find_h5_file()
+        self.input_file = self.find_input_file()
