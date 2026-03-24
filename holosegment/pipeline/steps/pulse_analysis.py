@@ -50,7 +50,7 @@ class PreArteryMaskStep(BaseStep):
 
 class ComputeTemporalCuesStep(BaseStep):
     requires = {"M0_ff_video", "pre_artery_mask", "choroidal_vessel_mask"}
-    produces = {"correlation", "diasys_image", "pre_arterial_pulse", "choroidal_pulse", "pre_arterial_pulse_filtered", "choroidal_pulse_filtered"}
+    produces = {"correlation", "diasys_image", "pre_arterial_pulse", "choroidal_pulse", "pre_arterial_pulse_filtered", "choroidal_pulse_filtered", "pre_arterial_pulse_interpolated", "video_cleaned", "pre_venous_pulse", "pre_venous_pulse_filtered"}
     name = "temporal_cues"
 
     def _relevant_config(self, ctx):
@@ -80,19 +80,26 @@ class ComputeTemporalCuesStep(BaseStep):
         venous_pulse_filtered = pulse_analysis.get_filtered_pulse(venous_pulse, sampling_frequency)
         choroidal_pulse_filtered = pulse_analysis.get_filtered_pulse(choroidal_pulse, sampling_frequency)
 
+        # --- Interpolate outlier frames using the filtered signal ---
+
+        video_cleaned, arterial_pulse_interpolated = pulse_analysis.interpolate_outliers(video, arterial_pulse, pre_artery_mask, sampling_frequency=sampling_frequency)
+
         # --- Compute correlation map with filtered pulses ---
 
-        correlation_artery = pulse_analysis.compute_correlation(video, arterial_pulse_filtered)
+        correlation_artery = pulse_analysis.compute_correlation(video_cleaned, arterial_pulse_interpolated)
         # correlation_vein = pulse_analysis.compute_correlation(video, venous_pulse_filtered)
         ctx.set("correlation", correlation_artery)
         # ctx.set("correlation_vein", correlation_vein)
 
         # --- Accumulate frames at the systolic and diastolic peaks of the filtered pulses ---
 
-        diasys, M0_Systole_img, M0_Diastole_img = pulse_analysis.compute_diasys_image(video, arterial_pulse_filtered, sampling_frequency)
+        diasys, M0_Systole_img, M0_Diastole_img = pulse_analysis.compute_diasys_image(video_cleaned, arterial_pulse_interpolated, sampling_frequency)
 
         ctx.set("pre_arterial_pulse", arterial_pulse)
+        ctx.set("pre_venous_pulse", venous_pulse)
         ctx.set("choroidal_pulse", choroidal_pulse)
         ctx.set("pre_arterial_pulse_filtered", arterial_pulse_filtered)
+        ctx.set("pre_venous_pulse_filtered", venous_pulse_filtered)
+        ctx.set("pre_arterial_pulse_interpolated", arterial_pulse_interpolated)
         ctx.set("choroidal_pulse_filtered", choroidal_pulse_filtered)
         ctx.set("diasys_image", diasys)

@@ -207,6 +207,9 @@ def get_filtered_branch_signals(video, labeled_vessels, sampling_frequency):
         if moving_window > 1:
             signals[i - 1, :] = movmean(signals[i - 1, :], moving_window)
 
+        outliers = detect_outliers_moving_median(signals[i - 1, :], window=moving_window, threshold_factor=1.5)
+        signals[i - 1, :] = interpolate_outliers_signal(signals[i - 1, :], outliers)
+
     return signals
 
 
@@ -279,6 +282,48 @@ def interpolate_outlier_frames(video, outlier_frames_mask):
 
     return video_cleaned
 
+def interpolate_outliers_signal(signal, outlier_frames_mask):
+    signal_cleaned = signal.copy()
+    outlier_indices = np.where(outlier_frames_mask)[0]
+
+    for idx in outlier_indices:
+        prev_candidates = np.where(~outlier_frames_mask[:idx])[0]
+        next_candidates = np.where(~outlier_frames_mask[idx+1:])[0] + idx + 1
+
+        prev_frame = prev_candidates[-1] if len(prev_candidates) > 0 else None
+        next_frame = next_candidates[0] if len(next_candidates) > 0 else None
+
+        if prev_frame is None:
+            prev_frame = next_frame
+        if next_frame is None:
+            next_frame = prev_frame
+
+        if prev_frame == next_frame:
+            signal_cleaned[idx] = signal[prev_frame]
+        else:
+            alpha = (idx - prev_frame) / (next_frame - prev_frame)
+            signal_cleaned[idx] = (
+                (1 - alpha) * signal[prev_frame] +
+                alpha * signal[next_frame]
+            )
+
+    return signal_cleaned
+
+# Detect outliers using a moving median and threshold
+def detect_outliers_moving_median(signal, window=5, threshold_factor=2.0):
+    padded = np.pad(signal, (window//2,), mode='edge')
+    mov_median = uniform_filter1d(padded, size=window, mode='nearest')[window//2:-(window//2)]
+    deviation = np.abs(signal - mov_median)
+    mad = np.median(deviation)
+    return deviation > threshold_factor * mad if mad != 0 else np.zeros_like(signal, dtype=bool)
+
+def interpolate_outliers(video, signal, artery_mask, sampling_frequency):
+    outlier_frames_mask = detect_outliers_moving_median(signal, window=5, threshold_factor=2)
+    print(f"    - Detected {outlier_frames_mask.sum()} outlier frames based on arterial pulse signal.")
+    video = interpolate_outlier_frames(video, outlier_frames_mask)
+    signal = get_pulse_from_mask(video, artery_mask)
+    signal_filtered = get_filtered_pulse(signal, sampling_frequency=sampling_frequency)
+    return video, signal_filtered
 
 def compute_correlation(video, signal):
     """
@@ -291,27 +336,6 @@ def compute_correlation(video, signal):
     Returns:
         R (np.ndarray): 1D array of correlation values
     """
-    
-    # --- 1) Compute first correlation ---
-    # # compute signal in 3 dimensions for correlation in the mask
-    # signal = np.nansum(video * mask[np.newaxis, :, :], axis=(1, 2))
-    # signal = signal / np.count_nonzero(mask)
-
-    # # Detect outliers using a moving median and threshold
-    # def detect_outliers_moving_median(x, window=5, threshold_factor=2.0):
-    #     padded = np.pad(x, (window//2,), mode='edge')
-    #     mov_median = uniform_filter1d(padded, size=window, mode='nearest')[window//2:-(window//2)]
-    #     deviation = np.abs(x - mov_median)
-    #     mad = np.median(deviation)
-    #     return deviation > threshold_factor * mad if mad != 0 else np.zeros_like(x, dtype=bool)
-
-    # outlier_frames_mask = detect_outliers_moving_median(signal, window=5, threshold_factor=2)
-    # video = interpolate_outlier_frames(video, outlier_frames_mask)  # Needs to be defined
-
-    # # Recompute signal after outlier interpolation
-    # signal = np.nansum(video * mask[np.newaxis, :, :], axis=(1, 2))
-    # signal = signal / np.count_nonzero(mask)
-
     # compute local-to-average signal wave zero-lag correlation
     signal_centered = signal - np.nanmean(signal)
     video_centered = video - np.nanmean(video)
