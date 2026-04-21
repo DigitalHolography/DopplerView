@@ -41,22 +41,19 @@ class PreArteryMaskStep(BaseStep):
 
         # --- Step 2: Compute mean temporal signal for each branch ---
         signals = pulse_analysis.get_filtered_branch_signals(video, labeled_vessels, sampling_frequency)
-        for i in range(1, labeled_vessels.max() + 1):
-            ctx.output_manager.output("pulse_analysis", f"branch_{i}_signal", signals[i - 1, :], "signal")
         signals_n = (signals - signals.mean(axis=1, keepdims=True)) / signals.std(axis=1, keepdims=True)
         ctx.cache["branch_signals"] = signals_n
 
+        # --- Step 3: Correct signals by aligning with median heartbeat ---
         beat_period = pulse_analysis.compute_idx0(signals_n, sampling_frequency)
-        print(f"    - Estimated beat period: {beat_period:.2f} seconds")
         corrected_signals = np.zeros_like(signals_n)
         for i, signal in enumerate(signals_n):
             corrected_signals[i, :] = pulse_analysis.correct_branch_signal_with_heartbeat(signal, beat_period, k=2)
         ctx.cache["corrected_signals"] = corrected_signals
-
         for i in range(1, labeled_vessels.max() + 1):
-            ctx.output_manager.output("pulse_analysis", f"branch_{i}_corrected", corrected_signals[i - 1, :], "signal")
+            ctx.output_manager.output("pulse_analysis", f"branch_{i}_corrected", (signals_n[i - 1, :], corrected_signals[i - 1, :]), "signal", options={"multiple_signals": True, "legend": ["Original Signal", "Corrected Signal"]})
 
-        # --- Step 3: Select regular peaks to classify arteries vs veins ---
+        # --- Step 4: Pre-classify arteries and veins using systolic gradient ---
         pre_artery_mask, pre_vein_mask = pulse_analysis.compute_pre_masks(corrected_signals, labeled_vessels, sampling_frequency)
         ctx.cache["pre_artery_mask"] = pre_artery_mask
         ctx.cache["pre_vein_mask"] = pre_vein_mask

@@ -76,7 +76,7 @@ class OutputManager:
         if renderer:
             renderer.render(key, cache, path)
 
-    def output(self, step_name, filename, value, type=None):
+    def output(self, step_name, filename, value, type=None, options=None):
         """Outputs a value manually for debugging purposes based on the provided output configuration."""
         if type is None:
             Warning(f"No output type specified for key '{step_name}', skipping debug output.")
@@ -89,7 +89,7 @@ class OutputManager:
         renderer = self.renderers.get(type)
 
         if renderer:
-            renderer.render("value", {"value": value}, path)
+            renderer.render("value", {"value": value}, path, options=options)
 
     def save(self, step_name, key, cache):
         self.save_h5(key, cache)
