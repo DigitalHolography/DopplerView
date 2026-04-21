@@ -1,4 +1,5 @@
 import json
+import os
 
 def ordered(obj):
     if isinstance(obj, dict):
@@ -18,3 +19,17 @@ def remove_spaces_from_keys(obj):
         return [remove_spaces_from_keys(item) for item in obj]
     else:
         return obj
+    
+def flatten_schema(schema):
+    flat = {}
+
+    def walk(node, path=""):
+        for k, v in node.items():
+            new_path = os.path.join(path, k) if path else k
+            if isinstance(v, dict):
+                walk(v, new_path)
+            else:
+                flat[v] = new_path
+
+    walk(schema)
+    return flat

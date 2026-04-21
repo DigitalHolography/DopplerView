@@ -50,20 +50,26 @@ def main():
         nargs='+',
         help='List of target steps to run'
     )
+
+    parser.add_argument(
+        '-d', '--debug',
+        action='store_true',
+        help='Enable debug mode. In this mode, steps outputs are read from the .h5, and only targeted steps are re-run. This is useful for debugging specific steps without having to re-run the entire pipeline.'
+    )
     
     args = parser.parse_args()
     
     # Validate input files
     input_folder = Path(args.holodoppler_folder)
 
-    debug = args.verbose is not None
+    debug = args.debug
     
     if not input_folder.exists():
         print(f"Error: holodoppler folder not found: {input_folder}", file=sys.stderr)
         sys.exit(1)
 
     registry = ModelRegistryConfig(Path("models.yaml"))
-    pipeline = Pipeline(registry, h5_schema=json.load(open("h5_schema.json")), debug_config=json.load(open("debug_config.json")))
+    pipeline = Pipeline(registry, h5_schema=json.load(open("h5_schema.json")), output_config=json.load(open("output_config.json")), debug_mode=debug)
     if args.config:
         pipeline.load_eyeflow_config(args.config)
 
@@ -71,10 +77,10 @@ def main():
 
     if args.batch:
         pipeline.load_folder_list(input_folder)
-        pipeline.run_batch(targets=targets, debug=debug)
+        pipeline.run_batch(targets=targets)
     else:
         pipeline.load_input(input_folder)
-        pipeline.run(targets=targets, debug=debug)
+        pipeline.run(targets=targets)
 
     return 0
 

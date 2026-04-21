@@ -244,7 +244,6 @@ Open `pipeline.py`:
 
 ```python
 self.steps = {
-    LoadMomentsStep(),
     PreprocessStep(),
     ...
 }

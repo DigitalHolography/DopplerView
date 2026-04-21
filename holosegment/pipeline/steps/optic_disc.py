@@ -35,9 +35,7 @@ class OpticDiscDetectionStep(BaseStep):
     
         
     def moment1_detection(self, ctx):
-        image = ctx.require("M1_ff_image")
-        moments = ctx.cache["moments"]
-        M1 = moments.M1
+        M1 = ctx.require("M1_ff_image")
         # Implement optic disc detection using M1 moments
         # For example, you could use the location of the maximum value in M1 as the optic disc center
         y_center, x_center = np.unravel_index(np.argmax(M1), M1.shape)

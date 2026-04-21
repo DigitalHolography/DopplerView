@@ -3,15 +3,18 @@ from holosegment.pipeline.step import BaseStep
 from holosegment.preprocessing.registration import register_video
 from holosegment.preprocessing import normalization, resize
 from holosegment.utils import image_utils
+from holosegment.utils.parallelization_utils import run_in_parallel
+
+from functools import partial
 import numpy as np
 
 class Preprocessor:
-    def __init__(self, config, moments):
+    def __init__(self, config, M0, M1, M2=None, SH=None):
         self.eyeflow_config = config
-        self.M0 = moments.M0
-        self.M1 = moments.M1
-        self.M2 = None
-        self.SH = moments.SH
+        self.M0 = M0
+        self.M1 = M1
+        self.M2 = M2
+        self.SH = SH
 
         self.M0_ff_video = None  # Cache for flatfield-corrected M0 video
         self.M0_ff_image = None  # Cache for flatfield-corrected M0
@@ -61,17 +64,17 @@ class Preprocessor:
     def normalize(self):
         # Implement normalization logic based on self.eyeflow_config
         # print(self.eyeflow_config)
-        gaussian_blur_ratio = self.eyeflow_config['FlatFieldCorrection']['GWRatio']
+        gw = self.eyeflow_config['FlatFieldCorrection']['GWRatio']
 
         if self.M0 is not None:
             numx = self.M0.shape[2]
-            self.M0_ff_video = normalization.flat_field_correction_3d(self.M0, gaussian_blur_ratio * numx)
+            self.M0_ff_video = normalization.flat_field_correction_3d(self.M0, gw * numx, parallel=True) # TODO: add parameter for parallelization 
 
         if self.M1 is not None:
-            self.M1_ff_video = normalization.flat_field_correction_3d(self.M1, gaussian_blur_ratio)
+            self.M1_ff_video = normalization.flat_field_correction_3d(self.M1, gw * numx, parallel=True) # TODO: add parameter for parallelization 
 
         if self.M2 is not None:
-            self.M2_ff_video = normalization.flat_field_correction_3d(self.M2, gaussian_blur_ratio)
+            self.M2_ff_video = normalization.flat_field_correction_3d(self.M2, gw * numx, parallel=True) # TODO: add parameter for parallelization 
 
         return
     
@@ -115,25 +118,27 @@ class Preprocessor:
         return 
 
 class PreprocessStep(BaseStep):
-    requires = {"moments"}
+    requires = {"moment0", "moment1", "moment2"}
     produces = {"M0_ff_video", "M0_ff_image", "M1_ff_image"}
     name = "preprocess"
 
     def _relevant_config(self, ctx):
         return {
-            "Preprocess": {
-                "Register": ctx.eyeflow_config["Preprocess"]["Register"],
-                "Crop": ctx.eyeflow_config["Preprocess"]["Crop"]
-            },
+            # "Preprocess": {
+            #     "Register": ctx.eyeflow_config["Preprocess"]["Register"],
+            #     "Crop": ctx.eyeflow_config["Preprocess"]["Crop"]
+            # },
             "FlatFieldCorrection": {
                 "GWRatio": ctx.eyeflow_config["FlatFieldCorrection"]["GWRatio"]
             }
         }
 
     def run(self, ctx):
-        moments = ctx.cache["moments"]
+        moment0 = ctx.cache["moment0"]
+        moment1 = ctx.cache["moment1"]
+        moment2 = ctx.cache["moment2"]
 
-        pre = Preprocessor(ctx.eyeflow_config, moments)
+        pre = Preprocessor(ctx.eyeflow_config, moment0, moment1)
         pre.preprocess()
 
         if pre.M0_ff_image is not None:

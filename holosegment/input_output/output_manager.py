@@ -3,8 +3,9 @@ import numpy as np
 from pathlib import Path
 import os
 from holosegment.utils.image_utils import normalize_to_uint8
+import holosegment.utils.json_utils as json_utils
 import imageio
-import holosegment.input_output.debug_renderer as debug_renderer
+import holosegment.input_output.output_renderer as output_renderer
 
 
 class OutputManager:
@@ -13,40 +14,37 @@ class OutputManager:
         output_folder,
         h5_path,
         schema,
-        debug_config=None,
+        cache_folder,
+        output_config=None
     ):
-        self.h5 = h5py.File(h5_path, "a")
-        self.schema = self._flatten_schema(schema)
+        self.h5_path = h5_path
+        self.schema = json_utils.flatten_schema(schema)
 
-        self.debug_dir = Path(os.path.join(output_folder, "debug"))
-        self.debug_dir.mkdir(exist_ok=True)
-        self.debug_config = debug_config or {}
+        self.output_dir = Path(output_folder)
+        self.output_dir.mkdir(exist_ok=True)
+        self.output_config = output_config or {}
+
+        self.cache_dir = Path(cache_folder)
 
         self.renderers = {
-            "image": debug_renderer.ImageRenderer(),
-            "mask": debug_renderer.ImageRenderer(),
-            "signal": debug_renderer.SignalRenderer(),
-            "video": debug_renderer.VideoRenderer(),
-            "optic_disc": debug_renderer.OpticDiscRenderer(),
-            "labeled_mask": debug_renderer.LabeledMaskRenderer()
+            "image": output_renderer.ImageRenderer(),
+            "mask": output_renderer.ImageRenderer(),
+            "signal": output_renderer.SignalRenderer(),
+            "video": output_renderer.VideoRenderer(),
+            "optic_disc": output_renderer.OpticDiscRenderer(),
+            "labeled_mask": output_renderer.LabeledMaskRenderer()
         }
 
-
-    def _flatten_schema(self, schema):
-        flat = {}
-
-        def walk(node, path=""):
-            for k, v in node.items():
-                new_path = os.path.join(path, k) if path else k
-                if isinstance(v, dict):
-                    walk(v, new_path)
-                else:
-                    flat[v] = new_path
-
-        walk(schema)
-        return flat
+    def save_cache(self, cache):
+        """Saves the entire cache to the H5 file"""
+        with h5py.File(self.cache_dir / "cache.h5", "w") as h5_cache:
+            for key in cache:
+                if key in h5_cache:
+                    del h5_cache[key]
+                h5_cache.create_dataset(key, data=cache[key])
 
     def save_h5(self, key, cache):
+        """Saves a value from the cache to the H5 file based on the provided schema."""
         if key not in self.schema:
             return
 
@@ -54,20 +52,22 @@ class OutputManager:
 
         path = path.replace("\\", "/")  # Ensure consistent path format
 
-        if path in self.h5:
-            del self.h5[path]
+        with h5py.File(self.h5_path, "a") as h5:
+            if path in h5:
+                del h5[path]
 
-        value = cache.get(key)
-        self.h5.create_dataset(path, data=value)
+            value = cache.get(key)
+            h5.create_dataset(path, data=value)
 
-    def debug_cache(self, step_name, key, cache, type=None):
-        if key not in self.debug_config or key not in cache:
+    def output_cache(self, step_name, key, cache, type=None):
+        """Outputs a value from the cache for debugging purposes based on the provided output configuration."""
+        if key not in self.output_config or key not in cache:
             return
         
         if type is None:
-            type = self.debug_config[key]
+            type = self.output_config[key]
 
-        step_dir = self.debug_dir / step_name
+        step_dir = self.output_dir / step_name
         step_dir.mkdir(exist_ok=True)
 
         path = step_dir / f"{key}.png"
@@ -76,23 +76,21 @@ class OutputManager:
         if renderer:
             renderer.render(key, cache, path)
 
-    def debug(self, step_name, filename, value, type=None):
+    def output(self, step_name, filename, value, type=None, options=None):
+        """Outputs a value manually for debugging purposes based on the provided output configuration."""
         if type is None:
-            Warning(f"No debug type specified for key '{step_name}', skipping debug output.")
+            Warning(f"No output type specified for key '{step_name}', skipping debug output.")
             return
 
-        step_dir = self.debug_dir / step_name
+        step_dir = self.output_dir / step_name
         step_dir.mkdir(exist_ok=True)
 
         path = step_dir / f"{filename}.png"
         renderer = self.renderers.get(type)
 
         if renderer:
-            renderer.render("value", {"value": value}, path)
+            renderer.render("value", {"value": value}, path, options=options)
 
     def save(self, step_name, key, cache):
         self.save_h5(key, cache)
-        self.debug_cache(step_name, key, cache)
-
-    def close(self):
-        self.h5.close()
+        self.output_cache(step_name, key, cache)

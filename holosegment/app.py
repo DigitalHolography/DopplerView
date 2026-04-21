@@ -54,8 +54,8 @@ def init_session():
     if "pipeline" not in st.session_state:
         model_registry = ModelRegistryConfig(Path("models.yaml"))
         h5_schema = json.load(open("h5_schema.json"))
-        debug_config = json.load(open("debug_config.json"))
-        st.session_state.pipeline = Pipeline(model_registry=model_registry, h5_schema=h5_schema, debug_config=debug_config)
+        output_config = json.load(open("output_config.json"))
+        st.session_state.pipeline = Pipeline(model_registry=model_registry, h5_schema=h5_schema, output_config=output_config)
 
     if "input_folder" not in st.session_state:
         st.session_state.input_folder = None
@@ -97,77 +97,94 @@ if st.button("Browse Folder"):
         st.warning("Please select a folder path.")
     else:
         st.session_state.pipeline.load_input(selected_path)
+        st.session_state.input_folder = selected_path
         st.success("Folder loaded.")
-
-
-st.subheader("Pipeline Steps")
-
-pipeline = st.session_state.pipeline
-all_steps = pipeline.get_step_names()
-
-if "ui_steps_initialized" not in st.session_state:
-    for step in all_steps:
-        st.session_state[f"ui_{step}"] = True
-    st.session_state.selected_targets = list(all_steps)
-    st.session_state.ui_steps_initialized = True
 
 
 def on_step_toggle(step):
     pipeline = st.session_state.pipeline
+
+    if not st.session_state[f"ui_{step}"]:
+        downstream = pipeline.get_downstream_steps(step)
+        for s in downstream:
+            st.session_state[f"ui_{s}"] = False
 
     selected = [
         s for s in pipeline.get_step_names()
         if st.session_state[f"ui_{s}"]
     ]
 
-    if step in selected:
-        resolved = pipeline.resolve_execution_graph(selected)
+    pipeline.set_targets(selected)
+    steps_to_run = pipeline.engine.steps_to_run
+    for s in pipeline.get_step_names():
+        st.session_state[f"ui_{s}"] = s in steps_to_run
 
-        for s in pipeline.get_step_names():
-            st.session_state[f"ui_{s}"] = s in resolved
-    else:
-        downstream = pipeline.get_downstream_steps(step)
-        for s in downstream:
-            st.session_state[f"ui_{s}"] = False
+    # if step in selected:
+    #     resolved = pipeline.resolve_execution_graph(selected)
 
-    st.session_state.selected_targets = [
-        s for s in pipeline.get_step_names()
-        if st.session_state[f"ui_{s}"]
-    ]
+    #     for s in pipeline.get_step_names():
+    #         st.session_state[f"ui_{s}"] = s in resolved
+    # else:
 
 
-for step in all_steps:
-    st.checkbox(
-        step,
-        key=f"ui_{step}",
-        on_change=on_step_toggle,
-        args=(step,)
-    )
+    # st.session_state.selected_targets = [
+    #     s for s in pipeline.get_step_names()
+    #     if st.session_state[f"ui_{s}"]
+    # ]
 
 
-if st.button("Run Pipeline"):
+if st.session_state.input_folder is not None:
+    st.subheader("Pipeline Steps")
 
     pipeline = st.session_state.pipeline
+    all_steps = pipeline.get_step_names()
 
-    if pipeline is None:
-        st.warning("Load a folder first.")
-    else:
-        pipeline.run(
-            targets=st.session_state.selected_targets
+    if "ui_steps_initialized" not in st.session_state:
+        for step in all_steps:
+            st.session_state[f"ui_{step}"] = True
+        st.session_state.selected_targets = list(all_steps)
+        st.session_state.ui_steps_initialized = True
+
+    for step in all_steps:
+        # Color code steps based on cache status: green if cached, yellow if not cached
+        # The last checked step is targeted for execution, so it is yellow.
+        if pipeline.is_cached(step):
+            label = f"🟢 {step}"
+        else:
+            label = f"🟡 {step}"
+        st.checkbox(
+            label,
+            key=f"ui_{step}",
+            on_change=on_step_toggle,
+            args=(step,)
         )
 
-        st.session_state.image = pipeline.ctx.get("M0_ff_image")
-        st.session_state.artery_mask = pipeline.ctx.get("retinal_artery_mask")
-        st.session_state.vein_mask = pipeline.ctx.get("retinal_vein_mask")
 
-        st.success("Pipeline completed.")
+    if st.button("Run Pipeline"):
+
+        pipeline = st.session_state.pipeline
+
+        if pipeline is None:
+            st.warning("Load a folder first.")
+        else:
+            pipeline.run(
+                targets=st.session_state.selected_targets
+            )
+
+            st.session_state.image = pipeline.ctx.get("M0_ff_image")
+
+            print("Pipeline execution completed.")
+
+            st.success("Pipeline completed.")
+
+            st.rerun()
 
 
 if st.session_state.image is not None:
     display_img = overlay_masks(
         st.session_state.image,
-        st.session_state.artery_mask,
-        st.session_state.vein_mask,
+        pipeline.ctx.get("retinal_artery_mask"),
+        pipeline.ctx.get("retinal_vein_mask")
     )
 
     st.image(display_img)

@@ -4,27 +4,34 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 class DebugRenderer:
-    def render(self, key, cache, path):
+    def render(self, key, cache, path, options=None):
         raise NotImplementedError
     
 class ImageRenderer(DebugRenderer):
-    def render(self, key, cache, path):
+    def render(self, key, cache, path, options=None):
         imageio.imwrite(path, normalize_to_uint8(cache.get(key)))
 
 class SignalRenderer(DebugRenderer):
-    def render(self, key, cache, path):
+    def render(self, key, cache, path, options=None):
         plt.figure()
-        plt.plot(cache.get(key))
         plt.title(key)
+        if options and options.get("multiple_signals"):
+            legend = options.get("legend", [])
+            for i, signal in enumerate(cache.get(key)):
+                plt.plot(signal, label=legend[i] if i < len(legend) else "")
+            if legend:
+                plt.legend()
+        else:
+            plt.plot(cache.get(key))
         plt.savefig(path)
         plt.close()
 
 class VideoRenderer(DebugRenderer):
-    def render(self, key, cache, path):
+    def render(self, key, cache, path, options=None):
         save_numpy_as_avi(cache.get(key), path.with_suffix(".avi"))
 
 class OpticDiscRenderer(DebugRenderer):
-    def render(self, key, cache, path):
+    def render(self, key, cache, path, options=None):
         image = cache.get("M0_ff_image")
         center = cache.get("optic_disc_center")
         axes = cache.get("optic_disc_axes")
@@ -59,6 +66,6 @@ class OpticDiscRenderer(DebugRenderer):
         plt.close()
 
 class LabeledMaskRenderer(DebugRenderer):
-    def render(self, key, cache, path):
+    def render(self, key, cache, path, options=None):
         save_labeled_branches(cache.get(key), path)
         plt.close()
