@@ -120,20 +120,6 @@ def on_step_toggle(step):
     for s in pipeline.get_step_names():
         st.session_state[f"ui_{s}"] = s in steps_to_run
 
-    # if step in selected:
-    #     resolved = pipeline.resolve_execution_graph(selected)
-
-    #     for s in pipeline.get_step_names():
-    #         st.session_state[f"ui_{s}"] = s in resolved
-    # else:
-
-
-    # st.session_state.selected_targets = [
-    #     s for s in pipeline.get_step_names()
-    #     if st.session_state[f"ui_{s}"]
-    # ]
-
-
 if st.session_state.input_folder is not None:
     st.subheader("Pipeline Steps")
 
