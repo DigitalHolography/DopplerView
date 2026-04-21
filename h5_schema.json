@@ -1,16 +1,11 @@
 {
     "segmentation": {
         "Retina": {
-            "binary": {
-                "vessel_mask": "retinal_vessel_mask",
-                "labeled_vessels": "labeled_vessels",
-                "vessel_segmentation_logits": "vessel_segmentation_logits",
-                "branch_signals": "branch_signals"
-            },
-            "av": {
-                "artery_mask": "retinal_artery_mask",
-                "vein_mask": "retinal_vein_mask"
-            }
+            "vessel_mask": "retinal_vessel_mask",
+            "labeled_vessels": "labeled_vessels",
+            "vessel_segmentation_logits": "vessel_segmentation_logits",
+            "artery_mask": "retinal_artery_mask",
+            "vein_mask": "retinal_vein_mask"
         },
         "Choroid": {
             "binary": {
@@ -26,10 +21,16 @@
             "axes": "optic_disc_axes"
         }
     },
+    "waveform": {
+        "Retina": {
+            "M0_vessel_branch": "branch_signals"
+        },
+        "Choroid": {}
+    },
     "analysis": {
         "retinal_velocity_array": "retinal_vessel_velocity",
         "retinal_artery_velocity_signal": "retinal_artery_velocity_signal",
-        "retinal_vein_velocity_signal" : "retinal_vein_velocity_signal",
+        "retinal_vein_velocity_signal": "retinal_vein_velocity_signal",
         "velocity_map_avg": "velocity_map_avg",
         "fRMS_avg": "fRMS_avg",
         "fRMS_bkg_avg": "fRMS_bkg_avg",
