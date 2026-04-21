@@ -48,7 +48,7 @@ class PreArteryMaskStep(BaseStep):
         beat_period = pulse_analysis.compute_idx0(signals_n, sampling_frequency)
         corrected_signals = np.zeros_like(signals_n)
         for i, signal in enumerate(signals_n):
-            corrected_signals[i, :] = pulse_analysis.correct_branch_signal_with_heartbeat(signal, beat_period, k=2)
+            corrected_signals[i, :] = pulse_analysis.correct_branch_signal_with_heartbeat(signal, beat_period, k=10)
         ctx.cache["corrected_signals"] = corrected_signals
         for i in range(1, labeled_vessels.max() + 1):
             ctx.output_manager.output("pulse_analysis", f"branch_{i}_corrected", (signals_n[i - 1, :], corrected_signals[i - 1, :]), "signal", options={"multiple_signals": True, "legend": ["Original Signal", "Corrected Signal"]})

@@ -33,7 +33,6 @@ def get_beats(signal, sys_idx, target_len=None):
     Returns
     -------
     beats : (n_beats, target_len)
-    median_beat : (target_len,)
     """
     
     sys_idx = np.asarray(sys_idx)
@@ -86,14 +85,14 @@ def fill_with_beat(beat, start_offset, end_offset, length):
     pseudo_signal[-(end_offset % l):] = beat[:(end_offset % l)]
     return pseudo_signal
 
-def get_pseudo_signal(median_beat, peaks, length):
+def get_pseudo_signal(beat, peaks, length):
     """
     Create a pseudo beat by repeating the average beat and aligning it with the peaks.
     """
-    x_old = np.linspace(0, 1, len(median_beat))
-    pseudo_signal = fill_with_beat(median_beat, int(peaks[0]), length - int(peaks[-1]), length)
+    x_old = np.linspace(0, 1, len(beat))
+    pseudo_signal = fill_with_beat(beat, int(peaks[0]), length - int(peaks[-1]), length)
 
-    f = interp1d(x_old, median_beat, kind='linear', fill_value="extrapolate")
+    f = interp1d(x_old, beat, kind='linear', fill_value="extrapolate")
     for i in range(len(peaks) - 1):
         pseudo_signal[peaks[i]:peaks[i + 1]] = f(np.linspace(0, 1, peaks[i + 1] - peaks[i]))
         
@@ -163,9 +162,9 @@ def correct_branch_signal_with_heartbeat(signal, beat_period, k=2):
     signal_length = len(signal)
     peaks = get_peaks(signal, beat_period)
     beats = get_beats(signal, peaks, target_len=signal_length)
-    median_beat = np.nanmedian(beats, axis=0)
+    average_beat = np.nanmean(beats, axis=0)
 
-    pseudo_signal = get_pseudo_signal(median_beat, peaks, signal_length)
+    pseudo_signal = get_pseudo_signal(average_beat, peaks, signal_length)
     corrected_signal = correct_signal(signal, pseudo_signal, k=k)
     return corrected_signal
 
