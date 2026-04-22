@@ -40,7 +40,7 @@ class MainWindow:
         self.root.title("Holosegment")
 
         self._minimal_title_font: tkfont.Font | None = None
-        self.minimal_input_path_var = tk.StringVar(value="No input selected")
+        self.input_folder = tk.StringVar(value="No input selected")
 
         # --- pipeline init ---
         config_path = Path("config")
@@ -183,7 +183,7 @@ class MainWindow:
 
         self.minimal_input_path_label = tk.Label(
             container,
-            textvariable=self.minimal_input_path_var,
+            textvariable=self.input_folder,
             bg=self._bg_color,
             fg=self._muted_fg,
             justify="center",
@@ -196,11 +196,65 @@ class MainWindow:
         frame = self.advanced_view
 
         # Buttons
-        self.btn_load = ttk.Button(self.advanced_view, text="Load Folder", command=self.load_folder)
+        self.btn_load = ttk.Button(frame, text="Load Folder", command=self.load_folder)
         self.btn_load.pack(pady=5)
 
-        self.btn_run = ttk.Button(self.advanced_view, text="Run Pipeline", command=self.run_pipeline)
-        self.btn_run.pack(pady=5)
+        self.minimal_input_path_label = tk.Label(
+            frame,
+            textvariable=self.input_folder,
+            bg=self._bg_color,
+            fg=self._muted_fg,
+            justify="center",
+            wraplength=420,
+        ).pack(pady=5)
+
+        # Model selection
+         # --- Model selection frame ---
+        self.models_frame = tk.LabelFrame(frame, text="Models")
+        self.models_frame.pack(fill="x", padx=5, pady=5)
+
+        ctx = self.pipeline.ctx
+        mm = ctx.model_manager
+
+        # Helper to create one dropdown
+        def create_model_selector(parent, label_text, task_name):
+            tk.Label(parent, text=label_text).pack(anchor="w")
+
+            values = mm.get_model_name_list_for_task(task_name)
+            var = tk.StringVar(value=values[0] if values else "")
+
+            combo = ttk.Combobox(parent, textvariable=var, values=values, state="readonly")
+            combo.pack(fill="x", pady=2)
+
+            def on_change(event=None):
+                ctx.change_model_for_task(task_name, var.get())
+
+            combo.bind("<<ComboboxSelected>>", on_change)
+
+            # Initialize state (like Streamlit does implicitly)
+            if values:
+                ctx.change_model_for_task(task_name, var.get())
+
+            return var, combo
+
+        # Create the three selectors
+        self.binary_model_var, self.binary_model_combo = create_model_selector(
+            self.models_frame,
+            "Binary vessel segmentation model",
+            "retinal_vessel_segmentation"
+        )
+
+        self.av_model_var, self.av_model_combo = create_model_selector(
+            self.models_frame,
+            "Artery/Vein segmentation model",
+            "retinal_artery_vein_segmentation"
+        )
+
+        self.optic_disc_model_var, self.optic_disc_model_combo = create_model_selector(
+            self.models_frame,
+            "Optic disc detection model",
+            "optic_disc_detection"
+        )
 
         # Step list (checkboxes)
         self.step_vars = {}
@@ -223,6 +277,9 @@ class MainWindow:
 
             self.step_vars[step] = var
             self.step_checkboxes[step] = cb
+
+        self.btn_run = ttk.Button(self.advanced_view, text="Run Pipeline", command=self.run_pipeline)
+        self.btn_run.pack(pady=5)
     
         # Image display
         self.image_label = tk.Label(self.advanced_view)
@@ -314,17 +371,21 @@ class MainWindow:
 
             cb.config(selectcolor=color)
 
+    def load_input(self, folder):
+        self.input_folder.set(folder)
+        self.pipeline.load_input(Path(folder))
+
     def load_folder(self):
         folder = filedialog.askdirectory()
         if folder:
-            self.pipeline.load_input(Path(folder))
+            self.load_input(folder)
 
     def get_selected_steps(self):
         return [step for step, var in self.step_vars.items() if var.get()]
 
     def on_drop(self, event):
         path = event.data.strip("{}")  # windows fix
-        self.pipeline.load_input(Path(path))
+        self.load_input(path)
 
     def run_full_pipeline(self):
         # full pipeline
