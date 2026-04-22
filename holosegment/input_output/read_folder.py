@@ -3,12 +3,13 @@ Read a holodoppler folder
 """
 
 import os
+import glob
 import shutil
 from pathlib import Path
 
 class HolodopplerFolder:
     def __init__(self, directory):
-        self.directory = directory
+        self.directory = Path(directory)
         self.eyeflow_config = None
         self.holodoppler_config = None
         self.output_folder = None
@@ -18,14 +19,14 @@ class HolodopplerFolder:
         self.read()
 
     def get_EF_config(self):
-        json_path = os.path.join(self.directory, "eyeflow", "json")
+        json_path = self.directory / "eyeflow" / "json"
         if not os.path.exists(json_path) or not os.path.isdir(json_path):
             os.makedirs(json_path)
         json_files = [f for f in os.listdir(json_path) if f.endswith(".json")]
         if len(json_files) == 0:
-            config_file = shutil.copy("DefaultEyeflowParams.json", os.path.join(json_path, "input_EF_params.json"))
+            config_file = shutil.copy("DefaultEyeflowParams.json", json_path / "input_EF_params.json")
         else:
-            config_file = os.path.join(json_path, json_files[0])
+            config_file = json_path / json_files[0]
         return config_file
 
     def get_HD_config(self):
@@ -33,7 +34,7 @@ class HolodopplerFolder:
         json_files = [f for f in os.listdir(self.directory) if f.endswith(".json")]
         if len(json_files) == 0:
             raise FileNotFoundError(f"No JSON configuration file found in {self.directory}")
-        json_path = os.path.join(self.directory, config_name) if config_name in json_files else os.path.join(self.directory, json_files[0])
+        json_path = self.directory / config_name if config_name in json_files else self.directory / json_files[0]
         if not os.path.exists(json_path):
             raise FileNotFoundError(f"Holodoppler config file not found: {json_path}")
         return json_path
@@ -57,20 +58,20 @@ class HolodopplerFolder:
         """
         Creates a new output folder with an incremented index if it already exists.
         """
-        holosegment_folder = os.path.join(self.directory, "holosegment")
+        holosegment_folder = self.directory / "holosegment"
         if not os.path.exists(holosegment_folder):
             os.makedirs(holosegment_folder)
         
         former_output_folder, index = self._select_highest_subdirectory(holosegment_folder)
         if former_output_folder is None:
             return None, -1
-        return os.path.join(holosegment_folder, f"output_{index}"), index
-    
+        return holosegment_folder / f"output_{index}", index
+
     def create_output_folder(self):
         _, index = self.get_output_folder()
-        new_output_folder = os.path.join(self.directory, "holosegment", f"output_{index + 1}")
-        debug_folder = os.path.join(new_output_folder)
-        # input_folder = os.path.join(new_output_folder, "h5")
+        new_output_folder = self.directory / "holosegment" / f"output_{index + 1}"
+        debug_folder = new_output_folder
+        # input_folder = new_output_folder / "h5"
         os.makedirs(debug_folder, exist_ok=True)
         # os.makedirs(input_folder, exist_ok=True)
         
@@ -78,26 +79,28 @@ class HolodopplerFolder:
         return new_output_folder
     
     def get_cache_folder(self):
-        self.cache_folder = os.path.join(self.directory, "holosegment", "cache")
+        self.cache_folder = self.directory / "holosegment" / "cache"
         os.makedirs(self.cache_folder, exist_ok=True)
         return self.cache_folder
     
     def get_input_folder(self):
-        self.raw_folder = os.path.join(self.directory, "raw")
+        self.raw_folder = self.directory / "raw"
         if not os.path.exists(self.raw_folder):
             raise FileNotFoundError(f"Raw folder not found in {self.directory}")
         return self.raw_folder
     
     def find_input_file(self):
-        raw_input_filename = self.directory.name + "_raw.h5"
-        if os.path.exists(os.path.join(self.raw_folder, raw_input_filename)):
-            return os.path.join(self.raw_folder, raw_input_filename)
-        
+        output_files = glob.glob(os.path.join(self.raw_folder, "*output.h5"))
+        raw_files = glob.glob(os.path.join(self.raw_folder, "*raw.h5"))
+        if output_files:
+            return Path(output_files[0])
+        if raw_files:
+            return Path(raw_files[0])
         # If expected .h5 file is not found, take the first .h5 file found
         input_files = [f for f in os.listdir(self.raw_folder) if f.endswith(".h5")]
         if len(input_files) == 0:
             raise FileNotFoundError(f"No HDF5 file found in {self.raw_folder}.")
-        return os.path.join(self.raw_folder, input_files[0])
+        return self.raw_folder / input_files[0]
 
     def read(self):
         self.raw_folder = self.get_input_folder()
