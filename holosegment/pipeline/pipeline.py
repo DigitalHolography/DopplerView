@@ -175,6 +175,8 @@ class Pipeline:
         return self.engine.execution_order
     
     def is_cached(self, step_name):
+        if self.ctx.cache == {}:
+            return False  # Cache not loaded, treat as not cached
         step = self.engine.steps[step_name]
         return self.engine._should_run(step, self.ctx) == False
     
