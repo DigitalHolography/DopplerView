@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 
 [project]
-name = "holosegment"
+name = "dopplerview"
 version = "0.2.0"
 description = "CLI and Streamlit application for artery/vein segmentation from Doppler holograms"
 authors = [{ name = "Marius Dubosc" }]
@@ -32,9 +32,9 @@ dependencies = [
 
 
 [project.scripts]
-holosegment = "holosegment.cli:main"
+dopplerview = "dopplerview.cli:main"
 
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["holosegment*"]
+include = ["dopplerview*"]
