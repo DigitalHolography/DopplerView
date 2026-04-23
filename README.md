@@ -1,8 +1,6 @@
-# HoloSegment
+# DopplerView
 
-Modular artery/vein segmentation pipeline for Doppler holography retinal imaging.
-
-HoloSegment processes Doppler hologram data acquired with **Holodoppler systems** and performs deterministic, reproducible artery/vein segmentation using a DAG-based pipeline and a configurable model registry.
+DopplerView is a deep-learning tool for image enhancement, vascular segmentation, and topology inference that processes HoloDoppler results into vascular maps and analysis-ready inputs for EyeFlow, using a DAG-based pipeline and a configurable model registry.
 
 The project provides:
 
@@ -10,92 +8,50 @@ The project provides:
 * Automatic dependency resolution and selective recomputation
 * A model registry with HuggingFace integration
 * CLI execution
-* A Streamlit-based GUI
+* A Streamlit-based GUI, for dynamic debugging
+* A tkinter-based App used for deployement, with minimal and advanced UI
 
 ---
 
 # Overview
 
-HoloSegment operates on **Holodoppler acquisition folders**, not single `.holo` files.
+DopplerView operates on **Holodoppler acquisition folders**.
 
 The pipeline processes spectral moments derived from Doppler holograms and performs:
 
-1. **Folder loading**
 
-   * Reads Holodoppler folder structure
-   * Loads configuration files
-   * Initializes runtime context
+1. **Preprocessing**
 
-2. **Moment extraction**
+   * Image normalization, flat-field correction and optional registration.
 
-   * Loads spectral moments (e.g., M0 full-field image)
+2. **Optic disc detection**
 
-3. **Preprocessing**
+   * Using model publicly available on [huggingface](https://huggingface.co/DigitalHolography/EyeFlow_OpticDiscDetector).
 
-   * Image normalization
-   * Optional registration
-   * Preparation for model inference
+3. **Binary vessel segmentation**
 
-4. **Optic disc detection**
+   * Deep learning–based vessel mask extraction, of retinal and choroidal vessels.
+   * Using model publicly available on [huggingface](https://huggingface.co/collections/DigitalHolography/doppler-retinal-vessel-segmentation), trained with M0 images available on [huggingface](https://huggingface.co/datasets/DigitalHolography/HoloDopplerSegISBI).
 
-5. **Binary vessel segmentation**
+4. **Pulse analysis**
 
-   * Deep learning–based vessel mask extraction
+   * Computation of diastolic/systolic frames and temporal correlation map using the arterial signal obtained with the pre-classified arteries, following the strategy described in [Dubosc, Marius, et al. "Improving segmentation of retinal arteries and veins using cardiac signal in doppler holograms." arXiv preprint arXiv:2511.14654 (2025).](https://arxiv.org/abs/2511.14654)
 
-6. **Pulse analysis**
+5. **Artery/vein semantic segmentation**
 
-   * Temporal signal analysis using vessel masks
+   * Following the strategy described in [the same paper](https://arxiv.org/abs/2511.14654).
+   * Using models publicly available on [huggingface](https://huggingface.co/collections/DigitalHolography/doppler-retinal-vessel-segmentation). The different models used in the pipelines are indicated in [models.yaml](config/models.yaml).
+   * The dataset used for training is publicly available on [huggingface](https://huggingface.co/datasets/DigitalHolography/HoloDopplerSegISBI), with the M0 images and temporal cues already computed.
 
-7. **Artery/vein semantic segmentation**
+6. **Estimation of the velicity in the retinal vessels**
 
-   * Classification of vessels into arteries and veins
+   * Using the forward scattering model described in [Fischer, Yann, et al. "Retinal arterial blood flow measured by real-time Doppler holography at 33,000 frames per second." 2024 16th Biomedical Engineering International Conference (BMEiCON). IEEE, 2024.](https://ieeexplore.ieee.org/abstract/document/10896274)
+
+7. **ArterialWaveformAnalysisStep**
+
+   * Per-beat signal analysis
 
 The entire workflow is implemented as a **Directed Acyclic Graph (DAG)** with automatic dependency resolution and fingerprint-based cache validation.
-
----
-
-# Key Features
-
-## Deterministic Execution
-
-Each pipeline step computes a unique fingerprint based on:
-
-* Relevant configuration
-* Input data
-
-If configuration or inputs change, only the necessary steps are recomputed.
-
----
-
-## Modular Step System
-
-Each step:
-
-* Declares required inputs
-* Declares produced outputs
-* Runs only when dependencies are satisfied
-
-The DAG engine guarantees:
-
-* No cyclic dependencies
-* No duplicate output producers
-* Stable execution order
-
----
-
-## Model Registry
-
-Models are defined declaratively in a YAML registry and:
-
-* Downloaded automatically from HuggingFace
-* Version-controlled via repository revision
-* Loaded lazily
-* Switchable per task at runtime
-
-Supported formats:
-
-* PyTorch (`.pt`)
-* ONNX (`.onnx`)
 
 ---
 
@@ -104,7 +60,7 @@ Supported formats:
 Clone the repository:
 
 ```bash
-git clone https://github.com/your-org/holosegment.git
+git clone https://github.com/your-org/DopplerView.git
 ```
 
 Create and activate a virtual environment:
@@ -118,30 +74,55 @@ Install in editable mode:
 
 ```bash
 pip install -e .
+pip install -r requirements.txt
 ```
 
 ---
 
 # Usage
 
+Doppler view runs using a [HoloDoppler](https://github.com/DigitalHolography/HoloDopplerPython/tree/main) acquisition folder, with the following structure :
+
+```
+measure_id.holo
+measure_id/
+└── measure_id_HD/
+    ├── raw/
+    │   └── measure_id_HD_output.h5    # The .h5 file used as input
+    ├── json/
+    │   └── parameters.json            # The rendering parameters
+    ├── mp4/
+    └── ...
+```
+
+https://github.com/DigitalHolography/HoloDopplerPython/tree/main
+
 ## CLI
 
 The CLI runs the full pipeline on a Holodoppler acquisition folder.
 
 ```bash
-holosegment /path/to/holodoppler_folder --config config.json -v
+dopplerview /path/to/holodoppler_folder --config config.json -v
 ```
 
 ### Arguments
 
-* `holodoppler_folder` : Path to Holodoppler folder
-* `--config` : Eyeflow configuration JSON file (optional)
-* `--verbose` : Enable debug mode (save intermediate outputs)
+* `-h, --help`            show this help message and exit
+* `-v, --verbose`         Enable verbose output
+*  `-c CONFIG, --config CONFIG`
+                        Path to JSON configuration file
+*  `-b, --batch`           Process multiple folders. Folders are either listed in a text file (one     
+                        folder path per line) or provided as subfolders of the specified path.      
+*  `-t TARGETS [TARGETS ...], --targets TARGETS [TARGETS ...]`
+                        List of target steps to run
+*  `-d, --debug`           Enable debug mode. In this mode, steps outputs are read from the .h5, and   
+                        only targeted steps are re-run. This is useful for debugging specific       
+                        steps without having to re-run the entire pipeline.
 
 ### Example
 
 ```bash
-holosegment ./data/patient_01 \
+dopplerview ./data/patient_01 \
     --config ./configs/default.json \
     -v
 ```
@@ -151,7 +132,7 @@ holosegment ./data/patient_01 \
 Launch the graphical interface:
 
 ```bash
-streamlit run holosegment/app.py
+streamlit run dopplerview/app.py
 ```
 
 The GUI allows you to:
@@ -162,22 +143,21 @@ The GUI allows you to:
 * Overlay vessel and AV segmentation masks
 * Run the full pipeline interactively
 
----
-
 # Project Structure
 
 ```
-holosegment/
+DopplerView/
 │
-├── holosegment/
+├── dopplerview/
 │   ├── pipeline/          # DAG engine, steps, context
 │   ├── models/            # Registry, manager, wrappers
 │   ├── input_output/      # Folder reading & output handling
 │   ├── utils/
+│   │   └── ...
+│   ├── app.py             # Streamlit GUI
+│   ├── cli.py/            # Command-line script
 │   └── ...
 │
-├── app.py                 # Streamlit GUI
-├── cli.py                 # Command-line script
 ├── README.md
 ├── WORKFLOW.md            # Architecture documentation
 ├── CONTRIBUTING.md        # Developer guide
@@ -206,7 +186,24 @@ See `WORKFLOW.md` for details on how configuration impacts execution.
 
 # Output
 
-Each pipeline run creates a dedicated output folder.
+The first execution of DopplerView creates a folder named `measure_id_DV` in the parent directory of the input `measure_id_HD`folder, with following structure :
+```
+measure.holo
+measure/
+├── measure_HD/
+└── measure_DV/
+   ├── output/                            # Output folders used for debuging
+    │   ├── output_0
+    │   └── ...
+    ├── json/
+    │   └── doppler_view_params.json      # The pipeline configuration
+    ├── h5/
+    │   └── measure_id_DV.h5              # The .h5 output
+    └── cache
+        └── cache.h5                      # The cache used for debugging
+```
+
+ Each pipeline run overwites the results in the .h5 file
 
 Depending on debug mode, it may include:
 

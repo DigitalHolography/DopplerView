@@ -1,8 +1,8 @@
 # CONTRIBUTING.md
 
-# Contributing to HoloSegment
+## Contributing to DopplerView
 
-Thank you for contributing to **HoloSegment**.
+Thank you for contributing to **DopplerView**.
 
 This document explains how to:
 
@@ -12,13 +12,13 @@ This document explains how to:
 * Understand execution & caching behavior
 * Respect reproducibility guarantees
 
-This is a developer-focused document.
+This is a developer-focused document. To understand the system design, execution guarantees and architectural principles, read [`WORKFLOW.md`](WORKFLOW.md).
 
 ---
 
-# 1. Architecture Overview
+## 1. Architecture Overview
 
-HoloSegment is built around three core components:
+DopplerView is built around three core components:
 
 1. **Model Registry + Model Manager**
 2. **Pipeline (DAG-based execution engine)**
@@ -40,9 +40,9 @@ Context (shared state)
 
 ---
 
-# 2. The Execution Model
+## 2. The Execution Model
 
-## 2.1 Context
+### 2.1 Context
 
 `Context` is the central execution container.
 
@@ -55,12 +55,12 @@ It stores:
 * Step fingerprints
 * Output manager
 
-### Access patterns
+#### Access patterns
 
 ```python
 ctx.get("key")
 ctx.set("key", value)
-ctx.require("key")  # raises if missing
+ctx.require("key")  ## raises if missing
 ctx.has("key")
 ```
 
@@ -71,7 +71,7 @@ No hidden side effects.
 
 ---
 
-## 2.2 DAG-Based Pipeline
+### 2.2 DAG-Based Pipeline
 
 The pipeline is executed by `DAGEngine`.
 
@@ -97,7 +97,7 @@ Execution uses:
 
 ---
 
-## 2.3 Caching & Fingerprinting
+### 2.3 Caching & Fingerprinting
 
 Each step implements:
 
@@ -128,17 +128,17 @@ This guarantees:
 
 ---
 
-# 3. Adding a New Pipeline Step
+## 3. Adding a New Pipeline Step
 
-## 3.1 Create the Step Class
+### 3.1 Create the Step Class
 
 Steps must inherit from:
 
 ```python
-from holosegment.pipeline.step import BaseStep
+from dopplerview.pipeline.step import BaseStep
 ```
 
-### Minimal Example
+#### Minimal Example
 
 ```python
 class MyNewStep(BaseStep):
@@ -158,9 +158,9 @@ class MyNewStep(BaseStep):
 
 ---
 
-## 3.2 Rules for Steps
+### 3.2 Rules for Steps
 
-### 1. Unique name
+#### 1. Unique name
 
 Every step must have a unique `name`.
 
@@ -168,7 +168,7 @@ If duplicated → DAG construction fails.
 
 ---
 
-### 2. No side effects
+#### 2. No side effects
 
 Steps must:
 
@@ -178,7 +178,7 @@ Steps must:
 
 ---
 
-### 3. Always declare correct dependencies
+#### 3. Always declare correct dependencies
 
 If your step reads:
 
@@ -200,7 +200,7 @@ If you forget this:
 
 ---
 
-### 4. Produce declared outputs only
+#### 4. Produce declared outputs only
 
 If your step sets:
 
@@ -216,7 +216,7 @@ produces = ["segmentation"]
 
 ---
 
-## 3.3 Optional: Custom Fingerprinting
+### 3.3 Optional: Custom Fingerprinting
 
 By default, fingerprint hashes:
 
@@ -236,7 +236,7 @@ This prevents unnecessary invalidation.
 
 ---
 
-## 3.4 Registering the Step in the Pipeline
+### 3.4 Registering the Step in the Pipeline
 
 After creating your step:
 
@@ -264,7 +264,7 @@ DAGEngine will:
 
 ---
 
-## 3.5 Nested Steps
+### 3.5 Nested Steps
 
 If your logic contains multiple atomic operations, use:
 
@@ -285,7 +285,7 @@ Use them to group logically related operations.
 
 ---
 
-# 4. Model Registry
+## 4. Model Registry
 
 Models are defined in a YAML file loaded by:
 
@@ -309,9 +309,9 @@ iternet5_vesselness:
 
 ---
 
-# 5. Adding a New Model
+## 5. Adding a New Model
 
-## 5.1 Step 1 — Upload Model
+### 5.1 Step 1 — Upload Model
 
 Upload model weights to:
 
@@ -325,7 +325,7 @@ hf_hub_download(...)
 
 ---
 
-## 5.2 Step 2 — Add YAML Entry
+### 5.2 Step 2 — Add YAML Entry
 
 In the registry YAML file, add:
 
@@ -345,7 +345,7 @@ If your model needs new format, input normalization method, input channels or ou
 
 ---
 
-## 5.3 Step 3 — That’s It
+### 5.3 Step 3 — That’s It
 
 No code modification required.
 
@@ -357,7 +357,7 @@ The registry automatically:
 
 ---
 
-# 6. Model Selection & Task Binding
+## 6. Model Selection & Task Binding
 
 Each task has a default model:
 
@@ -387,7 +387,7 @@ Models are:
 
 ---
 
-# 7. Model Formats
+## 7. Model Formats
 
 Supported formats:
 
@@ -404,7 +404,7 @@ ModelManager.build_model_wrapper()
 
 ---
 
-# 8. Partial Pipeline Execution
+## 8. Partial Pipeline Execution
 
 You can run only part of the pipeline:
 
@@ -419,7 +419,7 @@ DAGEngine will:
 
 ---
 
-# 9. Output Management
+## 9. Output Management
 
 `Context.create_output_folder()` initializes:
 
@@ -441,39 +441,39 @@ Keep I/O isolated from core logic when possible.
 
 ---
 
-# 10. Design Principles
+## 10. Design Principles
 
 When contributing, respect:
 
-### Determinism
+#### Determinism
 
 Same inputs + same config → same outputs.
 
-### No Hidden State
+#### No Hidden State
 
 Everything flows through `Context`.
 
-### Declarative Dependencies
+#### Declarative Dependencies
 
 All step dependencies must be declared.
 
-### Reproducibility
+#### Reproducibility
 
 Fingerprinting must remain stable.
 
 ---
 
-# 11. Common Mistakes
+## 11. Common Mistakes
 
-❌ Forgetting to declare a required key
-❌ Producing the same key in two steps
-❌ Modifying context without declaring `produces`
-❌ Using external mutable global state
-❌ Using random seeds without fixing them
+- ❌ Forgetting to declare a required key
+- ❌ Producing the same key in two steps
+- ❌ Modifying context without declaring `produces`
+- ❌ Using external mutable global state
+- ❌ Using random seeds without fixing them
 
 ---
 
-# 12. Recommended Development Workflow
+## 12. Recommended Development Workflow
 
 1. Create new step
 2. Add it to pipeline
@@ -485,7 +485,7 @@ Fingerprinting must remain stable.
 
 ---
 
-# 13. Testing Checklist
+## 13. Testing Checklist
 
 When adding a step or model:
 
@@ -497,14 +497,3 @@ When adding a step or model:
 * [ ] Model loads correctly
 * [ ] Output folder structure preserved
 
----
-
-# 14. Architectural Guarantees
-
-HoloSegment guarantees:
-
-* Deterministic execution order
-* Automatic dependency resolution
-* Cache-aware recomputation
-* Model version traceability
-* Modular extension
