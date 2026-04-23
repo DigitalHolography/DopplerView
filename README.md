@@ -201,17 +201,8 @@ measure/
         └── cache.h5                      # The cache used for debugging
 ```
 
- Each pipeline run overwites the results in the .h5 file
-
-Depending on debug mode, it may include:
-
-* Vessel masks
-* Artery/vein masks
-* Pulse analysis results
-* Intermediate artifacts
-* Metadata and step fingerprints
-
-Outputs are isolated per run to ensure reproducibility.
+Each pipeline run overwites the results in the .h5 file. The content of the .h5 file is decided by the [h5_schema.json](config/h5_schema.json).
+It also creates an `output` folder, with the content produced by each step, depending on the [output_config.json](config/output_config.json).
 
 ---
 
