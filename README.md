@@ -81,7 +81,7 @@ pip install -r requirements.txt
 
 # Usage
 
-Doppler view runs using a [HoloDoppler](https://github.com/DigitalHolography/HoloDopplerPython/tree/main) acquisition folder, with the following structure :
+DopplerView runs using a [HoloDoppler](https://github.com/DigitalHolography/HoloDopplerPython/tree/main) acquisition folder, with the following structure :
 
 ```
 measure_id.holo
@@ -94,8 +94,6 @@ measure_id/
     ├── mp4/
     └── ...
 ```
-
-https://github.com/DigitalHolography/HoloDopplerPython/tree/main
 
 ## CLI
 
