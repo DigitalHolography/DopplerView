@@ -67,7 +67,7 @@ Create and activate a virtual environment:
 
 ```bash
 python -m venv .venv
-source .venv/Script/activate
+source .venv/Scripts/activate
 ```
 
 Install in editable mode:
