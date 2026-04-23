@@ -1,18 +1,62 @@
 # WORKFLOW.md
 
-# HoloSegment Workflow
+## DopplerView Workflow
 
-This document describes the internal architecture and execution model of the HoloSegment segmentation pipeline.
+This document describes the internal architecture and execution model of the DopplerView segmentation pipeline.
 
 It focuses on system design, execution guarantees, and architectural principles.
 
-For instructions on extending the system, see `CONTRIBUTING.md`.
+For instructions on extending the system, see [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+---
+## Key Features
+
+### Deterministic Execution
+
+Each pipeline step computes a unique fingerprint based on:
+
+* Relevant configuration
+* Input data
+
+If configuration or inputs change, only the necessary steps are recomputed.
 
 ---
 
-# 1. High-Level Architecture
+### Modular Step System
 
-HoloSegment is built around a modular, deterministic pipeline designed for:
+Each step:
+
+* Declares required inputs
+* Declares produced outputs
+* Runs only when dependencies are satisfied
+
+The DAG engine guarantees:
+
+* No cyclic dependencies
+* No duplicate output producers
+* Stable execution order
+
+---
+
+### Model Registry
+
+Models are defined declaratively in a YAML registry and:
+
+* Downloaded automatically from HuggingFace
+* Version-controlled via repository revision
+* Loaded lazily
+* Switchable per task at runtime
+
+Supported formats:
+
+* PyTorch (`.pt`)
+* ONNX (`.onnx`)
+
+---
+
+## 1. High-Level Architecture
+
+DopplerView is built around a modular, deterministic pipeline designed for:
 
 * Reproducibility
 * Partial recomputation
@@ -45,7 +89,7 @@ The system ensures that computation is:
 
 ---
 
-# 2. Pipeline as a Directed Acyclic Graph (DAG)
+## 2. Pipeline as a Directed Acyclic Graph (DAG)
 
 The segmentation workflow is implemented as a **Directed Acyclic Graph (DAG)**.
 
@@ -55,7 +99,7 @@ Edges represent **data dependencies** between steps.
 
 A step depends on another step if it requires a key produced by that step.
 
-## 2.1 Step Declaration
+### 2.1 Step Declaration
 
 Each step declares:
 
@@ -78,7 +122,7 @@ class ExampleStep(BaseStep):
 
 ---
 
-## 2.2 Dependency Resolution
+### 2.2 Dependency Resolution
 
 During initialization:
 
@@ -99,7 +143,7 @@ If a cycle is detected, execution fails immediately.
 
 ---
 
-# 3. Execution Engine
+## 3. Execution Engine
 
 The `DAGEngine` is responsible for:
 
@@ -111,7 +155,7 @@ The `DAGEngine` is responsible for:
 
 ---
 
-## 3.1 Full Execution
+### 3.1 Full Execution
 
 If no targets are specified:
 
@@ -119,7 +163,7 @@ If no targets are specified:
 
 ---
 
-## 3.2 Partial Execution
+### 3.2 Partial Execution
 
 The pipeline supports partial execution.
 
@@ -143,7 +187,7 @@ This enables:
 
 ---
 
-# 4. Context: Shared Runtime State
+## 4. Context: Shared Runtime State
 
 The `Context` object is the shared runtime container.
 
@@ -163,7 +207,7 @@ No global state is used.
 
 ---
 
-## 4.1 Runtime Cache
+### 4.1 Runtime Cache
 
 Intermediate results are stored in:
 
@@ -186,7 +230,7 @@ This design ensures:
 
 ---
 
-# 5. Deterministic Fingerprinting
+## 5. Deterministic Fingerprinting
 
 Each step has a deterministic fingerprint.
 
@@ -212,7 +256,7 @@ fingerprint = hash(
 
 ---
 
-## 5.1 Cache Validation Logic
+### 5.1 Cache Validation Logic
 
 Before running a step:
 
@@ -232,7 +276,7 @@ This guarantees:
 
 ---
 
-# 6. Model Registry and Model Lifecycle
+## 6. Model Registry and Model Lifecycle
 
 Models are registered declaratively in a YAML configuration file.
 
@@ -249,7 +293,7 @@ Each model defines:
 
 ---
 
-## 6.1 ModelManager Responsibilities
+### 6.1 ModelManager Responsibilities
 
 The `ModelManager`:
 
@@ -267,7 +311,7 @@ Models are:
 
 ---
 
-## 6.2 Task-Based Model Selection
+### 6.2 Task-Based Model Selection
 
 Each task is associated with a default model.
 
@@ -287,7 +331,7 @@ This abstraction enables:
 
 ---
 
-# 7. Output Management
+## 7. Output Management
 
 Output generation is managed through `OutputManager`.
 
@@ -301,11 +345,11 @@ The output system:
 
 ---
 
-# 8. Architectural Guarantees
+## 8. Architectural Guarantees
 
-HoloSegment guarantees:
+DopplerView guarantees:
 
-### Deterministic Execution
+#### Deterministic Execution
 
 Given identical:
 
@@ -317,7 +361,7 @@ The output is deterministic.
 
 ---
 
-### Explicit Dependencies
+#### Explicit Dependencies
 
 All data dependencies are declared.
 
@@ -325,25 +369,25 @@ No hidden coupling exists between steps.
 
 ---
 
-### Automatic Invalidation
+#### Automatic Invalidation
 
 Configuration changes trigger only necessary recomputation.
 
 ---
 
-### No Global State
+#### No Global State
 
 All runtime information flows through `Context`.
 
 ---
 
-### Model Version Traceability
+#### Model Version Traceability
 
 Model revision and source repository are explicitly defined in the registry.
 
 ---
 
-# 9. Design Principles
+## 9. Design Principles
 
 The system is built around:
 
@@ -361,9 +405,9 @@ The DAG abstraction ensures the pipeline remains:
 
 ---
 
-# 10. Summary
+## 10. Summary
 
-The HoloSegment workflow is:
+The DopplerView workflow is:
 
 * A deterministic DAG-based pipeline
 * With fingerprint-based selective execution
@@ -371,4 +415,4 @@ The HoloSegment workflow is:
 * Using a shared runtime context
 * Designed for reproducibility and extensibility
 
-For instructions on extending the pipeline or adding models, refer to `CONTRIBUTING.md`.
+For instructions on extending the pipeline or adding models, refer to [`CONTRIBUTING.md`](CONTRIBUTING.md).
