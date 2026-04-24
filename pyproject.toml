@@ -2,21 +2,20 @@
 requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
-
 [project]
 name = "dopplerview"
 version = "0.2.0"
-description = "CLI and Streamlit application for artery/vein segmentation from Doppler holograms"
+description = "Doppler holography vessel segmentation pipeline"
 authors = [{ name = "Marius Dubosc" }]
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 
 dependencies = [
     "numpy",
     "scipy",
     "scikit-image",
     "scikit-learn",
-    "opencv-python",
+    "opencv-python-headless",
     "matplotlib",
     "pillow",
     "pandas",
@@ -26,15 +25,22 @@ dependencies = [
     "onnxruntime",
     "torch",
     "torchvision",
-    "streamlit",
     "typer",
+    "huggingface_hub",
 ]
 
+[project.optional-dependencies]
+ui = [
+    "streamlit",
+    "tkinterdnd2",
+]
 
 [project.scripts]
 dopplerview = "dopplerview.cli:main"
 
-
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["dopplerview*"]
+
+[tool.setuptools.package-data]
+dopplerview = ["resources/*.json", "resources/*.yaml"]

@@ -16,7 +16,7 @@ from dopplerview.pipeline.steps.optic_disc import OpticDiscDetectionStep
 from dopplerview.pipeline.steps.vessel_segmentation import RetinalVesselSegmentationStep, ChoroidalVesselSegmentationStep
 from dopplerview.pipeline.steps.pulse_analysis import PulseAnalysisStep
 from dopplerview.pipeline.steps.av_segmentation import AVSegmentationStep
-from dopplerview.input_output.read_folder import HolodopplerFolder
+from dopplerview.input_output.read_folder import DopplerViewFolder, HolodopplerFolder
 from dopplerview.pipeline.steps.vessel_velocity_estimator import VesselVelocityEstimatorStep
 from dopplerview.pipeline.steps.arterial_waveform_analysis import ArterialWaveformAnalysisStep
 
@@ -31,14 +31,17 @@ class Context:
     """
 
     def __init__(self, dopplerview_config, model_manager, h5_schema, output_config=None, debug_mode=False):
-        self.dopplerview_config = dopplerview_config
+        self.dopplerview_config = self.load_config(dopplerview_config) if dopplerview_config else None
         self.model_manager = model_manager
         self.model_instances = {}
         self.metadata = {
             "step_hashes": {}
         }
         self.input_folder_list = []
-        self.folder = None
+
+        self.measure_folder = None  # The measure folder containing the HD folder and the DV folder, set when loading input
+        self.HD_folder = None       # The Holodoppler folder containing the raw input data, set when loading input
+        self.DV_folder = None       # The DopplerView folder containing the output and cache, set when running the pipeline
         self.output_manager = None
         self.h5_schema = h5_schema
         self.output_config = output_config or {}
@@ -46,16 +49,15 @@ class Context:
 
         # Runtime data storage
         self.cache: Dict[str, Any] = {}
-
-    def load_dopplerview_config(self, config_path):
-        dopplerview_config = json.load(open(config_path))
-        self.dopplerview_config = json_utils.remove_spaces_from_keys(dopplerview_config) 
-        print(f"Using Eyeflow config file: {config_path}")
+        
+    def load_config(self, config_path):
+        config = json.load(open(config_path))
+        return json_utils.remove_spaces_from_keys(config)
 
     def _read_h5_into_cache(self):
-        if self.folder is None:
-            raise RuntimeError("Input folder not loaded. Cannot read cache file.")
-        cache_folder = self.folder.directory / "dopplerview" / "cache"
+        if self.DV_folder is None:
+            raise RuntimeError("DopplerView folder not initialized. Cannot read from H5 cache.")
+        cache_folder = self.DV_folder.cache_folder
         h5_cache_path = cache_folder / "cache.h5"
 
         if not h5_cache_path.exists():
@@ -69,24 +71,31 @@ class Context:
 
     def load_input_folder(self, folder_path):
         self.clear()  # Clear cache before loading new input
+        self.measure_folder = folder_path
 
-        self.folder = HolodopplerFolder(folder_path)
-        self.cache["input_file"] = self.folder.input_file
-        self.holodoppler_config = json.load(open(self.folder.holodoppler_config))
-        print(f"[Pipeline] Using Holodoppler config file: {self.folder.holodoppler_config}")
-
-        if self.dopplerview_config is None:
-            # Load configs from folder if not already loaded
-            self.load_dopplerview_config(self.folder.dopplerview_config)
+        self.HD_folder = HolodopplerFolder(folder_path)
+        self.cache["input_file"] = self.HD_folder.input_file
+        self.holodoppler_config = self.load_config(self.HD_folder.holodoppler_config)
+        print(f"[Pipeline] Using Holodoppler config file: {self.HD_folder.holodoppler_config}")
 
         if self.debug_mode:
             self._read_h5_into_cache()
 
-        reader = Moments(self.folder.input_file)
+        reader = Moments(self.HD_folder.input_file)
         reader.read_moments()
         self.cache["moment0"] = reader.M0
         self.cache["moment1"] = reader.M1
         self.cache["moment2"] = reader.M2
+
+    def load_DV_folder(self):
+        if not self.measure_folder:
+            raise RuntimeError("Measure folder not set. Cannot load DopplerView folder.")
+        self.DV_folder = DopplerViewFolder(self.measure_folder)
+        
+        if self.dopplerview_config is None:
+            # Load configs from folder if not already loaded
+            print(f"[Pipeline] Using DopplerView config file: {self.DV_folder.dopplerview_config}")
+            self.dopplerview_config = self.load_config(self.DV_folder.dopplerview_config)
 
     def load_folder_list(self, folder_list_path):
         if not os.path.exists(folder_list_path):
@@ -119,10 +128,9 @@ class Context:
         return self.get_model(model_name)
     
     def create_output_folder(self):
-        if self.folder is None:
-            raise RuntimeError("Input folder not loaded. Cannot determine output folder.")
+        self.load_DV_folder()
         # Create a new output folder with an incremented index
-        self.output_manager = OutputManager(output_folder=self.folder.create_output_folder(), h5_path=self.folder.input_file, schema=self.h5_schema, output_config=self.output_config, cache_folder=self.folder.get_cache_folder())
+        self.output_manager = OutputManager(dopplerview_folder=self.DV_folder, schema=self.h5_schema, dopplerview_config=self.dopplerview_config, output_config=self.output_config)
 
     def set(self, key: str, value: Any):
         self.cache[key] = value
@@ -150,9 +158,9 @@ class Pipeline:
             debug_mode: If True, steps outputs are read from the .h5, and only targeted steps are re-run. This is useful for debugging specific steps without having to re-run the entire pipeline.
         """
         self.ctx = Context(
-            dopplerview_config=dopplerview_config,
             model_manager=ModelManager(model_registry, cache_dir=model_cache_dir),
             h5_schema=h5_schema,
+            dopplerview_config=dopplerview_config,
             output_config=output_config,
             debug_mode=debug_mode
         )
@@ -218,6 +226,8 @@ class Pipeline:
         self.engine.run(self.ctx, targets)
         elapsed = time.time() - start_time
         print(f"[Pipeline] Finished execution in {elapsed:.2f}s")
+
+
 
         # If in debug mode, save the entire cache to the H5 file after execution
         if self.ctx.debug_mode:

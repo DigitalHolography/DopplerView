@@ -1,3 +1,5 @@
+import json
+
 import h5py
 import numpy as np
 from pathlib import Path
@@ -12,33 +14,27 @@ import re
 class OutputManager:
     def __init__(
         self,
-        output_folder,
-        h5_path,
+        dopplerview_folder,
         schema,
-        cache_folder,
+        dopplerview_config,
         output_config=None
     ):
-        h5_path = Path(h5_path)
-        filename = h5_path.stem
-        parent = h5_path.parent
-        print(f"{filename=}, {parent=}")
-        template = re.compile(r"^(.*)_(output|raw)$")
-        match = template.match(filename)
-        if match:
-            self.h5_path = parent / f"{match.group(1)}_DV.h5"
-        else:
-            self.h5_path = parent / f"{filename}_DV.h5"
+        self.h5_path = dopplerview_folder.get_h5_path()
+        # Create an empty H5 file if it doesn't exist, and overwrite it if it does (to ensure a clean slate for each run)
         with h5py.File(self.h5_path, "w") as h5:
-            pass  # Just create an empty H5 file or overwrite if it exists
+            pass
 
         self.schema = json_utils.flatten_schema(schema)
 
-        self.output_dir = Path(output_folder)
-        self.output_dir.mkdir(exist_ok=True)
+        self.dopplerview_folder = dopplerview_folder
+        self.output_dir = dopplerview_folder.get_output_folder()[0] # Get the output folder if it exists, otherwise it will be created when needed
         self.output_config = output_config or {}
 
-        self.cache_dir = Path(cache_folder)
+        self.dopplerview_config = dopplerview_config
+
+        self.cache_dir = dopplerview_folder.get_cache_folder()
         self.cache_dir.mkdir(exist_ok=True)
+
         self.renderers = {
             "image": output_renderer.ImageRenderer(),
             "mask": output_renderer.ImageRenderer(),
@@ -72,6 +68,19 @@ class OutputManager:
             value = cache.get(key)
             h5.create_dataset(path, data=value)
 
+    def write_dopplerview_config(self):
+        if self.output_dir is None:
+            raise ValueError("Output directory is not set. Cannot write DopplerView configuration.")
+        
+        config_path = self.output_dir / self.dopplerview_folder.config_name
+        with open(config_path, "w") as f:
+            json.dump(self.dopplerview_config, f)
+
+    def ensure_output_folder(self):
+        if self.output_dir is None:
+            self.output_dir = self.dopplerview_folder.create_output_folder()
+            self.write_dopplerview_config()
+
     def output_cache(self, step_name, key, cache, type=None):
         """Outputs a value from the cache for debugging purposes based on the provided output configuration."""
         if key not in self.output_config or key not in cache:
@@ -79,30 +88,42 @@ class OutputManager:
         
         if type is None:
             type = self.output_config[key]
+        renderer = self.renderers.get(type)
+
+        if renderer is None:
+            Warning(f"No renderer found for output type '{type}' of key '{key}', skipping output.")
+            return
+        
+        # Lasily create the output folder when we actually need to output something, to avoid creating empty output folders for runs that don't produce any outputs
+        self.ensure_output_folder()
 
         step_dir = self.output_dir / step_name
         step_dir.mkdir(exist_ok=True)
 
         path = step_dir / f"{key}.png"
-        renderer = self.renderers.get(type)
 
-        if renderer:
-            renderer.render(key, cache, path)
+        renderer.render(key, cache, path)
 
     def output(self, step_name, filename, value, type=None, options=None):
         """Outputs a value manually for debugging purposes based on the provided output configuration."""
         if type is None:
             Warning(f"No output type specified for key '{step_name}', skipping debug output.")
             return
+        
+        renderer = self.renderers.get(type)
+        if renderer is None:
+            Warning(f"No renderer found for output type '{type}' of key '{step_name}', skipping output.")
+            return
+
+        # Lasily create the output folder when we actually need to output something, to avoid creating empty output folders for runs that don't produce any outputs
+        self.ensure_output_folder()
 
         step_dir = self.output_dir / step_name
         step_dir.mkdir(exist_ok=True)
 
         path = step_dir / f"{filename}.png"
-        renderer = self.renderers.get(type)
 
-        if renderer:
-            renderer.render("value", {"value": value}, path, options=options)
+        renderer.render("value", {"value": value}, path, options=options)
 
     def save(self, step_name, key, cache):
         self.save_h5(key, cache)

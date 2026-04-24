@@ -2,6 +2,8 @@ import os
 from pathlib import Path
 import shutil
 import sys
+from importlib.resources import files
+
 
 
 def get_user_config_dir():
@@ -14,13 +16,16 @@ def get_user_config_dir():
     path.mkdir(parents=True, exist_ok=True)
     return path
 
-def get_resource_path(filename):
-    if hasattr(sys, "_MEIPASS"):
-        base = Path(sys._MEIPASS)
-    else:
-        base = Path(__file__).parent
+# def get_resource_path(filename):
+#     if hasattr(sys, "_MEIPASS"):
+#         base = Path(sys._MEIPASS)
+#     else:
+#         base = Path(__file__).parent
 
-    return base / "config" / filename
+#     return base / "config" / filename
+
+def get_resource_path(filename):
+    return files("dopplerview.resources") / filename
 
 def ensure_config_file(filename):
     user_dir = get_user_config_dir()
