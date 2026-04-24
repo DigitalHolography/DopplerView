@@ -427,7 +427,7 @@ def validate_peaks(sys_idx_list, min_distance):
     return sys_idx_list
 
 def get_effective_sampling_frequency(sampling_freq, stride):
-    return sampling_freq / stride * 1000.0
+    return sampling_freq / stride
 
 
 def find_systole_index(

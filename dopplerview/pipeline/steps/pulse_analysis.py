@@ -32,6 +32,8 @@ class PreArteryMaskStep(BaseStep):
 
         fs = ctx.holodoppler_config["sampling_freq"]
         stride = ctx.holodoppler_config["batch_stride"]
+        print(f"{fs=}, {stride=}")
+
 
         sampling_frequency = pulse_analysis.get_effective_sampling_frequency(fs, stride)
 
