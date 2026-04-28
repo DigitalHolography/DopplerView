@@ -1,11 +1,11 @@
 # CONTRIBUTING.md
 
-## Contributing to DopplerView
-
 Thank you for contributing to **DopplerView**.
 
 This document explains how to:
 
+* Create an executable
+* Create an installer
 * Add a new model to the registry
 * Add a new pipeline step
 * Modify the pipeline DAG
@@ -15,6 +15,41 @@ This document explains how to:
 This is a developer-focused document. To understand the system design, execution guarantees and architectural principles, read [`WORKFLOW.md`](WORKFLOW.md).
 
 ---
+# Make a new release
+
+## Create a new installer
+
+You must first [download InnoSetup](https://jrsoftware.org/isdl.php/Inno-Setup-Downloads), and add it to your PATH.
+
+Then, in the project root and **in your venv** (after `pip install -e .`), run 
+
+```bash
+python installer/build_installer
+```
+
+It first create *DopplerView.exe*, by running the command
+
+```bash
+python -m PyInstaller installer/DopplerView.spec
+```
+
+A custom hook was designed for scipy ; see [hook-scipy.py](installer/hook-scipy.py)
+
+You can find your installer in `dist/`, and the raw .exe in `dist/DopplerView`.
+
+## Release
+
+To make a new release :
+
+- Merge all features/bug fixes on dev. **Thoroughly test the branch**.
+- Merge dev in main with a pull-request
+- Create a tag : `git tag [new-version]` and push it ``git push origin tag <tag_name>``
+- [Create a new release](https://github.com/DigitalHolography/DopplerView/releases) with the new tag and the installer
+
+
+---
+
+# Contributing to DopplerView
 
 ## 1. Architecture Overview
 

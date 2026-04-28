@@ -1,5 +1,3 @@
-from unittest import signals
-
 from dopplerview.pipeline.step import BaseStep, NestedStep
 from dopplerview.segmentation import process_masks, pulse_analysis, signal_processing
 from dopplerview.utils.parallelization_utils import run_in_parallel

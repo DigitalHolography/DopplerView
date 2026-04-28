@@ -3,14 +3,13 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import filedialog, ttk
 from pathlib import Path
-import json
 
+from dopplerview.input_output import user_config
 import numpy as np
 import cv2
 from PIL import Image, ImageTk
 
 from dopplerview.pipeline.pipeline import Pipeline
-from dopplerview.models.registry import ModelRegistryConfig
 
 try:
     from tkinterdnd2 import DND_FILES, TkinterDnD
@@ -43,16 +42,16 @@ class MainWindow:
         self.input_folder = tk.StringVar(value="No input selected")
 
         # --- pipeline init ---
-        config_path = Path("config")
-        registry = ModelRegistryConfig(config_path / "models.yaml")
-        h5_schema = json.load(open(config_path / "h5_schema.json"))
-        output_config = json.load(open(config_path / "output_config.json"))
 
-        self.pipeline = Pipeline(
-            model_registry=registry,
-            h5_schema=h5_schema,
-            output_config=output_config
-        )
+        self.pipeline = Pipeline()
+
+        models_config = user_config.ensure_config_file("models.yaml")
+        self.pipeline.load_model_registry(models_config)
+        
+        h5_schema_config = user_config.ensure_config_file("h5_schema.json")
+        output_config = user_config.ensure_config_file("output_config.json")
+        self.pipeline.load_h5_schema(h5_schema_config)
+        self.pipeline.load_output_config(output_config)
 
         self.image_tk = None  # keep reference (IMPORTANT)
 
@@ -429,7 +428,7 @@ class MainWindow:
 
     def _resolve_logo_path(self) -> Path | None:
         for root in self._resource_roots():
-            candidate = root / "DopplerView_logo.png"
+            candidate = root / "DopplerView.ico"
             if candidate.is_file():
                 return candidate
         return None

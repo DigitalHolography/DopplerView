@@ -1,6 +1,8 @@
 from pathlib import Path
 import os
 import time
+from dopplerview.input_output import user_config
+from dopplerview.models.registry import ModelRegistryConfig
 import h5py
 import json
 from typing import Any, Dict
@@ -30,9 +32,9 @@ class Context:
         - services (models, output, etc.)
     """
 
-    def __init__(self, dopplerview_config, model_manager, h5_schema, output_config=None, debug_mode=False):
-        self.dopplerview_config = self.load_config(dopplerview_config) if dopplerview_config else None
-        self.model_manager = model_manager
+    def __init__(self, debug_mode=False):
+        self.eyeflow_config = None
+        self.model_manager = None
         self.model_instances = {}
         self.metadata = {
             "step_hashes": {}
@@ -43,16 +45,54 @@ class Context:
         self.HD_folder = None       # The Holodoppler folder containing the raw input data, set when loading input
         self.DV_folder = None       # The DopplerView folder containing the output and cache, set when running the pipeline
         self.output_manager = None
-        self.h5_schema = h5_schema
-        self.output_config = output_config or {}
+        self.h5_schema = None
+        self.output_config = None
         self.debug_mode = debug_mode
 
         # Runtime data storage
         self.cache: Dict[str, Any] = {}
+
+    def load_default_manager(self):
+        models_config = user_config.ensure_config_file("models.yaml")
+        print(f"[Pipeline] Loading model registry from {models_config}")
+        registry = ModelRegistryConfig(models_config)
+        self.model_manager = ModelManager(registry, cache_dir="~/.cache/dopplerview/models")
+
+    def load_manager(self, config_path):
+        print(f"[Pipeline] Loading model registry from {config_path}")
+        registry = ModelRegistryConfig(config_path)
+        self.model_manager = ModelManager(registry, cache_dir="~/.cache/dopplerview/models")
         
-    def load_config(self, config_path):
-        config = json.load(open(config_path))
-        return json_utils.remove_spaces_from_keys(config)
+    def load_default_h5_schema(self):
+        h5_schema_config = user_config.ensure_config_file("h5_schema.json")
+        print(f"[Pipeline] Loading default H5 schema from {h5_schema_config}")
+        self.h5_schema = json.load(open(h5_schema_config))
+
+    def load_h5_schema(self, config_path):
+        print(f"[Pipeline] Loading H5 schema from {config_path}")
+        self.h5_schema = json.load(open(config_path))
+
+    def load_default_output_config(self):
+        output_config = user_config.ensure_config_file("output_config.json")
+        print(f"[Pipeline] Loading default output config from {output_config}")
+        self.output_config = json.load(open(output_config))
+
+    def load_output_config(self, config_path):
+        print(f"[Pipeline] Loading output config from {config_path}")
+        self.output_config = json.load(open(config_path))
+
+    def ensure_config(self):
+        if self.model_manager is None:
+            self.load_default_manager()
+        if self.h5_schema is None:
+            self.load_default_h5_schema()
+        if self.output_config is None:
+            self.load_default_output_config()
+
+    def load_eyeflow_config(self, config_path):
+        eyeflow_config = json.load(open(config_path))
+        self.eyeflow_config = json_utils.remove_spaces_from_keys(eyeflow_config) 
+        print(f"Using Eyeflow config file: {config_path}")
 
     def _read_h5_into_cache(self):
         if self.DV_folder is None:
@@ -147,7 +187,7 @@ class Context:
         self.cache.clear()
 
 class Pipeline:
-    def __init__(self, model_registry, h5_schema, output_config=None, dopplerview_config=None, debug_mode=False, model_cache_dir="~/.cache/dopplerview/models"):
+    def __init__(self, debug_mode=False):
         """
         Initializes the pipeline with the given model registry and configuration.
         Args:
@@ -158,10 +198,6 @@ class Pipeline:
             debug_mode: If True, steps outputs are read from the .h5, and only targeted steps are re-run. This is useful for debugging specific steps without having to re-run the entire pipeline.
         """
         self.ctx = Context(
-            model_manager=ModelManager(model_registry, cache_dir=model_cache_dir),
-            h5_schema=h5_schema,
-            dopplerview_config=dopplerview_config,
-            output_config=output_config,
             debug_mode=debug_mode
         )
 
@@ -210,6 +246,15 @@ class Pipeline:
     def load_folder_list(self, folder_list_path):
         self.ctx.load_folder_list(folder_list_path)
 
+    def load_model_registry(self, config_path):
+        self.ctx.load_manager(config_path)
+    
+    def load_h5_schema(self, config_path):
+        self.ctx.load_h5_schema(config_path)
+
+    def load_output_config(self, config_path):
+        self.ctx.load_output_config(config_path)
+
     def set_targets(self, targets):
         self.engine.set_targets(targets)
 
@@ -219,6 +264,8 @@ class Pipeline:
         if self.ctx.dopplerview_config is None:
             raise RuntimeError("Configuration not loaded. Please load a configuration file before running the pipeline.")
         
+        self.ctx.ensure_config()
+
         self.ctx.create_output_folder()
         print(f"[Pipeline] Created output folder: {self.ctx.output_manager.output_dir}")
 

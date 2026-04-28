@@ -1,3 +1,4 @@
+from dopplerview.input_output import user_config
 import streamlit as st
 import numpy as np
 import cv2
@@ -7,7 +8,6 @@ from tkinter import filedialog
 import json
 
 from dopplerview.pipeline.pipeline import Pipeline
-from dopplerview.models.registry import ModelRegistryConfig
 
 def load_dopplerview_config():
     config_path = select_file()
@@ -52,11 +52,15 @@ def overlay_masks(image, artery_mask=None, vein_mask=None):
 
 def init_session():
     if "pipeline" not in st.session_state:
-        config_path = Path("config")
-        model_registry = ModelRegistryConfig(config_path / "models.yaml")
-        h5_schema = json.load(open(config_path /"h5_schema.json"))
-        output_config = json.load(open(config_path / "output_config.json"))
-        st.session_state.pipeline = Pipeline(model_registry=model_registry, h5_schema=h5_schema, output_config=output_config)
+        st.session_state.pipeline = Pipeline()
+
+        models_config = user_config.ensure_config_file("models.yaml")
+        st.session_state.pipeline.load_model_registry(models_config)
+        
+        h5_schema_config = user_config.ensure_config_file("h5_schema.json")
+        output_config = user_config.ensure_config_file("output_config.json")
+        st.session_state.pipeline.load_h5_schema(h5_schema_config)
+        st.session_state.pipeline.load_output_config(output_config)
 
     if "input_folder" not in st.session_state:
         st.session_state.input_folder = None

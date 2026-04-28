@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dopplerview"
-version = "0.2.0"
+version = "0.3.0"
 description = "Doppler holography vessel segmentation pipeline"
 authors = [{ name = "Marius Dubosc" }]
 readme = "README.md"
@@ -17,8 +17,9 @@ dependencies = [
     "scikit-learn",
     "opencv-python-headless",
     "matplotlib",
-    "pillow",
     "pandas",
+    "pillow",
+    "pyinstaller",
     "tqdm",
     "PyYAML",
     "h5py",
@@ -27,6 +28,10 @@ dependencies = [
     "torchvision",
     "typer",
     "huggingface_hub",
+<<<<<<< HEAD
+=======
+    "tkinterdnd2"
+>>>>>>> dev
 ]
 
 [project.optional-dependencies]

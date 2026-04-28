@@ -6,6 +6,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from dopplerview.input_output import user_config
 import numpy as np
 
 from dopplerview.pipeline.pipeline import Pipeline
@@ -68,14 +69,11 @@ def main():
     if not input_folder.exists():
         print(f"Error: holodoppler folder not found: {input_folder}", file=sys.stderr)
         sys.exit(1)
+    
+    pipeline = Pipeline(debug_mode=debug)
 
-
-    models_config = user_config.ensure_config_file("models.yaml")
-    h5_schema_config = user_config.ensure_config_file("h5_schema.json")
-    output_config = user_config.ensure_config_file("output_config.json")
-    registry = ModelRegistryConfig(models_config)
-    doppler_viewer_config = args.config or user_config.ensure_config_file("default_DV_params.json")
-    pipeline = Pipeline(registry, h5_schema=json.load(open(h5_schema_config)), output_config=json.load(open(output_config)), debug_mode=debug, dopplerview_config=doppler_viewer_config)
+    if args.config:
+        pipeline.load_eyeflow_config(args.config)
 
     targets = args.targets if args.targets else None
 
