@@ -8,7 +8,6 @@ from tkinter import filedialog
 import json
 
 from dopplerview.pipeline.pipeline import Pipeline
-from dopplerview.models.registry import ModelRegistryConfig
 
 def load_eyeflow_config():
     config_path = select_file()
@@ -62,7 +61,7 @@ def init_session():
         output_config = user_config.ensure_config_file("output_config.json")
         st.session_state.pipeline.load_h5_schema(h5_schema_config)
         st.session_state.pipeline.load_output_config(output_config)
-        
+
     if "input_folder" not in st.session_state:
         st.session_state.input_folder = None
 

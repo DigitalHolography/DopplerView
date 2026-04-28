@@ -27,14 +27,15 @@ def run_in_parallel(func, iterable, n_jobs=-1, chunking=True):
         indices = np.array_split(np.arange(len(iterable)), n_jobs)
         chunks = [[iterable[i] for i in idx] for idx in indices]
 
-        results = joblib.Parallel(n_jobs=n_jobs)(
+        # Use threading backend to avoid spawning a new .exe when using multiprocessing in a PyInstaller executable
+        results = joblib.Parallel(n_jobs=n_jobs, backend="threading")(
             joblib.delayed(_process_chunk)(chunk, func)
             for chunk in chunks
         )
 
         return np.concatenate(results, axis=0)
 
-    results = joblib.Parallel(n_jobs=n_jobs)(
+    results = joblib.Parallel(n_jobs=n_jobs, backend="threading")(
         joblib.delayed(func)(item) for item in iterable
     )
 
