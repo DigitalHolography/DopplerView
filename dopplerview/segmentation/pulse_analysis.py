@@ -2,9 +2,6 @@
 Pulse analysis module for analyzing temporal pulsatility in vessels
 """
 
-import signal
-from unittest import signals
-
 import numpy as np
 from scipy.signal import butter, filtfilt, find_peaks, savgol_filter
 from scipy.ndimage import uniform_filter1d, median_filter

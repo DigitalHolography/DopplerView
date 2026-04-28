@@ -1,9 +1,12 @@
+import dopplerview.fix_import
+import multiprocessing
+multiprocessing.freeze_support()
+
 import sys
 import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import filedialog, ttk
 from pathlib import Path
-import json
 
 from dopplerview.input_output import user_config
 import numpy as np
@@ -11,7 +14,6 @@ import cv2
 from PIL import Image, ImageTk
 
 from dopplerview.pipeline.pipeline import Pipeline
-from dopplerview.models.registry import ModelRegistryConfig
 
 try:
     from tkinterdnd2 import DND_FILES, TkinterDnD
@@ -24,6 +26,9 @@ try:
     import sv_ttk
 except ImportError:  #  optional dependency
     sv_ttk = None
+
+import os
+os.environ["SKIMAGE_NO_LAZY_IMPORTS"] = "1"
 
 def np_to_tk(img: np.ndarray):
     """Convert numpy image to Tkinter-compatible PhotoImage"""
