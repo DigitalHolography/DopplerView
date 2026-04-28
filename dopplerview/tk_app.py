@@ -428,7 +428,7 @@ class MainWindow:
 
     def _resolve_logo_path(self) -> Path | None:
         for root in self._resource_roots():
-            candidate = root / "DopplerView.ico"
+            candidate = root / "DopplerView.png"
             if candidate.is_file():
                 return candidate
         return None
