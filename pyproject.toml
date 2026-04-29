@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dopplerview"
-version = "0.3.0"
+version = "1.0.0"
 description = "Doppler holography vessel segmentation pipeline"
 authors = [{ name = "Marius Dubosc" }]
 readme = "README.md"
