@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.0
+
+* Interactive Tkinter GUI
+* Progress bar and real-time validation of steps
+
 ## 1.0.0
 
 * DAG-like pipeline with Preprocessing, Optic disc detection, Binary vessel segmentation, Pulse analysis, retinal Artery/vein segmentation, Velocity estimation and Arterial Waveform analysis
