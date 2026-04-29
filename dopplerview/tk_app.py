@@ -3,6 +3,8 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import filedialog, ttk
 from pathlib import Path
+import threading
+import queue
 
 from dopplerview.input_output import user_config
 import numpy as np
@@ -54,6 +56,8 @@ class MainWindow:
         self.pipeline.load_output_config(output_config)
 
         self.image_tk = None  # keep reference (IMPORTANT)
+
+        self.queue = queue.Queue()
 
         self._apply_theme()
         self._set_window_icon()
@@ -189,7 +193,11 @@ class MainWindow:
             wraplength=420,
         ).grid(row=3, column=0, pady=(0, 10))
 
-        self.btn_run = ttk.Button(container, text="Run Full Pipeline", command=self.run_full_pipeline).grid(row=4, column=0, pady=10)
+        self.btn_run_minimal = ttk.Button(container, text="Run Full Pipeline", command=self.run_full_pipeline)
+        self.btn_run_minimal.grid(row=4, column=0, pady=10)
+
+        self.progress_minimal = ttk.Progressbar(container, maximum=100)
+        self.progress_minimal.grid(row=5, column=0, sticky="ew", padx=10, pady=(0, 10))
 
     def _build_advanced_ui(self):
         frame = self.advanced_view
@@ -279,6 +287,9 @@ class MainWindow:
 
         self.btn_run = ttk.Button(self.advanced_view, text="Run Pipeline", command=self.run_pipeline)
         self.btn_run.pack(pady=5)
+
+        self.progress = ttk.Progressbar(self.advanced_view, maximum=100)
+        self.progress.pack()
     
         # Image display
         self.image_label = tk.Label(self.advanced_view)
@@ -341,6 +352,15 @@ class MainWindow:
             self.advanced_view.pack(fill="both", expand=True)
             self.root.geometry("900x700")
 
+    def update_step_color(self, step, state):
+        cb = self.step_checkboxes[step]
+        if state == "done" or state == "cached":
+            color =  "#26ac5c"
+        elif state == "running":
+            color = "#d7a61e"
+
+        cb.config(selectcolor=color)
+
     def update_step_display(self):
         pipeline = self.pipeline
 
@@ -349,7 +369,6 @@ class MainWindow:
 
         # Steps that will actually run
         pipeline.set_targets(selected)
-        steps_to_run = set(pipeline.engine.steps_to_run)
 
         for step, cb in self.step_checkboxes.items():
             is_checked = self.step_vars[step].get()
@@ -373,6 +392,7 @@ class MainWindow:
     def load_input(self, folder):
         self.input_folder.set(folder)
         self.pipeline.load_input(Path(folder))
+        self.update_step_display()
 
     def load_holo(self):
         file_path = filedialog.askopenfilename(filetypes=[("Holo files", "*.holo")], defaultextension=".holo")
@@ -393,30 +413,101 @@ class MainWindow:
 
     def run_full_pipeline(self):
         # full pipeline
-        self.pipeline.run(targets=None)
+        self.run_pipeline(steps=None)
 
-        img = self.pipeline.ctx.get("M0_ff_image")
-        art = self.pipeline.ctx.get("retinal_artery_mask")
-        vein = self.pipeline.ctx.get("retinal_vein_mask")
-
-        if img is not None:
-            overlay = self.overlay(img, art, vein)
-            self.display_image(overlay)
-
-    def run_pipeline(self):
+    def run_pipeline_with_steps(self):
         steps = self.get_selected_steps()
+        self.run_pipeline(steps=steps)
 
-        self.pipeline.run(targets=steps)
+    def run_pipeline(self, steps=None):
+        self.btn_run.config(state="disabled")
+        self.btn_run_minimal.config(state="disabled")
+        thread = threading.Thread(
+            target=self._run_pipeline_worker,
+            args=(steps,),
+            daemon=True
+        )
+        thread.start()
 
-        self.update_step_display()
+        self.root.after(100, self.check_queue)
 
-        img = self.pipeline.ctx.get("M0_ff_image")
-        art = self.pipeline.ctx.get("retinal_artery_mask")
-        vein = self.pipeline.ctx.get("retinal_vein_mask")
+    def _run_pipeline_worker(self, steps):
+        def callback(event, *args):
+            self.queue.put((event, args))
+        try:
+            self.pipeline.run(targets=steps, callback=callback)
 
-        if img is not None:
-            overlay = self.overlay(img, art, vein)
-            self.display_image(overlay)
+            img = self.pipeline.ctx.get("M0_ff_image")
+            art = self.pipeline.ctx.get("retinal_artery_mask")
+            vein = self.pipeline.ctx.get("retinal_vein_mask")
+
+            self.queue.put(("finished", (img, art, vein)))
+
+        except Exception as e:
+            self.queue.put(("error", str(e)))
+
+    # def check_queue(self):
+    #     try:
+    #         msg, data = self.queue.get_nowait()
+
+    #         if msg == "finished":
+    #             self.update_step_display()
+
+    #             img, art, vein = data
+
+    #             if img is not None:
+    #                 overlay = self.overlay(img, art, vein)
+    #                 self.display_image(overlay)
+
+    #         elif msg == "error":
+    #             print("Pipeline error:", data)
+
+    #         self.btn_run.config(state="enabled")
+            
+    #     except queue.Empty:
+    #         self.root.after(100, self.check_queue)
+
+    def check_queue(self):
+        try:
+            while True:
+                event, data = self.queue.get_nowait()
+
+                if event == "step_start":
+                    step_name, i, total = data
+                    progress = (i / total) * 100
+                    self.progress["value"] = progress
+                    self.progress_minimal["value"] = progress
+
+                    self.update_step_color(step_name, "running")
+
+                elif event == "step_done":
+                    step_name, elapsed = data
+                    self.update_step_color(step_name, "done")
+
+                elif event == "step_skipped":
+                    step_name = data[0]
+                    self.update_step_color(step_name, "cached")
+
+                elif event == "finished":
+                    self.progress["value"] = 100
+                    self.btn_run.config(state="enabled")
+
+                    self.progress_minimal["value"] = 100
+                    self.btn_run_minimal.config(state="enabled")
+
+                    img, art, vein = data
+
+                    if img is not None:
+                        overlay = self.overlay(img, art, vein)
+                        self.display_image(overlay)
+
+                elif event == "error":
+                    print("Error:", data)
+
+        except queue.Empty:
+            pass
+
+        self.root.after(100, self.check_queue)
 
     # -------------------
     # Logo
