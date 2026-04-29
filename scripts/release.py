@@ -7,7 +7,9 @@ import shutil
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT = PROJECT_ROOT / "pyproject.toml"
-BUILD_SCRIPT = PROJECT_ROOT / "scripts" / "build_installer.py"
+SCRIPT_DIR = PROJECT_ROOT / "scripts"
+BUILD_SCRIPT = SCRIPT_DIR / "build_installer.py"
+BUMPVERSION = SCRIPT_DIR / "bumpversion.cfg"
 
 
 # -------------------------
@@ -52,7 +54,7 @@ def check_tag_exists(version):
 # Version bump
 # -------------------------
 def bump_version(part):
-    run(["bump2version", part, "--config-file", "config/bumpversion.cfg"])
+    run(["bump2version", part, "--config-file", str(BUMPVERSION)])
 
 
 # -------------------------
