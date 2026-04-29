@@ -279,7 +279,7 @@ class Pipeline:
     def set_targets(self, targets):
         self.engine.set_targets(targets)
 
-    def run(self, targets=None):
+    def run(self, targets=None, callback=None):
         if not self.ctx.has("input_file"):
             raise RuntimeError("Input path not set. Please load input folder before running the pipeline.")
         if self.ctx.dopplerview_config is None:
@@ -291,7 +291,7 @@ class Pipeline:
         print(f"[Pipeline] Created output folder: {self.ctx.output_manager.output_dir}")
 
         start_time = time.time()
-        self.engine.run(self.ctx, targets)
+        self.engine.run(self.ctx, targets, callback=callback)
         elapsed = time.time() - start_time
         print(f"[Pipeline] Finished execution in {elapsed:.2f}s")
 
@@ -301,11 +301,11 @@ class Pipeline:
             self.ctx.output_manager.save_cache(self.ctx.cache)
         return self.ctx.cache
 
-    def run_batch(self, targets=None):
+    def run_batch(self, targets=None, callback=None):
         for folder in self.ctx.input_folder_list:
             try:
                 print(f"[Run Batch] Processing folder: {folder}")
                 self.load_input(folder)
-                self.run(targets=targets)
+                self.run(targets=targets, callback=callback)
             except Exception as e:
                 print(f"[Run Batch] Error processing folder {folder}: {e}")
