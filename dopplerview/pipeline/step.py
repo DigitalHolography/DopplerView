@@ -39,7 +39,7 @@ class BaseStep(ABC):
         Override in steps if needed.
         By default use entire config.
         """
-        return ctx.eyeflow_config
+        return ctx.dopplerview_config
 
     def _input_signature(self, ctx):
         sig = {}

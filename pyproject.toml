@@ -28,7 +28,10 @@ dependencies = [
     "torchvision",
     "typer",
     "huggingface_hub",
+<<<<<<< HEAD
+=======
     "tkinterdnd2"
+>>>>>>> dev
 ]
 
 [project.optional-dependencies]

@@ -9,7 +9,7 @@ import json
 
 from dopplerview.pipeline.pipeline import Pipeline
 
-def load_eyeflow_config():
+def load_dopplerview_config():
     config_path = select_file()
     if config_path is None or not Path(config_path).exists():
         st.warning("Please select a valid configuration file.")
@@ -85,9 +85,9 @@ optic_disc_model = st.selectbox("Selected optic disk detection model", options=s
 st.session_state.pipeline.ctx.change_model_for_task("optic_disc_detection", optic_disc_model)
 
 if st.button("Load config"):
-    config_path = load_eyeflow_config()
+    config_path = load_dopplerview_config()
     if config_path is not None:
-        st.session_state.pipeline.load_eyeflow_config(config_path)
+        st.session_state.pipeline.load_dopplerview_config(config_path)
         st.success("Config loaded.")
 
 # 1. BROWSER BUTTON

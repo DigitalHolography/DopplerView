@@ -84,7 +84,7 @@ Context (shared state)
 It stores:
 
 * Runtime artifacts (`ctx.cache`)
-* Configuration (`ctx.eyeflow_config`)
+* Configuration (`ctx.dopplerview_config`)
 * ModelManager
 * Loaded model instances (lazy)
 * Step fingerprints
@@ -263,7 +263,7 @@ If your step only depends on part of config:
 ```python
 def _relevant_config(self, ctx):
     return {
-        "threshold": ctx.eyeflow_config["threshold"]
+        "threshold": ctx.dopplerview_config["threshold"]
     }
 ```
 

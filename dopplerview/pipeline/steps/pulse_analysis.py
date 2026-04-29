@@ -21,24 +21,29 @@ class PreArteryMaskStep(BaseStep):
     name = "pre_artery_mask"
 
     def _relevant_config(self, ctx):
-        return {"fs": ctx.holodoppler_config["fs"]}
+        return {"sampling_freq": ctx.holodoppler_config["sampling_freq"]}
 
     def run(self, ctx):
         video = ctx.cache["M0_ff_video"]
         vessel_mask = ctx.cache["retinal_vessel_mask"]
         optic_disc_center = ctx.cache["optic_disc_center"]
 
-        fs = ctx.holodoppler_config["fs"]
+        fs = ctx.holodoppler_config["sampling_freq"]
         stride = ctx.holodoppler_config["batch_stride"]
+        print(f"    - Camera sampling frequency: {fs} Hz, batch stride: {stride}")
 
         sampling_frequency = pulse_analysis.get_effective_sampling_frequency(fs, stride)
+
+        print(f"    - Effective sampling frequency after accounting for batch stride: {sampling_frequency:.2f} Hz")
 
         # --- Step 1: Separate mask into branches ---
         labeled_vessels, _ = process_masks.get_labeled_vesselness(vessel_mask, *optic_disc_center)
         ctx.set("labeled_vessels", labeled_vessels)
 
         # --- Step 2: Compute mean temporal signal for each branch ---
+        # ctx.output_manager.output("pulse_analysis", "M0_ff_video", video, "video")
         signals = pulse_analysis.get_filtered_branch_signals(video, labeled_vessels, sampling_frequency)
+        ctx.output_manager.output("pulse_analysis", "labeled_vessels", labeled_vessels, "labeled_mask")
         signals_n = (signals - signals.mean(axis=1, keepdims=True)) / signals.std(axis=1, keepdims=True)
         ctx.cache["branch_signals"] = signals_n
 
@@ -64,7 +69,7 @@ class ComputeTemporalCuesStep(BaseStep):
     name = "temporal_cues"
 
     def _relevant_config(self, ctx):
-        return {"fs": ctx.holodoppler_config["fs"],
+        return {"sampling_freq": ctx.holodoppler_config["sampling_freq"],
                 "batch_stride": ctx.holodoppler_config["batch_stride"]}
 
     def run(self, ctx):
@@ -81,7 +86,7 @@ class ComputeTemporalCuesStep(BaseStep):
 
         # --- Filter pulses to remove high frequency noise ---
 
-        fs = ctx.holodoppler_config["fs"]
+        fs = ctx.holodoppler_config["sampling_freq"]
         stride = ctx.holodoppler_config["batch_stride"]
 
         sampling_frequency = pulse_analysis.get_effective_sampling_frequency(fs, stride)

@@ -11,9 +11,10 @@ import numpy as np
 
 from dopplerview.pipeline.pipeline import Pipeline
 from dopplerview.models.registry import ModelRegistryConfig
+import dopplerview.input_output.user_config as user_config
 
 
-def load_eyeflow_config(config_path):
+def load_dopplerview_config(config_path):
     """Load configuration from JSON file"""
     with open(config_path, 'r') as f:
         return json.load(f)
@@ -72,7 +73,7 @@ def main():
     pipeline = Pipeline(debug_mode=debug)
 
     if args.config:
-        pipeline.load_eyeflow_config(args.config)
+        pipeline.load_dopplerview_config(args.config)
 
     targets = args.targets if args.targets else None
 

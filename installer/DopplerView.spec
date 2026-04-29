@@ -92,6 +92,7 @@ a = Analysis(
     datas=datas + [
         (os.path.join(ROOT, "dopplerview", "resources"), "dopplerview/resources"),
         (os.path.join(ROOT, "DopplerView.ico"), "."),
+        (os.path.join(ROOT, "DopplerView.png"), "."),
     ],
     hiddenimports=hiddenimports,
     hookspath=[os.path.join(SPECPATH)],   # hooks are in installer/ alongside the spec

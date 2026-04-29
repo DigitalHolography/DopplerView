@@ -81,18 +81,18 @@ pip install -r requirements.txt
 
 # Usage
 
-Doppler view runs using a [HoloDoppler](https://github.com/DigitalHolography/HoloDopplerPython/tree/main) acquisition folder, with the following structure :
+DopplerView runs using a [HoloDoppler](https://github.com/DigitalHolography/HoloDopplerPython/tree/main) acquisition folder, with the following structure :
 
 ```
 measure_id.holo
 measure_id/
 └── measure_id_HD/
-    ├── raw/
-    │   └── measure_id_HD_output.h5    # The .h5 file used as input
     ├── json/
     │   └── parameters.json            # The rendering parameters
-    ├── mp4/
-    └── ...
+    ├── mp4/                           # Video of the rendered moments
+    ├── raw/
+    │   └── measure_id_HD_output.h5    # The .h5 file used as input
+    └── png/                           # Accumulated image of the moments
 ```
 
 ## Executable (InnoSetup + TKinter)
@@ -203,27 +203,18 @@ measure/
 ├── measure_HD/
 └── measure_DV/
    ├── output/                            # Output folders used for debuging
-    │   ├── output_0
-    │   └── ...
-    ├── json/
-    │   └── doppler_view_params.json      # The pipeline configuration
-    ├── h5/
-    │   └── measure_id_DV.h5              # The .h5 output
-    └── cache
-        └── cache.h5                      # The cache used for debugging
+   │   ├── output_0
+   │   └── ...
+   ├── config/
+   │   └── doppler_view_params.json      # The pipeline configuration
+   ├── h5/
+   │   └── measure_id_DV.h5              # The .h5 output
+   └── cache
+       └── cache.h5                      # The cache used for debugging
 ```
 
- Each pipeline run overwites the results in the .h5 file
-
-Depending on debug mode, it may include:
-
-* Vessel masks
-* Artery/vein masks
-* Pulse analysis results
-* Intermediate artifacts
-* Metadata and step fingerprints
-
-Outputs are isolated per run to ensure reproducibility.
+Each pipeline run overwites the results in the .h5 file. The content of the .h5 file is decided by the [h5_schema.json](config/h5_schema.json).
+It also creates an `output` folder, with the content produced by each step, depending on the [output_config.json](config/output_config.json).
 
 ---
 

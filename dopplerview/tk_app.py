@@ -177,7 +177,7 @@ class MainWindow:
             self.minimal_logo_label = ttk.Label(container, image=self._minimal_logo_image)
             self.minimal_logo_label.grid(row=1, column=0, pady=(0, 20))
 
-        self.btn_load = ttk.Button(container, text="Load Folder", command=self.load_folder)
+        self.btn_load = ttk.Button(container, text="Load .holo File", command=self.load_holo)
         self.btn_load.grid(row=2, column=0, pady=(0, 10))
 
         self.minimal_input_path_label = tk.Label(
@@ -373,6 +373,11 @@ class MainWindow:
     def load_input(self, folder):
         self.input_folder.set(folder)
         self.pipeline.load_input(Path(folder))
+
+    def load_holo(self):
+        file_path = filedialog.askopenfilename(filetypes=[("Holo files", "*.holo")], defaultextension=".holo")
+        if file_path:
+            self.load_input(file_path)
 
     def load_folder(self):
         folder = filedialog.askdirectory()

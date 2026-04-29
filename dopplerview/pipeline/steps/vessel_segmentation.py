@@ -20,7 +20,7 @@ class RetinalVesselSegmentationStep(VesselSegmentationStep):
     produces = {"retinal_vessel_mask", "vessel_segmentation_logits"}
 
     def _relevant_config(self, ctx):
-        params = ctx.eyeflow_config["Mask"]
+        params = ctx.dopplerview_config["Mask"]
         d = { "VesselSegmentationMethod": params["VesselSegmentationMethod"],
                  "DiaphragmRadius": params["DiaphragmRadius"],
                  "CropChoroidRadius": params["CropChoroidRadius"],
@@ -52,7 +52,7 @@ class RetinalVesselSegmentationStep(VesselSegmentationStep):
         image = ctx.require("M0_ff_image")
         optic_disc_center = ctx.require("optic_disc_center")
 
-        params = ctx.eyeflow_config["Mask"]
+        params = ctx.dopplerview_config["Mask"]
 
         clean_mask = clean_vessel_mask(
             raw_mask,
@@ -65,7 +65,7 @@ class RetinalVesselSegmentationStep(VesselSegmentationStep):
         return clean_mask
 
     def get_vessel_mask(self, ctx):
-        method = ctx.eyeflow_config.get("Mask", "").get("VesselSegmentationMethod", "AI")
+        method = ctx.dopplerview_config.get("Mask", "").get("VesselSegmentationMethod", "AI")
 
         if method == "AI":
             print("    - Use deep learning model for vessel segmentation.")
@@ -91,7 +91,7 @@ class ChoroidalVesselSegmentationStep(VesselSegmentationStep):
     produces = {"choroidal_vessel_mask"}
 
     def _relevant_config(self, ctx):
-        params = ctx.eyeflow_config["Mask"]
+        params = ctx.dopplerview_config["Mask"]
         d = {"DiaphragmRadius": params["DiaphragmRadius"]}
         return d
 
@@ -105,7 +105,7 @@ class ChoroidalVesselSegmentationStep(VesselSegmentationStep):
         return mask
     
     def clean_vessel_mask(self, raw_mask, ctx):
-        params = ctx.eyeflow_config["Mask"]
+        params = ctx.dopplerview_config["Mask"]
         center = ctx.require("optic_disc_center")
 
         diaphragm_radius = params["DiaphragmRadius"]

@@ -18,7 +18,7 @@ from dopplerview.pipeline.steps.optic_disc import OpticDiscDetectionStep
 from dopplerview.pipeline.steps.vessel_segmentation import RetinalVesselSegmentationStep, ChoroidalVesselSegmentationStep
 from dopplerview.pipeline.steps.pulse_analysis import PulseAnalysisStep
 from dopplerview.pipeline.steps.av_segmentation import AVSegmentationStep
-from dopplerview.input_output.read_folder import HolodopplerFolder
+from dopplerview.input_output.read_folder import DopplerViewFolder, HolodopplerFolder
 from dopplerview.pipeline.steps.vessel_velocity_estimator import VesselVelocityEstimatorStep
 from dopplerview.pipeline.steps.arterial_waveform_analysis import ArterialWaveformAnalysisStep
 
@@ -33,18 +33,22 @@ class Context:
     """
 
     def __init__(self, debug_mode=False):
-        self.eyeflow_config = None
         self.model_manager = None
         self.model_instances = {}
         self.metadata = {
             "step_hashes": {}
         }
         self.input_folder_list = []
-        self.folder = None
+
+        self.measure_folder = None  # The measure folder containing the HD folder and the DV folder, set when loading input
+        self.HD_folder = None       # The Holodoppler folder containing the raw input data, set when loading input
+        self.DV_folder = None       # The DopplerView folder containing the output and cache, set when running the pipeline
         self.output_manager = None
         self.h5_schema = None
         self.output_config = None
         self.debug_mode = debug_mode
+        self.dopplerview_config = None
+        self.holodoppler_config = None
 
         # Runtime data storage
         self.cache: Dict[str, Any] = {}
@@ -86,46 +90,70 @@ class Context:
         if self.output_config is None:
             self.load_default_output_config()
 
-    def load_eyeflow_config(self, config_path):
-        eyeflow_config = json.load(open(config_path))
-        self.eyeflow_config = json_utils.remove_spaces_from_keys(eyeflow_config) 
-        print(f"Using Eyeflow config file: {config_path}")
+    def load_config(self, config_path):
+        config = json.load(open(config_path))
+        return json_utils.remove_spaces_from_keys(config)
+    
+    def load_dopplerview_config(self, config_path):
+        self.dopplerview_config = self.load_config(config_path)
+        print(f"[Pipeline] Using DopplerView config file: {config_path}")
+    
+    def load_holodoppler_config(self, config_path):
+        self.holodoppler_config = self.load_config(config_path)
+        print(f"[Pipeline] Using Holodoppler config file: {config_path}")
 
     def _read_h5_into_cache(self):
-        if self.folder is None:
-            raise RuntimeError("Input folder not loaded. Cannot read cache file.")
-        cache_folder = self.folder.directory / "dopplerview" / "cache"
+        if self.DV_folder is None:
+            raise RuntimeError("DopplerView folder not initialized. Cannot read from H5 cache.")
+        cache_folder = self.DV_folder.cache_folder
         h5_cache_path = cache_folder / "cache.h5"
 
         if not h5_cache_path.exists():
-            print(f"No cache file found at {h5_cache_path}. Skipping cache loading.")
+            print(f"[Pipeline] No cache file found at {h5_cache_path}. Skipping cache loading.")
             return
         
-        print(f"Reading cache from {h5_cache_path}")
+        print(f"[Pipeline] Reading cache from {h5_cache_path}")
         with h5py.File(h5_cache_path, "r") as input_file:
             for key in input_file.keys():
                 self.cache[key] = input_file[key][()]
 
+    def ensure_directory(self, path):
+        path = Path(path)
+        if not os.path.isdir(path):
+            extension = path.suffix
+            if extension == ".holo":
+                self.measure_name = path.stem
+                return path.parent / self.measure_name
+            raise NotADirectoryError(f"Expected a directory or .holo file, but got: {path}")
+        return path
+
     def load_input_folder(self, folder_path):
         self.clear()  # Clear cache before loading new input
+        self.measure_folder = self.ensure_directory(folder_path)
 
-        self.folder = HolodopplerFolder(folder_path)
-        self.cache["input_file"] = self.folder.input_file
-        self.holodoppler_config = json.load(open(self.folder.holodoppler_config))
-        print(f"[Pipeline] Using Holodoppler config file: {self.folder.holodoppler_config}")
+        self.HD_folder = HolodopplerFolder(self.measure_folder)
+        self.cache["input_file"] = self.HD_folder.input_file
+        self.load_holodoppler_config(self.HD_folder.holodoppler_config)
 
-        if self.eyeflow_config is None:
-            # Load configs from folder if not already loaded
-            self.load_eyeflow_config(self.folder.eyeflow_config)
+        self.load_DV_folder()
 
         if self.debug_mode:
             self._read_h5_into_cache()
 
-        reader = Moments(self.folder.input_file)
+        reader = Moments(self.HD_folder.input_file)
         reader.read_moments()
         self.cache["moment0"] = reader.M0
         self.cache["moment1"] = reader.M1
         self.cache["moment2"] = reader.M2
+
+    def load_DV_folder(self):
+        if not self.measure_folder:
+            raise RuntimeError("Measure folder not set. Cannot load DopplerView folder.")
+        self.DV_folder = DopplerViewFolder(self.measure_folder)
+        
+        if self.dopplerview_config is None:
+            # Load configs from folder if not already loaded
+            self.load_dopplerview_config(self.DV_folder.dopplerview_config)
 
     def load_folder_list(self, folder_list_path):
         if not os.path.exists(folder_list_path):
@@ -158,10 +186,12 @@ class Context:
         return self.get_model(model_name)
     
     def create_output_folder(self):
-        if self.folder is None:
-            raise RuntimeError("Input folder not loaded. Cannot determine output folder.")
-        # Create a new output folder with an incremented index
-        self.output_manager = OutputManager(output_folder=self.folder.create_output_folder(), h5_path=self.folder.input_file, schema=self.h5_schema, output_config=self.output_config, cache_folder=self.folder.get_cache_folder())
+        if self.DV_folder is None:
+            self.load_DV_folder()
+
+        # Create the output manager. It will lazily create the output folder when needed, to avoid creating empty output folders for runs that don't produce any outputs
+        self.output_manager = OutputManager(dopplerview_folder=self.DV_folder, schema=self.h5_schema, dopplerview_config=self.dopplerview_config, output_config=self.output_config)
+
 
     def set(self, key: str, value: Any):
         self.cache[key] = value
@@ -185,7 +215,7 @@ class Pipeline:
             model_registry: Configuration for available models.
             h5_schema: Schema defining how to store outputs in HDF5.
             output_config: Configuration for debug outputs (optional). If None, outputs are manually saved.
-            eyeflow_config: Eyeflow configuration dictionary (optional) If None, the eyeflow configuration found in the input folder will be used.
+            dopplerview_config: DopplerView configuration dictionary (optional). If None, the dopplerview configuration found in the dopplerview folder will be used.
             debug_mode: If True, steps outputs are read from the .h5, and only targeted steps are re-run. This is useful for debugging specific steps without having to re-run the entire pipeline.
         """
         self.ctx = Context(
@@ -228,8 +258,8 @@ class Pipeline:
     def get_downstream_steps(self, step_name):
         return self.engine._collect_downstream(step_name)
 
-    def load_eyeflow_config(self, config_path):
-        self.ctx.load_eyeflow_config(config_path)
+    def load_dopplerview_config(self, config_path):
+        self.ctx.load_dopplerview_config(config_path)
 
     def load_input(self, input_path):
         self.ctx.load_input_folder(input_path)
@@ -252,7 +282,7 @@ class Pipeline:
     def run(self, targets=None):
         if not self.ctx.has("input_file"):
             raise RuntimeError("Input path not set. Please load input folder before running the pipeline.")
-        if self.ctx.eyeflow_config is None:
+        if self.ctx.dopplerview_config is None:
             raise RuntimeError("Configuration not loaded. Please load a configuration file before running the pipeline.")
         
         self.ctx.ensure_config()

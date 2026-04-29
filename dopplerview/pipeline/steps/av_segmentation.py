@@ -7,13 +7,13 @@ class AVSegmentationStep(BaseStep):
     name = "retinal_artery_vein_segmentation"
 
     def _relevant_config(self, ctx):
-        params = ctx.eyeflow_config["Mask"]
+        params = ctx.dopplerview_config["Mask"]
         return { "AVSegmentationMethod": params.get("AVSegmentationMethod", "AI"),
                     "av_segmentation_model": ctx.get_current_model_for_task(self.name)
         }
 
     def deep_segmentation(self, ctx):
-        # model_name = ctx.eyeflow_config["models"]["av"]
+        # model_name = ctx.dopplerview_config["models"]["av"]
         model = ctx.get_current_model_for_task(self.name)
 
         input = model.prepare_input(ctx)
@@ -30,7 +30,7 @@ class AVSegmentationStep(BaseStep):
         raise NotImplementedError("Handmade artery vein segmentation not implemented yet.")
 
     def run(self, ctx):
-        if ctx.eyeflow_config.get("AVSegmentationMethod", "AI") == "AI":
+        if ctx.dopplerview_config.get("AVSegmentationMethod", "AI") == "AI":
             print("    - Use deep segmentation model for artery vein segmentation.")
             ctx.cache["retinal_artery_mask"], ctx.cache["retinal_vein_mask"] = self.deep_segmentation(ctx)
             

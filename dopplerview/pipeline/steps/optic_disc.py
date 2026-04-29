@@ -9,7 +9,7 @@ class OpticDiscDetectionStep(BaseStep):
     name = "optic_disc_detection"
 
     def _relevant_config(self, ctx):
-        params = ctx.eyeflow_config["Mask"]
+        params = ctx.dopplerview_config["Mask"]
         return { 
             "OpticDiskDetectorNet": params.get("OpticDiskDetectorNet"),
             "optic_disc_model": ctx.get_current_model_for_task(self.name)}
@@ -53,7 +53,7 @@ class OpticDiscDetectionStep(BaseStep):
         return (x_center, y_center), diameter_x, diameter_y
 
     def run(self, ctx):
-        use_optic_disc_detector = ctx.eyeflow_config.get("OpticDiskDetectorNet", True)
+        use_optic_disc_detector = ctx.dopplerview_config.get("OpticDiskDetectorNet", True)
         M0 = ctx.cache["M0_ff_image"]
 
         if use_optic_disc_detector:

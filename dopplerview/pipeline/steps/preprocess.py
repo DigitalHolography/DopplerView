@@ -10,7 +10,7 @@ import numpy as np
 
 class Preprocessor:
     def __init__(self, config, M0, M1, M2=None, SH=None):
-        self.eyeflow_config = config
+        self.dopplerview_config = config
         self.M0 = M0
         self.M1 = M1
         self.M2 = M2
@@ -26,9 +26,9 @@ class Preprocessor:
         self.M2_ff_image = None  # Cache for flatfield-corrected M2
 
     def register(self, reference_idx=0):
-        firstFrame = self.eyeflow_config['Preprocess']['Register']['StartFrame']
-        endFrame = self.eyeflow_config['Preprocess']['Register']['EndFrame']
-        enable = self.eyeflow_config['Preprocess']['Register']['Enable']
+        firstFrame = self.dopplerview_config['Preprocess']['Register']['StartFrame']
+        endFrame = self.dopplerview_config['Preprocess']['Register']['EndFrame']
+        enable = self.dopplerview_config['Preprocess']['Register']['Enable']
 
         if not enable:
             return
@@ -42,16 +42,16 @@ class Preprocessor:
             self.SH = register_video(self.SH, firstFrame, endFrame, reference_idx)
 
     def nonrigid_register(self):
-        # Implement non-rigid registration logic based on self.eyeflow_config
+        # Implement non-rigid registration logic based on self.dopplerview_config
         return
     
     def crop(self):
-        firstFrame = self.eyeflow_config['Preprocess']['Crop']['StartFrame']
-        endFrame = self.eyeflow_config['Preprocess']['Crop']['EndFrame']
+        firstFrame = self.dopplerview_config['Preprocess']['Crop']['StartFrame']
+        endFrame = self.dopplerview_config['Preprocess']['Crop']['EndFrame']
         if firstFrame == 1 and endFrame == -1:
             return
         print(f"Cropping frames from {firstFrame} to {endFrame}")
-        # Implement cropping logic based on self.eyeflow_config
+        # Implement cropping logic based on self.dopplerview_config
         if self.M0 is not None:
             self.M0 = resize.crop_video(self.M0, first_frame=firstFrame, end_frame=endFrame)
         if self.M1 is not None:
@@ -62,9 +62,9 @@ class Preprocessor:
             self.SH = resize.crop_video(self.SH, first_frame=firstFrame, end_frame=endFrame)
 
     def normalize(self):
-        # Implement normalization logic based on self.eyeflow_config
-        # print(self.eyeflow_config)
-        gw = self.eyeflow_config['FlatFieldCorrection']['GWRatio']
+        # Implement normalization logic based on self.dopplerview_config
+        # print(self.dopplerview_config)
+        gw = self.dopplerview_config['FlatFieldCorrection']['GWRatio']
 
         if self.M0 is not None:
             numx = self.M0.shape[2]
@@ -79,15 +79,15 @@ class Preprocessor:
         return
     
     def resize(self):
-        # Implement resizing logic based on self.eyeflow_config
+        # Implement resizing logic based on self.dopplerview_config
         return
     
     def remove_outliers(self):
-        # Implement outlier removal logic based on self.eyeflow_config
+        # Implement outlier removal logic based on self.dopplerview_config
         return
     
     def interpolate(self):
-        # Implement interpolation logic based on self.eyeflow_config
+        # Implement interpolation logic based on self.dopplerview_config
         return
 
     def preprocess(self):
@@ -125,11 +125,11 @@ class PreprocessStep(BaseStep):
     def _relevant_config(self, ctx):
         return {
             # "Preprocess": {
-            #     "Register": ctx.eyeflow_config["Preprocess"]["Register"],
-            #     "Crop": ctx.eyeflow_config["Preprocess"]["Crop"]
+            #     "Register": ctx.dopplerview_config["Preprocess"]["Register"],
+            #     "Crop": ctx.dopplerview_config["Preprocess"]["Crop"]
             # },
             "FlatFieldCorrection": {
-                "GWRatio": ctx.eyeflow_config["FlatFieldCorrection"]["GWRatio"]
+                "GWRatio": ctx.dopplerview_config["FlatFieldCorrection"]["GWRatio"]
             }
         }
 
@@ -138,7 +138,7 @@ class PreprocessStep(BaseStep):
         moment1 = ctx.cache["moment1"]
         moment2 = ctx.cache["moment2"]
 
-        pre = Preprocessor(ctx.eyeflow_config, moment0, moment1)
+        pre = Preprocessor(ctx.dopplerview_config, moment0, moment1)
         pre.preprocess()
 
         if pre.M0_ff_image is not None:
