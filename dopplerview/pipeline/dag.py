@@ -2,26 +2,8 @@
 
 from collections import defaultdict, deque
 from typing import Dict, List, Iterable
+from dopplerview.pipeline.step import BaseStep
 import time
-
-
-class BaseStep:
-    """
-    Base class for pipeline steps.
-
-    Each step must define:
-        - name
-        - requires (list of data keys)
-        - produces (list of data keys)
-    """
-
-    name: str = None
-    requires: List[str] = []
-    produces: List[str] = []
-
-    def run(self, ctx):
-        raise NotImplementedError
-
 
 class DAGEngine:
     """
@@ -164,15 +146,24 @@ class DAGEngine:
         if self.steps_to_run is not None and len(self.steps_to_run) > 0:
             self.invalidated.add(self.steps_to_run[-1])
 
-    def run_step(self, ctx, step: BaseStep):
+    def run_step(self, ctx, step, callback=None):
         start_time = time.time()
+
+        if callback:
+            callback("step_running", step.name)
+
         step.run(ctx)
+
         elapsed = time.time() - start_time
         print(f"[DAG] Finished {step.name} in {elapsed:.2f}s")
+
+        if callback:
+            callback("step_done", step.name, elapsed)
+
         step.export(ctx)
         ctx.metadata["step_hashes"][step.name] = step.fingerprint(ctx)
 
-    def run(self, ctx, targets: List[str] = None):
+    def run(self, ctx, targets: List[str] = None, callback=None):
         """
         Execute the DAG.
 
@@ -185,12 +176,15 @@ class DAGEngine:
 
         print(f"[DAG] Execution order: {self.steps_to_run}")
 
-        for step_name in self.steps_to_run:
+        for i, step_name in enumerate(self.steps_to_run):
             step = self.steps[step_name]
+
+            if callback:
+                callback("step_start", step_name, i, len(self.steps_to_run))
 
             if step_name in self.invalidated:
                 print(f"[DAG] Running (invalidated): {step.name}")
-                self.run_step(ctx, step)
+                self.run_step(ctx, step, callback=callback)
 
                 # Invalidate downstream
                 downstream = self._collect_downstream(step_name)
@@ -199,11 +193,13 @@ class DAGEngine:
 
             if not self._should_run(step, ctx):
                 print(f"[DAG] Skipping (valid cache): {step.name}")
+                if callback:
+                    callback("step_skipped", step.name)
                 step.export(ctx)
                 continue
 
             print(f"[DAG] Running step: {step.name}")
-            self.run_step(ctx, step)
+            self.run_step(ctx, step, callback=callback)
 
         self.invalidated.clear()
         self.steps_to_run = None

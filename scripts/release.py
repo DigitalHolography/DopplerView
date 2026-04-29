@@ -157,15 +157,16 @@ def main():
     check_tag_exists(version)
 
     # 5. Build installer
-    build_installer()
+    if not args.finalize:
+        build_installer()
 
     if args.pre:
         print("Pre-release mode: skipping tag and push")
         print(f"Pre-release build for {version} complete")
         return
 
-    # 6. Changelog
-    generate_changelog(version)
+    # # 6. Changelog
+    # generate_changelog(version)
 
     # 7. Tag + push
     create_tag(version)

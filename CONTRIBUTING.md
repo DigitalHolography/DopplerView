@@ -24,28 +24,45 @@ You must first [download InnoSetup](https://jrsoftware.org/isdl.php/Inno-Setup-D
 Then, in the project root and **in your venv** (after `pip install -e .`), run 
 
 ```bash
-python installer/build_installer
+python packaging/build_installer
 ```
 
 It first create *DopplerView.exe*, by running the command
 
 ```bash
-python -m PyInstaller installer/DopplerView.spec
+python -m PyInstaller packaging/DopplerView.spec
 ```
 
-A custom hook was designed for scipy ; see [hook-scipy.py](installer/hook-scipy.py)
+A custom hook was designed for scipy ; see [hook-scipy.py](packaging/hook-scipy.py)
 
 You can find your installer in `dist/`, and the raw .exe in `dist/DopplerView`.
 
 ## Release
 
-To make a new release :
+**To make a new release**
 
 - Merge all features/bug fixes on dev. **Thoroughly test the branch**.
 - Merge dev in main with a pull-request
-- Create a tag : `git tag [new-version]` and push it ``git push origin tag <tag_name>``
-- [Create a new release](https://github.com/DigitalHolography/DopplerView/releases) with the new tag and the installer
 
+Then, on main, run 
+```bash
+python scripts/release.py [major|minor|patch] --pre
+```
+It will:
+- Modify the version across the project (using `scripts/bumpversion.cfg`) with a commit
+- Create the installer from scratch. **You must test the installer once created**
+
+If the installer is not correct, run
+```bash
+python scripts/release.py [major|minor|patch] --reset
+```
+Else :
+```bash
+python scripts/release.py [major|minor|patch] --finalize
+```
+It will create a tag with the new version and push it.
+
+Finally, you have to [Create a new release](https://github.com/DigitalHolography/DopplerView/releases) with the new tag and the installer
 
 ---
 

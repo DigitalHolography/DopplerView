@@ -2,13 +2,14 @@ import os
 import h5py
 import numpy as np
 
+from dopplerview.pipeline.step import BaseStep
+
 class Moments:
     def __init__(self, input_file_path):
         self.input_file_path = input_file_path
         self.M0 = None
         self.M1 = None
         self.M2 = None
-        self.SH = None
 
     def read_holo(self, file_path):
         pass
@@ -39,15 +40,21 @@ class Moments:
                 else:
                     print("Warning: moment2 dataset not found")
 
-                if "SH" in dataset_names:
-                    print("    - Reading the SH data")
-                    self.SH = np.squeeze(f["SH"][()])
-                else:
-                    print("Warning: SH dataset not found")
-
         except Exception as e:
             print(f"ID: {type(e).__name__}")
             raise
 
     def read_moments(self):
         self.read_hdf5(self.input_file_path)
+
+class ReadMomentsStep(BaseStep):
+    requires = {"input_file"}
+    produces = {"moment0", "moment1", "moment2"}
+    name = "read_moments"
+
+    def run(self, ctx):
+        reader = Moments(ctx.require("input_file"))
+        reader.read_moments()
+        ctx.cache["moment0"] = reader.M0
+        ctx.cache["moment1"] = reader.M1
+        ctx.cache["moment2"] = reader.M2

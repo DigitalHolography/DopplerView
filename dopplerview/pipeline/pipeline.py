@@ -11,8 +11,8 @@ from dopplerview.pipeline.dag import DAGEngine
 from dopplerview.models.manager import ModelManager
 from dopplerview.input_output.output_manager import OutputManager
 from dopplerview.utils import json_utils
-from dopplerview.input_output.read_moments import Moments
 
+from dopplerview.pipeline.steps.read_moments import ReadMomentsStep
 from dopplerview.pipeline.steps.preprocess import PreprocessStep
 from dopplerview.pipeline.steps.optic_disc import OpticDiscDetectionStep
 from dopplerview.pipeline.steps.vessel_segmentation import RetinalVesselSegmentationStep, ChoroidalVesselSegmentationStep
@@ -140,12 +140,6 @@ class Context:
         if self.debug_mode:
             self._read_h5_into_cache()
 
-        reader = Moments(self.HD_folder.input_file)
-        reader.read_moments()
-        self.cache["moment0"] = reader.M0
-        self.cache["moment1"] = reader.M1
-        self.cache["moment2"] = reader.M2
-
     def load_DV_folder(self):
         if not self.measure_folder:
             raise RuntimeError("Measure folder not set. Cannot load DopplerView folder.")
@@ -224,6 +218,7 @@ class Pipeline:
 
         # Register steps
         self.steps = {
+            ReadMomentsStep(),
             PreprocessStep(),
             OpticDiscDetectionStep(),
             RetinalVesselSegmentationStep(),
@@ -279,7 +274,7 @@ class Pipeline:
     def set_targets(self, targets):
         self.engine.set_targets(targets)
 
-    def run(self, targets=None):
+    def run(self, targets=None, callback=None):
         if not self.ctx.has("input_file"):
             raise RuntimeError("Input path not set. Please load input folder before running the pipeline.")
         if self.ctx.dopplerview_config is None:
@@ -291,7 +286,7 @@ class Pipeline:
         print(f"[Pipeline] Created output folder: {self.ctx.output_manager.output_dir}")
 
         start_time = time.time()
-        self.engine.run(self.ctx, targets)
+        self.engine.run(self.ctx, targets, callback=callback)
         elapsed = time.time() - start_time
         print(f"[Pipeline] Finished execution in {elapsed:.2f}s")
 
@@ -301,11 +296,11 @@ class Pipeline:
             self.ctx.output_manager.save_cache(self.ctx.cache)
         return self.ctx.cache
 
-    def run_batch(self, targets=None):
+    def run_batch(self, targets=None, callback=None):
         for folder in self.ctx.input_folder_list:
             try:
                 print(f"[Run Batch] Processing folder: {folder}")
                 self.load_input(folder)
-                self.run(targets=targets)
+                self.run(targets=targets, callback=callback)
             except Exception as e:
                 print(f"[Run Batch] Error processing folder {folder}: {e}")
