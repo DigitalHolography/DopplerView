@@ -34,11 +34,11 @@ class PreArteryMaskStep(BaseStep):
 
         fs = ctx.holodoppler_config["sampling_freq"]
         stride = ctx.holodoppler_config["batch_stride"]
-        print(f"    - Camera sampling frequency: {fs} Hz, batch stride: {stride}")
+        self.logger.info(f"    - Camera sampling frequency: {fs} Hz, batch stride: {stride}")
 
         sampling_frequency = pulse_analysis.get_effective_sampling_frequency(fs, stride)
 
-        print(f"    - Effective sampling frequency after accounting for batch stride: {sampling_frequency:.2f} Hz")
+        self.logger.info(f"    - Effective sampling frequency after accounting for batch stride: {sampling_frequency:.2f} Hz")
 
         # --- Step 1: Separate mask into branches ---
         labeled_vessels, _ = process_masks.get_labeled_vesselness(vessel_mask, *optic_disc_center)

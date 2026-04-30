@@ -12,6 +12,9 @@ from scipy.ndimage import rotate
 from skimage.measure import label
 from skimage import exposure
 
+import logging
+logger = logging.getLogger(__name__)
+
 def disk_mask(numX, numY, R1, center=(0.5, 0.5), R2=None):
     """
     Creates a binary disk-shaped mask on a normalized grid.
@@ -149,7 +152,7 @@ def clean_vessel_mask(
     height, width = image_shape
 
     if diaphragm_radius is not None:
-        print(f"    - Applying diaphragm mask with radius {diaphragm_radius}")
+        logger.info(f"    - Applying diaphragm mask with radius {diaphragm_radius}")
         mask_diaphragm = disk_mask(
             height, width, R1=diaphragm_radius
         )

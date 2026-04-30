@@ -68,11 +68,11 @@ class RetinalVesselSegmentationStep(VesselSegmentationStep):
         method = ctx.dopplerview_config.get("Mask", "").get("VesselSegmentationMethod", "AI")
 
         if method == "AI":
-            print("    - Use deep learning model for vessel segmentation.")
+            self.logger.info("    - Use deep learning model for vessel segmentation.")
             return self.deep_segmentation(ctx)
 
         if method == "frangi":
-            print("    - Use Frangi filter for vessel segmentation.")
+            self.logger.info("    - Use Frangi filter for vessel segmentation.")
             return self.frangi_segmentation(ctx)
         
     def run(self, ctx):

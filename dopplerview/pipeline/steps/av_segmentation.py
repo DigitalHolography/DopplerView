@@ -31,10 +31,10 @@ class AVSegmentationStep(BaseStep):
 
     def run(self, ctx):
         if ctx.dopplerview_config.get("AVSegmentationMethod", "AI") == "AI":
-            print("    - Use deep segmentation model for artery vein segmentation.")
+            self.logger.info("    - Use deep segmentation model for artery vein segmentation.")
             ctx.cache["retinal_artery_mask"], ctx.cache["retinal_vein_mask"] = self.deep_segmentation(ctx)
             
         else:
-            print("    - Use hand-made heuristics for artery vein segmentation.")
+            self.logger.info("    - Use hand-made heuristics for artery vein segmentation.")
             ctx.cache["retinal_artery_mask"], ctx.cache["retinal_vein_mask"] = self.handmade_segmentation(ctx)
         
