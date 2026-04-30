@@ -295,7 +295,8 @@ class MainWindow:
             text="Use local config",
             variable=self.config_mode_var,
             value="local",
-            anchor="w"
+            anchor="w",
+            command=self.update_config_mode,
         )
         rb_local.grid(row=0, column=0, sticky="w")
 
@@ -304,7 +305,8 @@ class MainWindow:
             text="Use default config",
             variable=self.config_mode_var,
             value="default",
-            anchor="w"
+            anchor="w",
+            command=self.update_config_mode,
         )
         rb_default.grid(row=0, column=1, sticky="w")
 
@@ -511,6 +513,7 @@ class MainWindow:
         self.progress_minimal["value"] = 0
 
         self.pipeline.load_input(folder)
+        self.config_path.set(self.pipeline.ctx.dopplerview_config_path)
         self.update_step_display()
 
         self.btn_run.config(state="enabled")
@@ -551,6 +554,21 @@ class MainWindow:
     def modify_output_config(self):
         self.open_with_default_app(self.pipeline.ctx.output_config_path)
         self.pipeline.load_output_config(self.pipeline.ctx.output_config_path)
+
+    def update_config_mode(self):
+        mode = self.config_mode_var.get()
+        self.pipeline.set_config_mode(mode)
+        if mode == "local":
+            if self.pipeline.ctx.DV_folder is not None:
+                config_path = self.pipeline.ctx.DV_folder.dopplerview_config
+                self.pipeline.load_dopplerview_config(config_path)
+            else:
+                config_path = "No config loaded"
+        else:
+            config_path = user_config.ensure_config_file("default_DV_params.json")
+            self.pipeline.load_dopplerview_config(config_path)
+
+        self.config_path.set(config_path)
 
     def get_selected_steps(self):
         return [step for step, var in self.step_vars.items() if var.get()]

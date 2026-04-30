@@ -51,6 +51,8 @@ class Context:
         self.output_config_path = None
         self.debug_mode = debug_mode
         self.dopplerview_config = None
+        self.dopplerview_config_path = None
+        self.DV_config_mode = "local"
         self.holodoppler_config = None
 
         # Runtime data storage
@@ -100,7 +102,13 @@ class Context:
         config = json.load(open(config_path))
         return json_utils.remove_spaces_from_keys(config)
     
+    def set_config_mode(self, mode):
+        if mode not in ["local", "default"]:
+            raise ValueError(f"Invalid config mode: {mode}. Supported modes are 'local' and 'default'.")
+        self.DV_config_mode = mode
+    
     def load_dopplerview_config(self, config_path):
+        self.dopplerview_config_path = config_path
         self.dopplerview_config = self.load_config(config_path)
         print(f"[Pipeline] Using DopplerView config file: {config_path}")
     
@@ -151,8 +159,8 @@ class Context:
             raise RuntimeError("Measure folder not set. Cannot load DopplerView folder.")
         self.DV_folder = DopplerViewFolder(self.measure_folder)
         
-        if self.dopplerview_config is None:
-            # Load configs from folder if not already loaded
+        if self.DV_config_mode == "local":
+            # Load configs from folder
             self.load_dopplerview_config(self.DV_folder.dopplerview_config)
 
     def load_folder_list(self, folder_list_path):
@@ -279,6 +287,9 @@ class Pipeline:
 
     def set_targets(self, targets):
         self.engine.set_targets(targets)
+
+    def set_config_mode(self, mode):
+        self.ctx.set_config_mode(mode)
 
     def run(self, targets=None, callback=None):
         if not self.ctx.has("input_file"):
