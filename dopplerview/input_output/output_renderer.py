@@ -3,15 +3,15 @@ from dopplerview.utils.image_utils import normalize_to_uint8, save_numpy_as_avi,
 import matplotlib.pyplot as plt
 import numpy as np
 
-class DebugRenderer:
+class OutputRenderer:
     def render(self, key, cache, path, options=None):
         raise NotImplementedError
     
-class ImageRenderer(DebugRenderer):
+class ImageRenderer(OutputRenderer):
     def render(self, key, cache, path, options=None):
         imageio.imwrite(path, normalize_to_uint8(cache.get(key)))
 
-class SignalRenderer(DebugRenderer):
+class SignalRenderer(OutputRenderer):
     def render(self, key, cache, path, options=None):
         plt.figure()
         plt.title(key)
@@ -26,11 +26,11 @@ class SignalRenderer(DebugRenderer):
         plt.savefig(path)
         plt.close()
 
-class VideoRenderer(DebugRenderer):
+class VideoRenderer(OutputRenderer):
     def render(self, key, cache, path, options=None):
         save_numpy_as_avi(cache.get(key), path.with_suffix(".avi"))
 
-class OpticDiscRenderer(DebugRenderer):
+class OpticDiscRenderer(OutputRenderer):
     def render(self, key, cache, path, options=None):
         image = cache.get("M0_ff_image")
         center = cache.get("optic_disc_center")
@@ -65,7 +65,7 @@ class OpticDiscRenderer(DebugRenderer):
         plt.savefig(path)
         plt.close()
 
-class LabeledMaskRenderer(DebugRenderer):
+class LabeledMaskRenderer(OutputRenderer):
     def render(self, key, cache, path, options=None):
         save_labeled_branches(cache.get(key), path)
         plt.close()
