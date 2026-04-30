@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.2.0
+* Take into account *NumberOfWorkers* params. By default, set at 0.5 : take half of the available workers
+
 ## 1.1.0
 
 * Interactive Tkinter GUI
