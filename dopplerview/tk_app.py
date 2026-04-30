@@ -8,19 +8,22 @@ from pathlib import Path
 import threading
 import queue
 
-from dopplerview.input_output import user_config
+from dopplerview.input_output import log_config, user_config
 import numpy as np
 import cv2
 from PIL import Image, ImageTk
 
 from dopplerview.pipeline.pipeline import Pipeline
 
+import logging
+logger = logging.getLogger(__name__)
+
 try:
     from tkinterdnd2 import DND_FILES, TkinterDnD
 except ImportError:  # optional dependency
     DND_FILES = None
     TkinterDnD = None
-    print("Warning: tkinterdnd2 not found, drag-and-drop functionality will be disabled.")
+    logger.warning("Warning: tkinterdnd2 not found, drag-and-drop functionality will be disabled.")
 
 try:
     import sv_ttk
@@ -535,7 +538,7 @@ class MainWindow:
             raise FileNotFoundError(path)
 
         if sys.platform.startswith("win"):
-            print(f"Opening {path} with default application...")
+            logger.info(f"Opening {path} with default application...")
             os.startfile(path)  # Windows
         elif sys.platform.startswith("darwin"):
             subprocess.run(["open", path])  # macOS
@@ -612,27 +615,6 @@ class MainWindow:
         except Exception as e:
             self.queue.put(("error", str(e)))
 
-    # def check_queue(self):
-    #     try:
-    #         msg, data = self.queue.get_nowait()
-
-    #         if msg == "finished":
-    #             self.update_step_display()
-
-    #             img, art, vein = data
-
-    #             if img is not None:
-    #                 overlay = self.overlay(img, art, vein)
-    #                 self.display_image(overlay)
-
-    #         elif msg == "error":
-    #             print("Pipeline error:", data)
-
-    #         self.btn_run.config(state="enabled")
-            
-    #     except queue.Empty:
-    #         self.root.after(100, self.check_queue)
-
     def check_queue(self):
         try:
             while True:
@@ -668,7 +650,7 @@ class MainWindow:
                         self.display_image(overlay)
 
                 elif event == "error":
-                    print("Error:", data)
+                    logger.error("Error:", data)
 
         except queue.Empty:
             pass
@@ -781,5 +763,7 @@ if __name__ == "__main__":
         root = TkinterDnD.Tk()
     else:
         root = tk.Tk()
+    log_config.setup_logging()
+
     app = MainWindow(root)
     root.mainloop()

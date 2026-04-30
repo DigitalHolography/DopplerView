@@ -4,6 +4,8 @@ import json
 import numpy as np
 from abc import ABC
 
+import logging
+
 class BaseStep(ABC):
     """
     Base class for pipeline steps.
@@ -17,6 +19,8 @@ class BaseStep(ABC):
     name: str = None
     requires: set[str] = []
     produces: set[str] = []
+
+    logger = logging.getLogger(__name__)
 
     def run(self, ctx):
         raise NotImplementedError

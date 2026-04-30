@@ -1,6 +1,8 @@
 import joblib
 import numpy as np
 
+import logging
+logger = logging.getLogger(__name__)
 
 def _process_chunk(chunk, func):
     return np.stack([func(item) for item in chunk], axis=0)
@@ -34,7 +36,7 @@ def run_in_parallel(func, iterable, n_jobs=-1, chunking=True, task_name=None):
         n_jobs = min(n_jobs, len(iterable))
 
     if task_name is not None:
-        print(f"    - Running {task_name} in parallel with {n_jobs} jobs and chunking={chunking}")
+        logger.info(f"    - Running {task_name} in parallel with {n_jobs} jobs and chunking={chunking}")
 
     if chunking:
         indices = np.array_split(np.arange(len(iterable)), n_jobs)

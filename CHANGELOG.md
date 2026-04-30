@@ -5,6 +5,7 @@
 * Enable loading of doppler_view config
 * Choose to use local configs or default config
 * Enable modification of model_registry, h5_schema and output_config in advanced_ui
+* Log last run in %AppData%
 
 ## 1.1.0
 

@@ -2,6 +2,9 @@ import numpy as np
 from scipy.signal import butter, filtfilt, savgol_filter
 from scipy.ndimage import uniform_filter1d, median_filter
 
+import logging
+logger = logging.getLogger(__name__)
+
 def movmean(x, k):
     x = np.asarray(x, dtype=float)
     n = len(x)
@@ -148,7 +151,7 @@ def local_percentile_outliers(signal, window=31, lower=5, upper=95, thresh=1.5):
 
 def interpolate_outliers(video, signal, artery_mask, sampling_frequency):
     outlier_frames_mask = detect_outliers_moving_median(signal, window=5, threshold_factor=2)
-    print(f"    - Detected {outlier_frames_mask.sum()} outlier frames based on arterial pulse signal.")
+    logger.info(f"    - Detected {outlier_frames_mask.sum()} outlier frames based on arterial pulse signal.")
     video = interpolate_outlier_frames(video, outlier_frames_mask)
     signal = get_pulse_from_mask(video, artery_mask)
     signal_filtered = get_filtered_pulse(signal, sampling_frequency=sampling_frequency)

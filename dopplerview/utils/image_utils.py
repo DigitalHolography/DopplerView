@@ -8,6 +8,9 @@ from skimage.measure import regionprops
 import matplotlib.pyplot as plt
 import cv2
 
+import logging
+logger = logging.getLogger(__name__)
+
 def load_image_as_array(image_path):
     """
     Load an image from the specified path and convert it to a numpy array
@@ -157,4 +160,3 @@ def save_numpy_as_avi(video: np.ndarray, filename: str, fps: int = 30):
         out.write(frame)
 
     out.release()
-    print(f"Saved video to {filename}")
