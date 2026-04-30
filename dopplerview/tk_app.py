@@ -1,4 +1,6 @@
 import sys
+import os
+import subprocess
 import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import filedialog, ttk
@@ -195,7 +197,8 @@ class MainWindow:
             wraplength=420,
         ).grid(row=3, column=0, pady=(0, 10))
 
-        self.btn_run_minimal = ttk.Button(container, text="Run Full Pipeline", command=self.run_full_pipeline)
+        state = "disabled" if self.input_folder.get() == "No input selected" else "enabled"
+        self.btn_run_minimal = ttk.Button(container, text="Run Full Pipeline", command=self.run_full_pipeline, state=state)
         self.btn_run_minimal.grid(row=4, column=0, pady=10)
 
         self.progress_minimal = ttk.Progressbar(container, maximum=100)
@@ -310,21 +313,21 @@ class MainWindow:
         self.btn_models_registry = ttk.Button(
             self.config_panel,
             text="Modify models registry",
-            # command=self.modify_models_registry
+            command=self.modify_models_registry
         )
         self.btn_models_registry.grid(row=2, column=0, sticky="ew", pady=5)
 
         self.btn_h5_schema = ttk.Button(
             self.config_panel,
             text="Modify h5 schema",
-            # command=self.modify_h5_schema
+            command=self.modify_h5_schema
         )
         self.btn_h5_schema.grid(row=3, column=0, sticky="ew", pady=5)
 
         self.btn_output_config = ttk.Button(
             self.config_panel,
             text="Modify output config",
-            # command=self.modify_output_config
+            command=self.modify_output_config
         )
         self.btn_output_config.grid(row=4, column=0, sticky="ew", pady=5)
 
@@ -399,7 +402,8 @@ class MainWindow:
             self.step_checkboxes[step] = cb
 
         # --- Run button ---
-        self.btn_run = ttk.Button(frame, text="Run Pipeline", command=self.run_pipeline)
+        state = "disabled" if self.input_folder.get() == "No input selected" else "enabled"
+        self.btn_run = ttk.Button(frame, text="Run Pipeline", command=self.run_pipeline, state=state)
         self.btn_run.grid(row=row, column=0, pady=5, sticky="ew")
         row += 1
 
@@ -508,6 +512,9 @@ class MainWindow:
 
         self.pipeline.load_input(folder)
         self.update_step_display()
+
+        self.btn_run.config(state="enabled")
+        self.btn_run_minimal.config(state="enabled")
         
     def load_holo(self):
         file_path = filedialog.askopenfilename(filetypes=[("Holo files", "*.holo")], defaultextension=".holo")
@@ -519,6 +526,31 @@ class MainWindow:
         if file_path:
             self.pipeline.load_dopplerview_config(file_path)
             self.config_path.set(file_path)
+    
+    def open_with_default_app(self, path):
+        if not os.path.exists(path):
+            raise FileNotFoundError(path)
+
+        if sys.platform.startswith("win"):
+            print(f"Opening {path} with default application...")
+            os.startfile(path)  # Windows
+        elif sys.platform.startswith("darwin"):
+            subprocess.run(["open", path])  # macOS
+        else:
+            subprocess.run(["xdg-open", path])  # Linux
+
+    def modify_models_registry(self):
+        self.open_with_default_app(self.pipeline.ctx.model_registry_path)
+        self.pipeline.load_model_registry(self.pipeline.ctx.model_registry_path)
+        self._build_advanced_ui()  # rebuild to update model lists in dropdowns
+
+    def modify_h5_schema(self):
+        self.open_with_default_app(self.pipeline.ctx.h5_schema_path)
+        self.pipeline.load_h5_schema(self.pipeline.ctx.h5_schema_path)
+
+    def modify_output_config(self):
+        self.open_with_default_app(self.pipeline.ctx.output_config_path)
+        self.pipeline.load_output_config(self.pipeline.ctx.output_config_path)
 
     def get_selected_steps(self):
         return [step for step, var in self.step_vars.items() if var.get()]

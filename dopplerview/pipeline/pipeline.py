@@ -33,6 +33,7 @@ class Context:
     """
 
     def __init__(self, debug_mode=False):
+        self.model_registry_path = None
         self.model_manager = None
         self.model_instances = {}
         self.metadata = {
@@ -45,7 +46,9 @@ class Context:
         self.DV_folder = None       # The DopplerView folder containing the output and cache, set when running the pipeline
         self.output_manager = None
         self.h5_schema = None
+        self.h5_schema_path = None
         self.output_config = None
+        self.output_config_path = None
         self.debug_mode = debug_mode
         self.dopplerview_config = None
         self.holodoppler_config = None
@@ -61,24 +64,27 @@ class Context:
 
     def load_manager(self, config_path):
         print(f"[Pipeline] Loading model registry from {config_path}")
+        self.model_registry_path = config_path
         registry = ModelRegistryConfig(config_path)
         self.model_manager = ModelManager(registry, cache_dir="~/.cache/dopplerview/models")
         
     def load_default_h5_schema(self):
-        h5_schema_config = user_config.ensure_config_file("h5_schema.json")
-        print(f"[Pipeline] Loading default H5 schema from {h5_schema_config}")
-        self.h5_schema = json.load(open(h5_schema_config))
+        self.h5_schema_path = user_config.ensure_config_file("h5_schema.json")
+        print(f"[Pipeline] Loading default H5 schema from {self.h5_schema_path}")
+        self.h5_schema = json.load(open(self.h5_schema_path))
 
     def load_h5_schema(self, config_path):
+        self.h5_schema_path = config_path
         print(f"[Pipeline] Loading H5 schema from {config_path}")
         self.h5_schema = json.load(open(config_path))
 
     def load_default_output_config(self):
-        output_config = user_config.ensure_config_file("output_config.json")
-        print(f"[Pipeline] Loading default output config from {output_config}")
-        self.output_config = json.load(open(output_config))
+        self.output_config_path = user_config.ensure_config_file("output_config.json")
+        print(f"[Pipeline] Loading default output config from {self.output_config_path}")
+        self.output_config = json.load(open(self.output_config_path))
 
     def load_output_config(self, config_path):
+        self.output_config_path = config_path
         print(f"[Pipeline] Loading output config from {config_path}")
         self.output_config = json.load(open(config_path))
 
