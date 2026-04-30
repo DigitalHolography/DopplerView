@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 import shutil
@@ -27,12 +28,21 @@ def get_user_config_dir():
 def get_resource_path(filename):
     return files("dopplerview.resources") / filename
 
+def get_version(config):
+    with json.load(open(config, "r")) as data:
+        return data.get("Version", 0)
+    
+def get_latest_config(user_config, default_config):
+    if get_version(user_config) < get_version(default_config):
+        return default_config
+    return user_config
+
 def ensure_config_file(filename):
     user_dir = get_user_config_dir()
     user_file = user_dir / filename
 
-    if not user_file.exists():
-        default_file = get_resource_path(filename)
+    default_file = get_resource_path(filename)
+    if not user_file.exists() or get_version(user_file) < get_version(default_file):
         shutil.copy(default_file, user_file)
 
     return user_file
