@@ -33,6 +33,7 @@ class Context:
     """
 
     def __init__(self, debug_mode=False):
+        self.model_registry_path = None
         self.model_manager = None
         self.model_instances = {}
         self.metadata = {
@@ -45,9 +46,13 @@ class Context:
         self.DV_folder = None       # The DopplerView folder containing the output and cache, set when running the pipeline
         self.output_manager = None
         self.h5_schema = None
+        self.h5_schema_path = None
         self.output_config = None
+        self.output_config_path = None
         self.debug_mode = debug_mode
         self.dopplerview_config = None
+        self.dopplerview_config_path = None
+        self.DV_config_mode = "local"
         self.holodoppler_config = None
 
         # Runtime data storage
@@ -61,24 +66,27 @@ class Context:
 
     def load_manager(self, config_path):
         print(f"[Pipeline] Loading model registry from {config_path}")
+        self.model_registry_path = config_path
         registry = ModelRegistryConfig(config_path)
         self.model_manager = ModelManager(registry, cache_dir="~/.cache/dopplerview/models")
         
     def load_default_h5_schema(self):
-        h5_schema_config = user_config.ensure_config_file("h5_schema.json")
-        print(f"[Pipeline] Loading default H5 schema from {h5_schema_config}")
-        self.h5_schema = json.load(open(h5_schema_config))
+        self.h5_schema_path = user_config.ensure_config_file("h5_schema.json")
+        print(f"[Pipeline] Loading default H5 schema from {self.h5_schema_path}")
+        self.h5_schema = json.load(open(self.h5_schema_path))
 
     def load_h5_schema(self, config_path):
+        self.h5_schema_path = config_path
         print(f"[Pipeline] Loading H5 schema from {config_path}")
         self.h5_schema = json.load(open(config_path))
 
     def load_default_output_config(self):
-        output_config = user_config.ensure_config_file("output_config.json")
-        print(f"[Pipeline] Loading default output config from {output_config}")
-        self.output_config = json.load(open(output_config))
+        self.output_config_path = user_config.ensure_config_file("output_config.json")
+        print(f"[Pipeline] Loading default output config from {self.output_config_path}")
+        self.output_config = json.load(open(self.output_config_path))
 
     def load_output_config(self, config_path):
+        self.output_config_path = config_path
         print(f"[Pipeline] Loading output config from {config_path}")
         self.output_config = json.load(open(config_path))
 
@@ -94,7 +102,13 @@ class Context:
         config = json.load(open(config_path))
         return json_utils.remove_spaces_from_keys(config)
     
+    def set_config_mode(self, mode):
+        if mode not in ["local", "default"]:
+            raise ValueError(f"Invalid config mode: {mode}. Supported modes are 'local' and 'default'.")
+        self.DV_config_mode = mode
+    
     def load_dopplerview_config(self, config_path):
+        self.dopplerview_config_path = config_path
         self.dopplerview_config = self.load_config(config_path)
         print(f"[Pipeline] Using DopplerView config file: {config_path}")
     
@@ -145,8 +159,8 @@ class Context:
             raise RuntimeError("Measure folder not set. Cannot load DopplerView folder.")
         self.DV_folder = DopplerViewFolder(self.measure_folder)
         
-        if self.dopplerview_config is None:
-            # Load configs from folder if not already loaded
+        if self.DV_config_mode == "local":
+            # Load configs from folder
             self.load_dopplerview_config(self.DV_folder.dopplerview_config)
 
     def load_folder_list(self, folder_list_path):
@@ -273,6 +287,9 @@ class Pipeline:
 
     def set_targets(self, targets):
         self.engine.set_targets(targets)
+
+    def set_config_mode(self, mode):
+        self.ctx.set_config_mode(mode)
 
     def run(self, targets=None, callback=None):
         if not self.ctx.has("input_file"):

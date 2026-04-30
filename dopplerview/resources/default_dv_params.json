@@ -37,5 +37,6 @@
     "ProfileFitTresholdRatio": 0.1,
     "InterpolationPoints": 50
   },
-  "DebugMode": false
+  "DebugMode": false,
+  "Version":1.0
 }
