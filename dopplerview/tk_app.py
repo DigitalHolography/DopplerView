@@ -1,4 +1,6 @@
 import sys
+import os
+import subprocess
 import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import filedialog, ttk
@@ -54,6 +56,9 @@ class MainWindow:
         output_config = user_config.ensure_config_file("output_config.json")
         self.pipeline.load_h5_schema(h5_schema_config)
         self.pipeline.load_output_config(output_config)
+        config_path = user_config.ensure_config_file("default_DV_params.json")
+        self.pipeline.load_dopplerview_config(config_path)
+        self.config_path = tk.StringVar(value=str(config_path))
 
         self.image_tk = None  # keep reference (IMPORTANT)
 
@@ -126,7 +131,6 @@ class MainWindow:
 
         container = ttk.Frame(self.root, padding=10)
         container.pack(fill="both", expand=True)
-        self.main_container = container
 
         self.minimal_view = ttk.Frame(container, padding=10)
         self.advanced_view = ttk.Frame(container, padding=10)
@@ -184,7 +188,7 @@ class MainWindow:
         self.btn_load = ttk.Button(container, text="Select .holo File", command=self.load_holo)
         self.btn_load.grid(row=2, column=0, pady=(0, 10))
 
-        self.minimal_input_path_label = tk.Label(
+        self.input_path_label = tk.Label(
             container,
             textvariable=self.input_folder,
             bg=self._bg_color,
@@ -193,7 +197,8 @@ class MainWindow:
             wraplength=420,
         ).grid(row=3, column=0, pady=(0, 10))
 
-        self.btn_run_minimal = ttk.Button(container, text="Run Full Pipeline", command=self.run_full_pipeline)
+        state = "disabled" if self.input_folder.get() == "No input selected" else "enabled"
+        self.btn_run_minimal = ttk.Button(container, text="Run Full Pipeline", command=self.run_full_pipeline, state=state)
         self.btn_run_minimal.grid(row=4, column=0, pady=10)
 
         self.progress_minimal = ttk.Progressbar(container, maximum=100)
@@ -202,75 +207,188 @@ class MainWindow:
     def _build_advanced_ui(self):
         frame = self.advanced_view
 
-        # Buttons
-        self.btn_load = ttk.Button(frame, text="Select .holo File", command=self.load_holo)
-        self.btn_load.pack(pady=5)
+        # Make frame expandable
+        # Main frame stays 1 column
+        frame.grid_columnconfigure(0, weight=1)
 
-        self.minimal_input_path_label = tk.Label(
-            frame,
+        row = 0
+
+        # --- Buttons sub-frame (2 columns ONLY here) ---
+        self.buttons_frame = tk.Frame(frame, bg=self._bg_color)
+        self.buttons_frame.grid(row=row, column=0, sticky="ew", pady=5)
+
+        self.buttons_frame.grid_columnconfigure(0, weight=1)
+        self.buttons_frame.grid_columnconfigure(1, weight=1)
+
+        self.btn_load = ttk.Button(
+            self.buttons_frame,
+            text="Select .holo File",
+            command=self.load_holo
+        )
+        self.btn_load.grid(row=0, column=0, padx=5, sticky="ew")
+
+        self.btn_select_config = ttk.Button(
+            self.buttons_frame,
+            text="Select config",
+            command=self.load_config
+        )
+        self.btn_select_config.grid(row=0, column=1, padx=5, sticky="ew")
+
+        row += 1
+
+        # --- Labels (back to full-width single column) ---
+        self.input_path_label = tk.Label(
+            self.buttons_frame,
             textvariable=self.input_folder,
             bg=self._bg_color,
             fg=self._muted_fg,
             justify="center",
-            wraplength=420,
-        ).pack(pady=5)
+            wraplength=600,  # increase since now full width
+        )
+        self.input_path_label.grid(row=row, column=0, pady=5, sticky="ew")
 
-        # Model selection
-         # --- Model selection frame ---
-        self.models_frame = tk.LabelFrame(frame, text="Models")
-        self.models_frame.pack(fill="x", padx=5, pady=5)
+        self.config_path_label = tk.Label(
+            self.buttons_frame,
+            textvariable=self.config_path,
+            bg=self._bg_color,
+            fg=self._muted_fg,
+            justify="center",
+            wraplength=600,
+        )
+        self.config_path_label.grid(row=row, column=1, pady=5, sticky="ew")
+        row += 1
+
+        row += 1
+        # --- Models + Config panel container ---
+        self.middle_frame = tk.Frame(frame, bg=self._bg_color)
+        self.middle_frame.grid(row=row, column=0, padx=5, pady=5, sticky="nsew")
+
+        # Make both columns expand
+        self.middle_frame.grid_columnconfigure(0, weight=1)
+        self.middle_frame.grid_columnconfigure(1, weight=1)
+
+        # -----------------------
+        # LEFT: Models frame
+        # -----------------------
+        self.models_frame = tk.LabelFrame(self.middle_frame, text="Models")
+        self.models_frame.grid(row=0, column=0, padx=5, sticky="nsew")
+        self.models_frame.grid_columnconfigure(0, weight=1)
+
+        # -----------------------
+        # RIGHT: Config panel
+        # -----------------------
+        self.config_panel = tk.LabelFrame(self.middle_frame, text="Configuration")
+        self.config_panel.grid(row=0, column=1, padx=5, sticky="nsew")
+        self.config_panel.grid_columnconfigure(0, weight=1)
+
+        # --- Radio buttons container (2 columns) ---
+        self.radio_frame = tk.Frame(self.config_panel, bg=self._bg_color)
+        self.radio_frame.grid(row=0, column=0, sticky="ew", pady=(0, 5))
+
+        self.radio_frame.grid_columnconfigure(0, weight=1)
+        self.radio_frame.grid_columnconfigure(1, weight=1)
+
+        self.config_mode_var = tk.StringVar(value="local")
+
+        rb_local = tk.Radiobutton(
+            self.radio_frame,
+            text="Use local config",
+            variable=self.config_mode_var,
+            value="local",
+            anchor="w",
+            command=self.update_config_mode,
+        )
+        rb_local.grid(row=0, column=0, sticky="w")
+
+        rb_default = tk.Radiobutton(
+            self.radio_frame,
+            text="Use default config",
+            variable=self.config_mode_var,
+            value="default",
+            anchor="w",
+            command=self.update_config_mode,
+        )
+        rb_default.grid(row=0, column=1, sticky="w")
+
+
+        # --- Buttons ---
+        self.btn_models_registry = ttk.Button(
+            self.config_panel,
+            text="Modify models registry",
+            command=self.modify_models_registry
+        )
+        self.btn_models_registry.grid(row=2, column=0, sticky="ew", pady=5)
+
+        self.btn_h5_schema = ttk.Button(
+            self.config_panel,
+            text="Modify h5 schema",
+            command=self.modify_h5_schema
+        )
+        self.btn_h5_schema.grid(row=3, column=0, sticky="ew", pady=5)
+
+        self.btn_output_config = ttk.Button(
+            self.config_panel,
+            text="Modify output config",
+            command=self.modify_output_config
+        )
+        self.btn_output_config.grid(row=4, column=0, sticky="ew", pady=5)
+
+        row += 1  # continue main layout after this block
 
         ctx = self.pipeline.ctx
         mm = ctx.model_manager
 
-        # Helper to create one dropdown
-        def create_model_selector(parent, label_text, task_name):
-            tk.Label(parent, text=label_text).pack(anchor="w")
+        def create_model_selector(parent, label_text, task_name, r):
+            tk.Label(parent, text=label_text).grid(row=r, column=0, sticky="w")
 
             values = mm.get_model_name_list_for_task(task_name)
             var = tk.StringVar(value=values[0] if values else "")
 
             combo = ttk.Combobox(parent, textvariable=var, values=values, state="readonly")
-            combo.pack(fill="x", pady=2)
+            combo.grid(row=r+1, column=0, sticky="ew", pady=2)
 
             def on_change(event=None):
                 ctx.change_model_for_task(task_name, var.get())
 
             combo.bind("<<ComboboxSelected>>", on_change)
 
-            # Initialize state (like Streamlit does implicitly)
             if values:
                 ctx.change_model_for_task(task_name, var.get())
 
-            return var, combo
+            return var, combo, r + 2
 
-        # Create the three selectors
-        self.binary_model_var, self.binary_model_combo = create_model_selector(
+        r = 0
+        self.binary_model_var, self.binary_model_combo, r = create_model_selector(
             self.models_frame,
             "Binary vessel segmentation model",
-            "retinal_vessel_segmentation"
+            "retinal_vessel_segmentation",
+            r
         )
 
-        self.av_model_var, self.av_model_combo = create_model_selector(
+        self.av_model_var, self.av_model_combo, r = create_model_selector(
             self.models_frame,
             "Artery/Vein segmentation model",
-            "retinal_artery_vein_segmentation"
+            "retinal_artery_vein_segmentation",
+            r
         )
 
-        self.optic_disc_model_var, self.optic_disc_model_combo = create_model_selector(
+        self.optic_disc_model_var, self.optic_disc_model_combo, r = create_model_selector(
             self.models_frame,
             "Optic disc detection model",
-            "optic_disc_detection"
+            "optic_disc_detection",
+            r
         )
 
-        # Step list (checkboxes)
+        # --- Steps frame ---
+        self.steps_frame = tk.LabelFrame(frame, text="Pipeline Steps")
+        self.steps_frame.grid(row=row, column=0, padx=5, pady=5, sticky="nsew")
+        self.steps_frame.grid_columnconfigure(0, weight=1)
+        row += 1
+
         self.step_vars = {}
         self.step_checkboxes = {}
 
-        self.steps_frame = tk.LabelFrame(self.advanced_view, text="Pipeline Steps")
-        self.steps_frame.pack(fill="x", padx=5, pady=5)
-
-        for step in self.pipeline.get_step_names():
+        for i, step in enumerate(self.pipeline.get_step_names()):
             var = tk.BooleanVar(value=True)
 
             cb = tk.Checkbutton(
@@ -280,20 +398,25 @@ class MainWindow:
                 command=lambda s=step: self.on_step_toggle(s),
                 fg=self._text_fg,
             )
-            cb.pack(anchor="w")
+            cb.grid(row=i, column=0, sticky="w")
 
             self.step_vars[step] = var
             self.step_checkboxes[step] = cb
 
-        self.btn_run = ttk.Button(self.advanced_view, text="Run Pipeline", command=self.run_pipeline)
-        self.btn_run.pack(pady=5)
+        # --- Run button ---
+        state = "disabled" if self.input_folder.get() == "No input selected" else "enabled"
+        self.btn_run = ttk.Button(frame, text="Run Pipeline", command=self.run_pipeline, state=state)
+        self.btn_run.grid(row=row, column=0, pady=5, sticky="ew")
+        row += 1
 
-        self.progress = ttk.Progressbar(self.advanced_view, maximum=100)
-        self.progress.pack()
-    
-        # Image display
-        self.image_label = tk.Label(self.advanced_view)
-        self.image_label.pack(pady=10)
+        # --- Progress bar ---
+        self.progress = ttk.Progressbar(frame, maximum=100)
+        self.progress.grid(row=row, column=0, sticky="ew", padx=5)
+        row += 1
+
+        # --- Image display ---
+        self.image_label = tk.Label(frame)
+        self.image_label.grid(row=row, column=0, pady=10, sticky="nsew")
 
     def _install_drop_targets(self) -> None:
         if DND_FILES is None:
@@ -390,13 +513,62 @@ class MainWindow:
         self.progress_minimal["value"] = 0
 
         self.pipeline.load_input(folder)
+        self.config_path.set(self.pipeline.ctx.dopplerview_config_path)
         self.update_step_display()
-        
 
+        self.btn_run.config(state="enabled")
+        self.btn_run_minimal.config(state="enabled")
+        
     def load_holo(self):
         file_path = filedialog.askopenfilename(filetypes=[("Holo files", "*.holo")], defaultextension=".holo")
         if file_path:
             self.load_input(file_path)
+
+    def load_config(self):
+        file_path = filedialog.askopenfilename(filetypes=[("JSON files", "*.json")], defaultextension=".json")
+        if file_path:
+            self.pipeline.load_dopplerview_config(file_path)
+            self.config_path.set(file_path)
+    
+    def open_with_default_app(self, path):
+        if not os.path.exists(path):
+            raise FileNotFoundError(path)
+
+        if sys.platform.startswith("win"):
+            print(f"Opening {path} with default application...")
+            os.startfile(path)  # Windows
+        elif sys.platform.startswith("darwin"):
+            subprocess.run(["open", path])  # macOS
+        else:
+            subprocess.run(["xdg-open", path])  # Linux
+
+    def modify_models_registry(self):
+        self.open_with_default_app(self.pipeline.ctx.model_registry_path)
+        self.pipeline.load_model_registry(self.pipeline.ctx.model_registry_path)
+        self._build_advanced_ui()  # rebuild to update model lists in dropdowns
+
+    def modify_h5_schema(self):
+        self.open_with_default_app(self.pipeline.ctx.h5_schema_path)
+        self.pipeline.load_h5_schema(self.pipeline.ctx.h5_schema_path)
+
+    def modify_output_config(self):
+        self.open_with_default_app(self.pipeline.ctx.output_config_path)
+        self.pipeline.load_output_config(self.pipeline.ctx.output_config_path)
+
+    def update_config_mode(self):
+        mode = self.config_mode_var.get()
+        self.pipeline.set_config_mode(mode)
+        if mode == "local":
+            if self.pipeline.ctx.DV_folder is not None:
+                config_path = self.pipeline.ctx.DV_folder.dopplerview_config
+                self.pipeline.load_dopplerview_config(config_path)
+            else:
+                config_path = "No config loaded"
+        else:
+            config_path = user_config.ensure_config_file("default_DV_params.json")
+            self.pipeline.load_dopplerview_config(config_path)
+
+        self.config_path.set(config_path)
 
     def get_selected_steps(self):
         return [step for step, var in self.step_vars.items() if var.get()]

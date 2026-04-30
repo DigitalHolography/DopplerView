@@ -1,4 +1,4 @@
-{
+ {
   "Preprocess": {
     "ReshapeToSquare": true,
     "InterpolationFactor": 1
@@ -7,7 +7,7 @@
     "GWRatio": 0.07,
     "Border": 0.15
     },
-  "NumberOfWorkers": -1,
+  "NumberOfWorkers": 0.5,
   "Mask": {
     "ForcedMasks": -1,
     "VesselSegmentationMethod": "AI",
@@ -37,5 +37,6 @@
     "ProfileFitTresholdRatio": 0.1,
     "InterpolationPoints": 50
   },
-  "DebugMode": false
+  "DebugMode": false,
+  "Version":1.0
 }

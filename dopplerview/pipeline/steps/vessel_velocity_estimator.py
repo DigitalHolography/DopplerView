@@ -15,17 +15,20 @@ import matplotlib.pyplot as plt
 
 class VesselVelocityEstimatorStep(BaseStep):
     name = "retinal_vessel_velocity_estimator"
-    requires = {"moment0", "moment2", "retinal_artery_mask", "retinal_vein_mask", "optic_disc_center"}
+    requires = {"M0_ff_video", "M2_ff_video", "retinal_artery_mask", "retinal_vein_mask", "optic_disc_center"}
     produces = {"retinal_vessel_velocity","velocity_map_avg","fRMS_avg","fRMS_bkg_avg","retinal_artery_velocity_signal","retinal_vein_velocity_signal"}
 
     def _relevant_config(self, ctx):
-        return {"LocalBackgroundDist": ctx.dopplerview_config["VelocityEstimation"]["LocalBackgroundDist"]}
+        return {
+            "LocalBackgroundDist": ctx.dopplerview_config["VelocityEstimation"]["LocalBackgroundDist"],
+            "NumberOfWorkers": ctx.dopplerview_config["NumberOfWorkers"]
+        }
 
     def run(self, ctx):
 
         # ---- Requires ----
-        moment0 = ctx.require("moment0")
-        moment2 = ctx.require("moment2")
+        moment0 = ctx.require("M0_ff_video")
+        moment2 = ctx.require("M2_ff_video")
 
         artery_mask = ctx.require("retinal_artery_mask")
         vein_mask = ctx.require("retinal_vein_mask")
@@ -39,14 +42,12 @@ class VesselVelocityEstimatorStep(BaseStep):
         local_background_dist = ctx.dopplerview_config["VelocityEstimation"]["LocalBackgroundDist"]
         mask = dilation(vessel_mask, disk(local_background_dist)) #TODO add parameter
 
-        n_jobs = joblib.cpu_count() #TODO add parameter for number of parallel jobs
-
-        print(f"    - Inpainting fRMS with {n_jobs} parallel jobs")
+        n_jobs = ctx.dopplerview_config["NumberOfWorkers"]
 
         def _inpaint_frame(frame, mask):
             return inpaint.inpaint_biharmonic(frame, mask)
         
-        fRMSbkg = run_in_parallel(partial(_inpaint_frame, mask=mask), fRMS, n_jobs=-1, chunking=False)
+        fRMSbkg = run_in_parallel(partial(_inpaint_frame, mask=mask), fRMS, n_jobs=n_jobs, chunking=False, task_name="fRMS inpainting")
 
         # fRMSbkg = np.stack(np.array([inpaint.inpaint_biharmonic(frame, mask) for frame in fRMS]), axis=0)
 

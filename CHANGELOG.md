@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.0
+
+* Enable loading of doppler_view config
+* Choose to use local configs or default config
+* Enable modification of model_registry, h5_schema and output_config in advanced_ui
+
 ## 1.1.0
 
 * Interactive Tkinter GUI
