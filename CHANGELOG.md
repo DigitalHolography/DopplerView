@@ -1,7 +1,7 @@
 # Changelog
 
 ## 1.2.0
-
+* Take into account *NumberOfWorkers* params. By default, set at 0.5 : take half of the available workers
 * Enable loading of doppler_view config
 * Choose to use local configs or default config
 * Enable modification of model_registry, h5_schema and output_config in advanced_ui
