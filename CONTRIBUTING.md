@@ -42,7 +42,7 @@ You can find your installer in `dist/`, and the raw .exe in `dist/DopplerView`.
 **To make a new release**
 
 - Merge all features/bug fixes on dev. **Thoroughly test the branch**.
-- Merge dev in main with a pull-request
+- Run the release script:
 
 Then, on main, run 
 ```bash
@@ -62,7 +62,8 @@ python scripts/release.py [major|minor|patch] --finalize
 ```
 It will create a tag with the new version and push it.
 
-Finally, you have to [Create a new release](https://github.com/DigitalHolography/DopplerView/releases) with the new tag and the installer
+- Merge dev in main with a pull-request
+- Finally, [create a new release](https://github.com/DigitalHolography/DopplerView/releases) with the new tag and the installer
 
 ---
 
@@ -479,11 +480,20 @@ DAGEngine will:
 OutputManager
 ```
 
-If `debug=True`:
+The OutputManager handles all outputs :
+- .h5 outputs
+- images / plots / video outputs
+- .h5 cache for fast debugging
 
-* Intermediate outputs may be saved.
+It is used **automatically** by each step :
+- After step execution, the `DAG` calls the step.export() method
+- In step.export(), all keys produced by the steps are automatically saved in the .h5 if present in [h5_schema.json](dopplerview/resources/h5_schema.json) and in `measure_DV/output/output_%/step_name` if present in [output_config.json](dopplerview/resources/output_config.json).
+- To add an output in the .h5, indicate its path in [h5_schema.json](dopplerview/resources/h5_schema.json)
+- To add an output in the output_folder, indicate it in [output_config.json](dopplerview/resources/output_config.json) with its type. If it needs a new type, create a custom [renderer](dopplerview/input_output/output_renderer.py).
 
-Steps may optionally use:
+
+
+Instead of automatically saving at the end of the step with `output_config.json`, steps may optionally use:
 
 ```python
 ctx.output_manager
@@ -548,4 +558,3 @@ When adding a step or model:
 * [ ] No dependency cycles
 * [ ] Model loads correctly
 * [ ] Output folder structure preserved
-

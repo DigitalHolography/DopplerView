@@ -6,13 +6,15 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from dopplerview.input_output import user_config
+from dopplerview.input_output import log_config, user_config
 import numpy as np
 
 from dopplerview.pipeline.pipeline import Pipeline
 from dopplerview.models.registry import ModelRegistryConfig
 import dopplerview.input_output.user_config as user_config
 
+import logging
+logger = logging.getLogger(__name__)
 
 def load_dopplerview_config(config_path):
     """Load configuration from JSON file"""
@@ -21,6 +23,7 @@ def load_dopplerview_config(config_path):
 
 
 def main():
+    log_config.setup_logging()
     """Main CLI entry point"""
     parser = argparse.ArgumentParser(
         description='DopplerView - Artery/vein segmentation from doppler holograms'
@@ -67,7 +70,7 @@ def main():
     debug = args.debug
     
     if not input_folder.exists():
-        print(f"Error: holodoppler folder not found: {input_folder}", file=sys.stderr)
+        logger.info(f"Error: holodoppler folder not found: {input_folder}", file=sys.stderr)
         sys.exit(1)
     
     pipeline = Pipeline(debug_mode=debug)

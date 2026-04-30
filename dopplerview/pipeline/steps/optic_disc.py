@@ -29,7 +29,7 @@ class OpticDiscDetectionStep(BaseStep):
 
         center = (int(x_center), int(y_center))
 
-        print(f"    - Optic disc center detected at: {center}")
+        self.logger.info(f"    - Optic disc center detected at: {center}")
 
         return (x_center, y_center), diameter_x, diameter_y
     

@@ -21,7 +21,11 @@ class PreArteryMaskStep(BaseStep):
     name = "pre_artery_mask"
 
     def _relevant_config(self, ctx):
-        return {"sampling_freq": ctx.holodoppler_config["sampling_freq"]}
+        return {
+            "sampling_freq": ctx.holodoppler_config["sampling_freq"],
+            "batch_stride": ctx.holodoppler_config["batch_stride"],
+            "NumberOfWorkers": ctx.dopplerview_config["NumberOfWorkers"]
+            }
 
     def run(self, ctx):
         video = ctx.cache["M0_ff_video"]
@@ -30,11 +34,11 @@ class PreArteryMaskStep(BaseStep):
 
         fs = ctx.holodoppler_config["sampling_freq"]
         stride = ctx.holodoppler_config["batch_stride"]
-        print(f"    - Camera sampling frequency: {fs} Hz, batch stride: {stride}")
+        self.logger.info(f"    - Camera sampling frequency: {fs} Hz, batch stride: {stride}")
 
         sampling_frequency = pulse_analysis.get_effective_sampling_frequency(fs, stride)
 
-        print(f"    - Effective sampling frequency after accounting for batch stride: {sampling_frequency:.2f} Hz")
+        self.logger.info(f"    - Effective sampling frequency after accounting for batch stride: {sampling_frequency:.2f} Hz")
 
         # --- Step 1: Separate mask into branches ---
         labeled_vessels, _ = process_masks.get_labeled_vesselness(vessel_mask, *optic_disc_center)
@@ -51,7 +55,7 @@ class PreArteryMaskStep(BaseStep):
         beat_period = pulse_analysis.compute_idx0(signals_n, sampling_frequency)
         corrected_signals = np.zeros_like(signals_n)
         func = partial(pulse_analysis.correct_branch_signal_with_heartbeat, beat_period=beat_period, k=10)
-        corrected_signals = run_in_parallel(func, signals_n, n_jobs=-1, chunking=False)
+        corrected_signals = run_in_parallel(func, signals_n, n_jobs=ctx.dopplerview_config["NumberOfWorkers"], chunking=False, task_name="signal correction")
         # for i, signal in enumerate(signals_n):
         #     corrected_signals[i, :] = pulse_analysis.correct_branch_signal_with_heartbeat(signal, beat_period, k=10)
         ctx.cache["corrected_signals"] = corrected_signals

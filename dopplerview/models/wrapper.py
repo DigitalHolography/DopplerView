@@ -75,7 +75,7 @@ class TorchModelWrapper(BaseModelWrapper):
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
 
         # SAFER: assume state_dict unless you explicitly allow full model loading
-        checkpoint = torch.load(self.model_path, map_location=self.device, weights_only=False)
+        checkpoint = torch.jit.load(self.model_path, map_location=self.device)
 
         if isinstance(checkpoint, dict) and "state_dict" in checkpoint:
             checkpoint = checkpoint["state_dict"]

@@ -8,13 +8,9 @@
             "vein_mask": "retinal_vein_mask"
         },
         "Choroid": {
-            "binary": {
-                "vessel_mask": "choroidal_vessel_mask"
-            },
-            "av": {
-                "artery_mask": "choroidal_artery_mask",
-                "vein_mask": "choroidal_vein_mask"
-            }
+            "vessel_mask": "choroidal_vessel_mask",
+            "artery_mask": "choroidal_artery_mask",
+            "vein_mask": "choroidal_vein_mask"
         },
         "OpticDisc": {
             "center": "optic_disc_center",

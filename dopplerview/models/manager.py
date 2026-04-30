@@ -3,6 +3,8 @@ from pathlib import Path
 from huggingface_hub import hf_hub_download
 from dopplerview.models.wrapper import TorchModelWrapper, ONNXModelWrapper
 
+import logging
+logger = logging.getLogger(__name__)
 
 class ModelManager:
     def __init__(self, registry, cache_dir):

@@ -5,6 +5,8 @@ from typing import Dict, List, Iterable
 from dopplerview.pipeline.step import BaseStep
 import time
 
+import logging
+logger = logging.getLogger(__name__)
 class DAGEngine:
     """
     Directed Acyclic Graph execution engine.
@@ -113,7 +115,7 @@ class DAGEngine:
                 if self.debug_mode:
                     for k in step.produces:
                         if not ctx.has(k):
-                            print(f"    - Missing output '{k}' for step '{step.name}'. Marking for execution.")
+                            logger.info(f"    - Missing output '{k}' for step '{step.name}'. Marking for execution.")
                 should_run = True
 
             new_hash = step.fingerprint(ctx)
@@ -155,7 +157,7 @@ class DAGEngine:
         step.run(ctx)
 
         elapsed = time.time() - start_time
-        print(f"[DAG] Finished {step.name} in {elapsed:.2f}s")
+        logger.info(f"[DAG] Finished {step.name} in {elapsed:.2f}s")
 
         if callback:
             callback("step_done", step.name, elapsed)
@@ -174,7 +176,7 @@ class DAGEngine:
         if self.steps_to_run is None:
             self.set_targets(targets)
 
-        print(f"[DAG] Execution order: {self.steps_to_run}")
+        logger.info(f"[DAG] Execution order: {self.steps_to_run}")
 
         for i, step_name in enumerate(self.steps_to_run):
             step = self.steps[step_name]
@@ -183,7 +185,7 @@ class DAGEngine:
                 callback("step_start", step_name, i, len(self.steps_to_run))
 
             if step_name in self.invalidated:
-                print(f"[DAG] Running (invalidated): {step.name}")
+                logger.info(f"[DAG] Running (invalidated): {step.name}")
                 self.run_step(ctx, step, callback=callback)
 
                 # Invalidate downstream
@@ -192,13 +194,13 @@ class DAGEngine:
                 continue
 
             if not self._should_run(step, ctx):
-                print(f"[DAG] Skipping (valid cache): {step.name}")
+                logger.info(f"[DAG] Skipping (valid cache): {step.name}")
                 if callback:
                     callback("step_skipped", step.name)
                 step.export(ctx)
                 continue
 
-            print(f"[DAG] Running step: {step.name}")
+            logger.info(f"[DAG] Running step: {step.name}")
             self.run_step(ctx, step, callback=callback)
 
         self.invalidated.clear()

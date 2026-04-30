@@ -22,6 +22,8 @@ from dopplerview.input_output.read_folder import DopplerViewFolder, HolodopplerF
 from dopplerview.pipeline.steps.vessel_velocity_estimator import VesselVelocityEstimatorStep
 from dopplerview.pipeline.steps.arterial_waveform_analysis import ArterialWaveformAnalysisStep
 
+import logging
+logger = logging.getLogger(__name__)
 class Context:
     """
     Execution context shared across all steps.
@@ -33,6 +35,7 @@ class Context:
     """
 
     def __init__(self, debug_mode=False):
+        self.model_registry_path = None
         self.model_manager = None
         self.model_instances = {}
         self.metadata = {
@@ -45,9 +48,13 @@ class Context:
         self.DV_folder = None       # The DopplerView folder containing the output and cache, set when running the pipeline
         self.output_manager = None
         self.h5_schema = None
+        self.h5_schema_path = None
         self.output_config = None
+        self.output_config_path = None
         self.debug_mode = debug_mode
         self.dopplerview_config = None
+        self.dopplerview_config_path = None
+        self.DV_config_mode = "local"
         self.holodoppler_config = None
 
         # Runtime data storage
@@ -55,31 +62,34 @@ class Context:
 
     def load_default_manager(self):
         models_config = user_config.ensure_config_file("models.yaml")
-        print(f"[Pipeline] Loading model registry from {models_config}")
+        logger.info(f"[Pipeline] Loading model registry from {models_config}")
         registry = ModelRegistryConfig(models_config)
         self.model_manager = ModelManager(registry, cache_dir="~/.cache/dopplerview/models")
 
     def load_manager(self, config_path):
-        print(f"[Pipeline] Loading model registry from {config_path}")
+        logger.info(f"[Pipeline] Loading model registry from {config_path}")
+        self.model_registry_path = config_path
         registry = ModelRegistryConfig(config_path)
         self.model_manager = ModelManager(registry, cache_dir="~/.cache/dopplerview/models")
         
     def load_default_h5_schema(self):
-        h5_schema_config = user_config.ensure_config_file("h5_schema.json")
-        print(f"[Pipeline] Loading default H5 schema from {h5_schema_config}")
-        self.h5_schema = json.load(open(h5_schema_config))
+        self.h5_schema_path = user_config.ensure_config_file("h5_schema.json")
+        logger.info(f"[Pipeline] Loading default H5 schema from {self.h5_schema_path}")
+        self.h5_schema = json.load(open(self.h5_schema_path))
 
     def load_h5_schema(self, config_path):
-        print(f"[Pipeline] Loading H5 schema from {config_path}")
+        self.h5_schema_path = config_path
+        logger.info(f"[Pipeline] Loading H5 schema from {config_path}")
         self.h5_schema = json.load(open(config_path))
 
     def load_default_output_config(self):
-        output_config = user_config.ensure_config_file("output_config.json")
-        print(f"[Pipeline] Loading default output config from {output_config}")
-        self.output_config = json.load(open(output_config))
+        self.output_config_path = user_config.ensure_config_file("output_config.json")
+        logger.info(f"[Pipeline] Loading default output config from {self.output_config_path}")
+        self.output_config = json.load(open(self.output_config_path))
 
     def load_output_config(self, config_path):
-        print(f"[Pipeline] Loading output config from {config_path}")
+        self.output_config_path = config_path
+        logger.info(f"[Pipeline] Loading output config from {config_path}")
         self.output_config = json.load(open(config_path))
 
     def ensure_config(self):
@@ -94,13 +104,19 @@ class Context:
         config = json.load(open(config_path))
         return json_utils.remove_spaces_from_keys(config)
     
+    def set_config_mode(self, mode):
+        if mode not in ["local", "default"]:
+            raise ValueError(f"Invalid config mode: {mode}. Supported modes are 'local' and 'default'.")
+        self.DV_config_mode = mode
+    
     def load_dopplerview_config(self, config_path):
+        self.dopplerview_config_path = config_path
         self.dopplerview_config = self.load_config(config_path)
-        print(f"[Pipeline] Using DopplerView config file: {config_path}")
+        logger.info(f"[Pipeline] Using DopplerView config file: {config_path}")
     
     def load_holodoppler_config(self, config_path):
         self.holodoppler_config = self.load_config(config_path)
-        print(f"[Pipeline] Using Holodoppler config file: {config_path}")
+        logger.info(f"[Pipeline] Using Holodoppler config file: {config_path}")
 
     def _read_h5_into_cache(self):
         if self.DV_folder is None:
@@ -109,10 +125,10 @@ class Context:
         h5_cache_path = cache_folder / "cache.h5"
 
         if not h5_cache_path.exists():
-            print(f"[Pipeline] No cache file found at {h5_cache_path}. Skipping cache loading.")
+            logger.info(f"[Pipeline] No cache file found at {h5_cache_path}. Skipping cache loading.")
             return
         
-        print(f"[Pipeline] Reading cache from {h5_cache_path}")
+        logger.info(f"[Pipeline] Reading cache from {h5_cache_path}")
         with h5py.File(h5_cache_path, "r") as input_file:
             for key in input_file.keys():
                 self.cache[key] = input_file[key][()]
@@ -145,8 +161,8 @@ class Context:
             raise RuntimeError("Measure folder not set. Cannot load DopplerView folder.")
         self.DV_folder = DopplerViewFolder(self.measure_folder)
         
-        if self.dopplerview_config is None:
-            # Load configs from folder if not already loaded
+        if self.DV_config_mode == "local":
+            # Load configs from folder
             self.load_dopplerview_config(self.DV_folder.dopplerview_config)
 
     def load_folder_list(self, folder_list_path):
@@ -274,6 +290,9 @@ class Pipeline:
     def set_targets(self, targets):
         self.engine.set_targets(targets)
 
+    def set_config_mode(self, mode):
+        self.ctx.set_config_mode(mode)
+
     def run(self, targets=None, callback=None):
         if not self.ctx.has("input_file"):
             raise RuntimeError("Input path not set. Please load input folder before running the pipeline.")
@@ -283,24 +302,24 @@ class Pipeline:
         self.ctx.ensure_config()
 
         self.ctx.create_output_folder()
-        print(f"[Pipeline] Created output folder: {self.ctx.output_manager.output_dir}")
+        logger.info(f"[Pipeline] Created output folder: {self.ctx.output_manager.output_dir}")
 
         start_time = time.time()
         self.engine.run(self.ctx, targets, callback=callback)
         elapsed = time.time() - start_time
-        print(f"[Pipeline] Finished execution in {elapsed:.2f}s")
+        logger.info(f"[Pipeline] Finished execution in {elapsed:.2f}s")
 
         # If in debug mode, save the entire cache to the H5 file after execution
         if self.ctx.debug_mode:
-            print(f"[Pipeline] Saving cache to H5 file.")
+            logger.info(f"[Pipeline] Saving cache to H5 file.")
             self.ctx.output_manager.save_cache(self.ctx.cache)
         return self.ctx.cache
 
     def run_batch(self, targets=None, callback=None):
         for folder in self.ctx.input_folder_list:
             try:
-                print(f"[Run Batch] Processing folder: {folder}")
+                logger.info(f"[Run Batch] Processing folder: {folder}")
                 self.load_input(folder)
                 self.run(targets=targets, callback=callback)
             except Exception as e:
-                print(f"[Run Batch] Error processing folder {folder}: {e}")
+                logger.info(f"[Run Batch] Error processing folder {folder}: {e}")

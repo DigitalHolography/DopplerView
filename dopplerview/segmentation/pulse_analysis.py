@@ -15,6 +15,9 @@ from skimage import measure
 from dopplerview.segmentation import signal_processing
 from dopplerview.utils import image_utils
 
+import logging
+logger = logging.getLogger(__name__)
+
 # ================================ Pre-artery mask ================================ #
 
 def get_beats(signal, sys_idx, target_len=None):
@@ -535,7 +538,7 @@ def compute_diasys(video, pulse_artery, sampling_frequency, pulse_vein=None):
 
     # --- Empty systole case ---
     if sys_index_list is None or len(sys_index_list) == 0:
-        print("Warning: sys_index_list is empty. Skipping systole/diastole.")
+        logger.warning("Warning: sys_index_list is empty. Skipping systole/diastole.")
 
         amin = np.argmin(video, axis=2)
         amax = np.argmax(video, axis=2)
@@ -594,7 +597,7 @@ def compute_diasys(video, pulse_artery, sampling_frequency, pulse_vein=None):
     sysindexes = sorted(set(i for i in sysindexes if 0 <= i < numFrames))
     diasindexes = sorted(set(i for i in diasindexes if 0 <= i < numFrames))
 
-    print(f"    - Identified {len(sysindexes)} systole frames and {len(diasindexes)} diastole frames.")
+    logger.info(f"    - Identified {len(sysindexes)} systole frames and {len(diasindexes)} diastole frames.")
 
     if len(sysindexes) == 0:
         sysindexes = [0]
