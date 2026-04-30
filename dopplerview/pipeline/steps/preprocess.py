@@ -166,6 +166,7 @@ class PreprocessStep(BaseStep):
         moment2 = ctx.require("moment2")
 
         # Step 1: Normalize 
+        print("    - Applying flat field correction to the moments")
         gaussian_std = ctx.dopplerview_config['FlatFieldCorrection']['GWRatio']
         n_jobs = ctx.dopplerview_config["NumberOfWorkers"]
         M0_ff_video, M1_ff_video, M2_ff_video = self.normalize(gaussian_std, moment0, moment1, moment2, n_jobs=n_jobs)
@@ -178,9 +179,9 @@ class PreprocessStep(BaseStep):
 
         # # Step 4: Remove outliers 
         # self.remove_outliers()
-        ctx.cache["M0_ff_video"] = M0_ff_video
-        ctx.cache["M1_ff_video"] = M1_ff_video
-        ctx.cache["M2_ff_video"] = M2_ff_video
-        ctx["M0_ff_image"] = image_utils.normalize_to_uint8(np.mean(M0_ff_video, axis=0)) if M0_ff_video is not None else None
-        ctx["M1_ff_image"] = image_utils.normalize_to_uint8(np.mean(M1_ff_video, axis=0)) if M1_ff_video is not None else None
-        ctx["M2_ff_image"] = image_utils.normalize_to_uint8(np.mean(M2_ff_video, axis=0)) if M2_ff_video is not None else None
+        ctx.set("M0_ff_video", M0_ff_video)
+        ctx.set("M1_ff_video", M1_ff_video)
+        ctx.set("M2_ff_video", M2_ff_video)
+        ctx.set("M0_ff_image", image_utils.normalize_to_uint8(np.mean(M0_ff_video, axis=0)) if M0_ff_video is not None else None)
+        ctx.set("M1_ff_image", image_utils.normalize_to_uint8(np.mean(M1_ff_video, axis=0)) if M1_ff_video is not None else None)
+        ctx.set("M2_ff_image", image_utils.normalize_to_uint8(np.mean(M2_ff_video, axis=0)) if M2_ff_video is not None else None)
