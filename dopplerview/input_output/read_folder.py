@@ -36,7 +36,7 @@ class HolodopplerFolder:
         return json_path
     
     def get_input_folder(self):
-        raw_folder = self.directory / "raw"
+        raw_folder = self.directory / "h5"
         if not os.path.exists(raw_folder):
             raise FileNotFoundError(f"Raw folder not found in {self.directory}")
         return raw_folder
