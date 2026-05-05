@@ -205,6 +205,11 @@ class DAGEngine:
 
         self.invalidated.clear()
         self.steps_to_run = None
+
+        if callback:
+            callback("finished")
+
+
             
 
     # ------------------------------------------------------------------

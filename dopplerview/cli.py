@@ -81,7 +81,7 @@ def main():
     targets = args.targets if args.targets else None
 
     if args.batch:
-        pipeline.load_folder_list(input_folder)
+        pipeline.load_input_list(input_folder)
         pipeline.run_batch(targets=targets)
     else:
         pipeline.load_input(input_folder)
