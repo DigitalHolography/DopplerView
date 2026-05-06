@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.3.0
+* Handle multiple inputs
+
 ## 1.2.0
 * Take into account *NumberOfWorkers* params. By default, set at 0.5 : take half of the available workers
 * Enable loading of doppler_view config
