@@ -74,6 +74,7 @@ class MainWindow:
         self._build_ui()
         self._install_drop_targets()
         self.update_mode()  # set initial mode
+        self.update_config_mode() # set initial config mode
 
 
     def _apply_theme(self) -> None:
@@ -188,7 +189,7 @@ class MainWindow:
             self.minimal_logo_label = ttk.Label(container, image=self._minimal_logo_image)
             self.minimal_logo_label.grid(row=1, column=0, pady=(0, 20))
 
-        self.btn_load = ttk.Button(container, text="Select .holo File", command=self.load_holo)
+        self.btn_load = ttk.Button(container, text="Select .holo file(s)", command=self.load_holo)
         self.btn_load.grid(row=2, column=0, pady=(0, 10))
 
         self.input_path_label = tk.Label(
@@ -201,7 +202,7 @@ class MainWindow:
         ).grid(row=3, column=0, pady=(0, 10))
 
         state = "disabled" if self.input_folder.get() == "No input selected" else "enabled"
-        self.btn_run_minimal = ttk.Button(container, text="Run Full Pipeline", command=self.run_full_pipeline, state=state)
+        self.btn_run_minimal = ttk.Button(container, text="Run Full Pipeline", command=self.run_full_pipelines, state=state)
         self.btn_run_minimal.grid(row=4, column=0, pady=10)
 
         self.progress_minimal = ttk.Progressbar(container, maximum=100)
@@ -291,17 +292,7 @@ class MainWindow:
         self.radio_frame.grid_columnconfigure(0, weight=1)
         self.radio_frame.grid_columnconfigure(1, weight=1)
 
-        self.config_mode_var = tk.StringVar(value="local")
-
-        rb_local = tk.Radiobutton(
-            self.radio_frame,
-            text="Use local config",
-            variable=self.config_mode_var,
-            value="local",
-            anchor="w",
-            command=self.update_config_mode,
-        )
-        rb_local.grid(row=0, column=0, sticky="w")
+        self.config_mode_var = tk.StringVar(value="default")
 
         rb_default = tk.Radiobutton(
             self.radio_frame,
@@ -311,8 +302,17 @@ class MainWindow:
             anchor="w",
             command=self.update_config_mode,
         )
-        rb_default.grid(row=0, column=1, sticky="w")
+        rb_default.grid(row=0, column=0, sticky="w")
 
+        rb_local = tk.Radiobutton(
+            self.radio_frame,
+            text="Use local config",
+            variable=self.config_mode_var,
+            value="local",
+            anchor="w",
+            command=self.update_config_mode,
+        )
+        rb_local.grid(row=0, column=1, sticky="w")
 
         # --- Buttons ---
         self.btn_models_registry = ttk.Button(
@@ -408,7 +408,7 @@ class MainWindow:
 
         # --- Run button ---
         state = "disabled" if self.input_folder.get() == "No input selected" else "enabled"
-        self.btn_run = ttk.Button(frame, text="Run Pipeline", command=self.run_pipeline, state=state)
+        self.btn_run = ttk.Button(frame, text="Run Pipeline", command=self.run_pipelines_with_steps, state=state)
         self.btn_run.grid(row=row, column=0, pady=5, sticky="ew")
         row += 1
 
@@ -509,13 +509,16 @@ class MainWindow:
 
             cb.config(selectcolor=color)
 
-    def load_input(self, folder):
-        self.input_folder.set(folder)
+    def load_input(self, folders):
+        self.input_folder.set(folders)
         self.cleanup_image()
         self.progress["value"] = 0
         self.progress_minimal["value"] = 0
 
-        self.pipeline.load_input(folder)
+        folder_list = folders.split()
+
+        self.pipeline.ctx.input_list = folder_list
+        self.pipeline.load_input(folder_list[0])  # load first by default, pipeline will handle the rest in batch mode
         self.config_path.set(self.pipeline.ctx.dopplerview_config_path)
         self.update_step_display()
 
@@ -580,19 +583,19 @@ class MainWindow:
         path = event.data.strip("{}")  # windows fix
         self.load_input(path)
 
-    def run_full_pipeline(self):
+    def run_full_pipelines(self):
         # full pipeline
-        self.run_pipeline(steps=None)
+        self.run_pipelines(None)
 
-    def run_pipeline_with_steps(self):
+    def run_pipelines_with_steps(self):
         steps = self.get_selected_steps()
-        self.run_pipeline(steps=steps)
+        self.run_pipelines(steps=steps)
 
-    def run_pipeline(self, steps=None):
+    def run_pipelines(self, steps=None):
         self.btn_run.config(state="disabled")
         self.btn_run_minimal.config(state="disabled")
         thread = threading.Thread(
-            target=self._run_pipeline_worker,
+            target=self._run_pipelines_worker,
             args=(steps,),
             daemon=True
         )
@@ -600,27 +603,46 @@ class MainWindow:
 
         self.root.after(100, self.check_queue)
 
-    def _run_pipeline_worker(self, steps):
+    def _run_pipelines_worker(self, steps):
         def callback(event, *args):
             self.queue.put((event, args))
         try:
-            self.pipeline.run(targets=steps, callback=callback)
-
-            img = self.pipeline.ctx.get("M0_ff_image")
-            art = self.pipeline.ctx.get("retinal_artery_mask")
-            vein = self.pipeline.ctx.get("retinal_vein_mask")
-
-            self.queue.put(("finished", (img, art, vein)))
-
+            self.pipeline.run_batch(targets=steps, callback=callback)
         except Exception as e:
             self.queue.put(("error", str(e)))
 
+    def step_done_output(self, step_name):
+        if step_name == "preprocess":
+            img = self.pipeline.ctx.get("M0_ff_image")
+            if img is not None:
+                self.display_image(img)
+
+        elif step_name == "retinal_vessel_segmentation":
+            img = self.pipeline.ctx.get("M0_ff_image")
+            vessel = self.pipeline.ctx.get("retinal_vessel_mask")
+            if img is not None and vessel is not None:
+                overlay = self.overlay(img, vessel, None)
+                self.display_image(overlay)
+
+        elif step_name == "retinal_artery_vein_segmentation":
+            img = self.pipeline.ctx.get("M0_ff_image")
+            art = self.pipeline.ctx.get("retinal_artery_mask")
+            vein = self.pipeline.ctx.get("retinal_vein_mask")
+            if img is not None and art is not None and vein is not None:
+                overlay = self.overlay(img, art, vein)
+                self.display_image(overlay)
+        
     def check_queue(self):
         try:
             while True:
                 event, data = self.queue.get_nowait()
+                if event == "input_loaded":
+                    self.progress["value"] = 0
+                    self.progress_minimal["value"] = 0
 
-                if event == "step_start":
+                    self.config_path.set(self.pipeline.ctx.dopplerview_config_path) # refresh config path
+
+                elif event == "step_start":
                     step_name, i, total = data
                     progress = (i / total) * 100
                     self.progress["value"] = progress
@@ -631,6 +653,7 @@ class MainWindow:
                 elif event == "step_done":
                     step_name, elapsed = data
                     self.update_step_color(step_name, "done")
+                    self.step_done_output(step_name)
 
                 elif event == "step_skipped":
                     step_name = data[0]
@@ -643,11 +666,7 @@ class MainWindow:
                     self.progress_minimal["value"] = 100
                     self.btn_run_minimal.config(state="enabled")
 
-                    img, art, vein = data
-
-                    if img is not None:
-                        overlay = self.overlay(img, art, vein)
-                        self.display_image(overlay)
+                    self.update_step_display()  # refresh colors to reflect final cache status
 
                 elif event == "error":
                     logger.error("Error:", data)
@@ -718,6 +737,8 @@ class MainWindow:
     # -------------------
 
     def display_image(self, img):
+        if img.ndim == 2:
+            img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
         self.image_tk = np_to_tk(img)  # keep reference!
         self.image_label.config(image=self.image_tk)
 
@@ -731,7 +752,10 @@ class MainWindow:
             img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
 
         if artery_mask is not None:
-            img[artery_mask > 0] = [255, 0, 0]
+            if vein_mask is not None:
+                img[artery_mask > 0] = [255, 0, 0]
+            else:
+                img[artery_mask > 0] = [255, 250, 250]
 
         if vein_mask is not None:
             img[vein_mask > 0] = [0, 0, 255]

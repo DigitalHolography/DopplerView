@@ -41,7 +41,7 @@ class Context:
         self.metadata = {
             "step_hashes": {}
         }
-        self.input_folder_list = []
+        self.input_list = []
 
         self.measure_folder = None  # The measure folder containing the HD folder and the DV folder, set when loading input
         self.HD_folder = None       # The Holodoppler folder containing the raw input data, set when loading input
@@ -165,17 +165,21 @@ class Context:
             # Load configs from folder
             self.load_dopplerview_config(self.DV_folder.dopplerview_config)
 
-    def load_folder_list(self, folder_list_path):
+    def load_input_list(self, folder_list_path):
+        """ 
+        Loads a list of input folders for batch processing. 
+        The list can be provided as a text file (one folder path per line) or as a directory containing subdirectories for each input folder.
+        """
         if not os.path.exists(folder_list_path):
             raise FileNotFoundError(f"Folder list file not found: {folder_list_path}")
         
         if os.path.isfile(folder_list_path):
             with open(folder_list_path, "r") as f:
-                self.input_folder_list = [line.strip() for line in f.readlines()]
+                self.input_list = [line.strip() for line in f.readlines()]
         elif os.path.isdir(folder_list_path):
             # Load all subdirectories as folders
             subdirs = [d for d in os.listdir(folder_list_path) if os.path.isdir(os.path.join(folder_list_path, d))]
-            self.input_folder_list = [Path(os.path.join(folder_list_path, d)) for d in subdirs]
+            self.input_list = [Path(os.path.join(folder_list_path, d)) for d in subdirs]
 
     def get(self, key: str):
         return self.cache.get(key)
@@ -275,8 +279,8 @@ class Pipeline:
     def load_input(self, input_path):
         self.ctx.load_input_folder(input_path)
 
-    def load_folder_list(self, folder_list_path):
-        self.ctx.load_folder_list(folder_list_path)
+    def load_input_list(self, folder_list_path):
+        self.ctx.load_input_list(folder_list_path)
 
     def load_model_registry(self, config_path):
         self.ctx.load_manager(config_path)
@@ -316,10 +320,11 @@ class Pipeline:
         return self.ctx.cache
 
     def run_batch(self, targets=None, callback=None):
-        for folder in self.ctx.input_folder_list:
+        for folder in self.ctx.input_list:
             try:
                 logger.info(f"[Run Batch] Processing folder: {folder}")
                 self.load_input(folder)
+                callback("input_loaded")
                 self.run(targets=targets, callback=callback)
             except Exception as e:
                 logger.info(f"[Run Batch] Error processing folder {folder}: {e}")
