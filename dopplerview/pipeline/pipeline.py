@@ -324,6 +324,7 @@ class Pipeline:
             try:
                 logger.info(f"[Run Batch] Processing folder: {folder}")
                 self.load_input(folder)
+                callback("input_loaded")
                 self.run(targets=targets, callback=callback)
             except Exception as e:
                 logger.info(f"[Run Batch] Error processing folder {folder}: {e}")

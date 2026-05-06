@@ -74,6 +74,7 @@ class MainWindow:
         self._build_ui()
         self._install_drop_targets()
         self.update_mode()  # set initial mode
+        self.update_config_mode() # set initial config mode
 
 
     def _apply_theme(self) -> None:
@@ -291,17 +292,7 @@ class MainWindow:
         self.radio_frame.grid_columnconfigure(0, weight=1)
         self.radio_frame.grid_columnconfigure(1, weight=1)
 
-        self.config_mode_var = tk.StringVar(value="local")
-
-        rb_local = tk.Radiobutton(
-            self.radio_frame,
-            text="Use local config",
-            variable=self.config_mode_var,
-            value="local",
-            anchor="w",
-            command=self.update_config_mode,
-        )
-        rb_local.grid(row=0, column=0, sticky="w")
+        self.config_mode_var = tk.StringVar(value="default")
 
         rb_default = tk.Radiobutton(
             self.radio_frame,
@@ -311,8 +302,17 @@ class MainWindow:
             anchor="w",
             command=self.update_config_mode,
         )
-        rb_default.grid(row=0, column=1, sticky="w")
+        rb_default.grid(row=0, column=0, sticky="w")
 
+        rb_local = tk.Radiobutton(
+            self.radio_frame,
+            text="Use local config",
+            variable=self.config_mode_var,
+            value="local",
+            anchor="w",
+            command=self.update_config_mode,
+        )
+        rb_local.grid(row=0, column=1, sticky="w")
 
         # --- Buttons ---
         self.btn_models_registry = ttk.Button(
@@ -616,7 +616,7 @@ class MainWindow:
             img = self.pipeline.ctx.get("M0_ff_image")
             if img is not None:
                 self.display_image(img)
-                
+
         elif step_name == "retinal_vessel_segmentation":
             img = self.pipeline.ctx.get("M0_ff_image")
             vessel = self.pipeline.ctx.get("retinal_vessel_mask")
@@ -636,8 +636,13 @@ class MainWindow:
         try:
             while True:
                 event, data = self.queue.get_nowait()
+                if event == "input_loaded":
+                    self.progress["value"] = 0
+                    self.progress_minimal["value"] = 0
 
-                if event == "step_start":
+                    self.config_path.set(self.pipeline.ctx.dopplerview_config_path) # refresh config path
+
+                elif event == "step_start":
                     step_name, i, total = data
                     progress = (i / total) * 100
                     self.progress["value"] = progress
@@ -660,6 +665,8 @@ class MainWindow:
 
                     self.progress_minimal["value"] = 100
                     self.btn_run_minimal.config(state="enabled")
+
+                    self.update_step_display()  # refresh colors to reflect final cache status
 
                 elif event == "error":
                     logger.error("Error:", data)
@@ -745,7 +752,10 @@ class MainWindow:
             img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
 
         if artery_mask is not None:
-            img[artery_mask > 0] = [255, 0, 0]
+            if vein_mask is not None:
+                img[artery_mask > 0] = [255, 0, 0]
+            else:
+                img[artery_mask > 0] = [255, 250, 250]
 
         if vein_mask is not None:
             img[vein_mask > 0] = [0, 0, 255]
