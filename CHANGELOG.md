@@ -5,6 +5,7 @@
 * Resize advanced window when images are displayed
 * Add eye laterality classification
 * Enable parallel step execution
+* Add optic disc segmentation
 
 ## 1.2.0
 * Take into account *NumberOfWorkers* params. By default, set at 0.5 : take half of the available workers

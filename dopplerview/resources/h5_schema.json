@@ -14,7 +14,8 @@
         },
         "OpticDisc": {
             "center": "optic_disc_center",
-            "axes": "optic_disc_axes"
+            "axes": "optic_disc_axes",
+            "mask": "optic_disc_mask"
         }
     },
     "waveform": {

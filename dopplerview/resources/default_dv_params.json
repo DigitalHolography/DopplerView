@@ -14,7 +14,7 @@
     "DiaphragmRadius": 0.45,
     "CropChoroidRadius": 0.1,
     "ForceVesselWidth": false,
-    "OpticDiskDetectorMethod": "raphael"
+    "OpticDiskDetectorMethod": "deep"
   },
   "VelocityEstimation": {
     "DifferenceMethods": "signed_quadratic",

@@ -15,7 +15,7 @@ from dopplerview.utils import json_utils
 
 from dopplerview.pipeline.steps.read_moments import ReadMomentsStep
 from dopplerview.pipeline.steps.preprocess import PreprocessStep
-from dopplerview.pipeline.steps.optic_disc import OpticDiscDetectionStep
+from dopplerview.pipeline.steps.optic_disc import OpticDiscDetectionStep, OpticDiscSegmentationStep
 from dopplerview.pipeline.steps.eye_laterality_classification import EyeLateralityClassificationStep
 from dopplerview.pipeline.steps.vessel_segmentation import RetinalVesselSegmentationStep, ChoroidalVesselSegmentationStep
 from dopplerview.pipeline.steps.pulse_analysis import PulseAnalysisStep
@@ -264,6 +264,7 @@ class Pipeline:
             PreprocessStep(),
             EyeLateralityClassificationStep(),
             OpticDiscDetectionStep(),
+            OpticDiscSegmentationStep(),
             RetinalVesselSegmentationStep(),
             ChoroidalVesselSegmentationStep(),
             PulseAnalysisStep(),
