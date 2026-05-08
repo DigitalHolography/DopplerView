@@ -1,89 +1,106 @@
 # dopplerview/core/dag.py
 
 from collections import defaultdict, deque
-from typing import Dict, List, Iterable
-from dopplerview.pipeline.step import BaseStep
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Callable, Dict, Iterable, List, Optional, Set
+import threading
 import time
-
 import logging
+
+from dopplerview.pipeline.step import BaseStep
+
 logger = logging.getLogger(__name__)
+
+
 class DAGEngine:
     """
     Directed Acyclic Graph execution engine.
 
     - Resolves dependencies automatically
-    - Executes only required steps
+    - Executes independent steps in parallel (wave-based scheduling)
+    - Executes only required steps, with cache validation
     """
 
-    def __init__(self, steps: Iterable[BaseStep], debug_mode=False):
+    def __init__(
+        self,
+        steps: Iterable[BaseStep],
+        debug_mode: bool = False,
+        max_workers: Optional[int] = None,
+    ):
         self.steps: Dict[str, BaseStep] = {s.name: s for s in steps}
-
-        self._validate_unique_names() # Ensure all steps have unique names
-        self.graph = self._build_dependency_graph() # Directed acyclic graph of step dependencies
-        self.execution_order = self._topological_sort() # Cached topological order of steps for execution
-
-        self.invalidated = set() # Steps marked for execution due to changes or missing outputs
-        self.steps_to_run = None # Cache resolved execution order for given targets
-
         self.debug_mode = debug_mode
+        self.max_workers = max_workers  # None → ThreadPoolExecutor picks a default
+
+        self._validate_unique_names()
+        self.graph: Dict[str, Set[str]] = self._build_dependency_graph()
+        self.reverse_graph: Dict[str, Set[str]] = self._build_reverse_graph()
+        self.execution_order: List[str] = self._topological_sort()
+
+        # Mutable state reset between run() calls
+        self._invalidated: Set[str] = set()
+        self._steps_to_run: Optional[List[str]] = None
+        self._lock = threading.Lock()  # Guards shared mutable state during parallel runs
 
     # ------------------------------------------------------------------
     # Graph construction
     # ------------------------------------------------------------------
 
-    def _validate_unique_names(self):
-        if len(self.steps) == 0:
+    def _validate_unique_names(self) -> None:
+        if not self.steps:
             raise ValueError("No steps registered in DAG.")
-
-        if len(set(self.steps.keys())) != len(self.steps):
+        if len(set(self.steps)) != len(self.steps):
             raise ValueError("Duplicate step names detected.")
 
-    def _build_dependency_graph(self):
+    def _build_dependency_graph(self) -> Dict[str, Set[str]]:
         """
-        Build step-to-step dependency graph based on produced keys.
+        Build a producer → consumer graph based on produced/required keys.
+        graph[A] = {B, C}  means A must finish before B and C can start.
         """
-        key_producers = {}
-        graph = defaultdict(set)
+        key_producers: Dict[str, str] = {}
+        graph: Dict[str, Set[str]] = defaultdict(set)
 
-        # Map which step produces which key
         for step in self.steps.values():
             for key in step.produces:
                 if key in key_producers:
-                    raise ValueError(
-                        f"Multiple steps produce the same key: '{key}'"
-                    )
+                    raise ValueError(f"Multiple steps produce the same key: '{key}'")
                 key_producers[key] = step.name
 
-        # Build dependency edges
         for step in self.steps.values():
             for required_key in step.requires:
-                if required_key not in key_producers:
-                    continue  # Assume provided externally
-                producer = key_producers[required_key]
-                graph[producer].add(step.name)
+                producer = key_producers.get(required_key)
+                if producer:
+                    graph[producer].add(step.name)
 
-        return graph
+        # Ensure every step appears in the graph (even if it has no edges)
+        for name in self.steps:
+            graph.setdefault(name, set())
+
+        return dict(graph)
+
+    def _build_reverse_graph(self) -> Dict[str, Set[str]]:
+        """consumer → set of producers (used for ancestor traversal)."""
+        reverse: Dict[str, Set[str]] = defaultdict(set)
+        for producer, consumers in self.graph.items():
+            for consumer in consumers:
+                reverse[consumer].add(producer)
+        return dict(reverse)
 
     # ------------------------------------------------------------------
-    # Topological sort
+    # Topological sort (Kahn's algorithm)
     # ------------------------------------------------------------------
 
-    def _topological_sort(self):
-        """
-        Kahn's algorithm.
-        """
+    def _topological_sort(self) -> List[str]:
         in_degree = {name: 0 for name in self.steps}
-        for deps in self.graph.values():
-            for node in deps:
+        for consumers in self.graph.values():
+            for node in consumers:
                 in_degree[node] += 1
 
-        queue = deque([n for n, deg in in_degree.items() if deg == 0])
-        order = []
+        queue = deque(name for name, deg in in_degree.items() if deg == 0)
+        order: List[str] = []
 
         while queue:
             node = queue.popleft()
             order.append(node)
-
             for neighbor in self.graph[node]:
                 in_degree[neighbor] -= 1
                 if in_degree[neighbor] == 0:
@@ -95,140 +112,127 @@ class DAGEngine:
         return order
 
     # ------------------------------------------------------------------
-    # Execution
+    # Wave decomposition (parallelism)
     # ------------------------------------------------------------------
 
-    def _should_run(self, step, ctx):
-        """Determine if a step needs to be executed.
-        A step should run if:
-        1. It is explicitly invalidated (e.g. due to upstream changes).
-        2. Any of its outputs are missing from the cache.
-        3. The fingerprint hash of the step's relevant config or inputs has changed since last execution.
-
-        If in debug mode, steps will be skipped if outputs are present, regardless of hash changes, allowing to bypass expensive computations while iterating on the pipeline.
+    def _build_execution_waves(self, steps_to_run: List[str]) -> List[List[str]]:
         """
-        should_run = step.name in self.invalidated
+        Partition *steps_to_run* into sequential waves.
+        All steps within a wave are independent and can run in parallel.
 
-        if not should_run:
-            # If outputs missing -> must run
-            if not all(ctx.has(k) for k in step.produces):
-                if self.debug_mode:
-                    for k in step.produces:
-                        if not ctx.has(k):
-                            logger.info(f"    - Missing output '{k}' for step '{step.name}'. Marking for execution.")
-                should_run = True
+        A step enters wave N when all its required producers (that are
+        included in steps_to_run) have been assigned to waves 0..N-1.
+        """
+        run_set = set(steps_to_run)
+        wave_index: Dict[str, int] = {}
 
+        for name in steps_to_run:  # already in topological order
+            producers_in_run = self.reverse_graph.get(name, set()) & run_set
+            if producers_in_run:
+                wave_index[name] = max(wave_index[p] for p in producers_in_run) + 1
+            else:
+                wave_index[name] = 0
+
+        max_wave = max(wave_index.values(), default=0)
+        waves: List[List[str]] = [[] for _ in range(max_wave + 1)]
+        for name, idx in wave_index.items():
+            waves[idx].append(name)
+
+        return waves
+
+    # ------------------------------------------------------------------
+    # Cache / invalidation helpers
+    # ------------------------------------------------------------------
+
+    def _collect_downstream(self, step_name: str) -> Set[str]:
+        visited: Set[str] = set()
+
+        def dfs(node: str) -> None:
+            for child in self.graph.get(node, set()):
+                if child not in visited:
+                    visited.add(child)
+                    dfs(child)
+
+        dfs(step_name)
+        return visited
+
+    def _should_run(self, step: BaseStep, ctx) -> bool:
+        """
+        Determine whether a step needs to execute.
+
+        Runs when:
+        1. Explicitly invalidated (upstream changed).
+        2. Any output key is absent from the cache.
+        3. Fingerprint changed (skipped in debug_mode when outputs present).
+        """
+        with self._lock:
+            already_invalidated = step.name in self._invalidated
+
+        if already_invalidated:
+            return True
+
+        missing_output = not all(ctx.has(k) for k in step.produces)
+        if missing_output:
+            if self.debug_mode:
+                for k in step.produces:
+                    if not ctx.has(k):
+                        logger.info(
+                            f"    - Missing output '{k}' for step '{step.name}'."
+                            " Marking for execution."
+                        )
+            self._mark_invalidated(step.name)
+            return True
+
+        if not self.debug_mode:
             new_hash = step.fingerprint(ctx)
             old_hash = ctx.metadata["step_hashes"].get(step.name)
+            if old_hash != new_hash:
+                self._mark_invalidated(step.name)
+                return True
 
-            # If hashes differ, must run
-            if old_hash != new_hash and not self.debug_mode:
-                should_run = True
+        return False
 
-        # If should run, invalidate downstream to ensure following steps also re-run
-        if should_run:
-            self.invalidated.add(step.name)
-            self.invalidated.update(self._collect_downstream(step.name))
+    def _mark_invalidated(self, step_name: str) -> None:
+        """Thread-safe invalidation of a step and all its downstream dependents."""
+        with self._lock:
+            self._invalidated.add(step_name)
+            self._invalidated.update(self._collect_downstream(step_name))
 
-        return should_run
-    
-    def set_targets(self, targets: List[str]):
+    # ------------------------------------------------------------------
+    # Target resolution
+    # ------------------------------------------------------------------
+
+    def set_targets(self, targets: Optional[List[str]]) -> None:
         """
-        Set specific targets for execution, invalidating necessary steps.
+        Restrict execution to *targets* and their transitive dependencies.
+        Pass None to run the full pipeline.
         """
-        self.invalidated.clear()
+        with self._lock:
+            self._invalidated.clear()
+
         if targets is None:
-            self.steps_to_run = self.execution_order
+            self._steps_to_run = list(self.execution_order)
         else:
             if self.debug_mode:
-                self.invalidated.update(targets)
-            self.steps_to_run = self._resolve_required_steps(targets)
-        
-        # Last target is always invalidated to ensure it runs, even if cached
-        if self.steps_to_run is not None and len(self.steps_to_run) > 0:
-            self.invalidated.add(self.steps_to_run[-1])
+                with self._lock:
+                    self._invalidated.update(targets)
+            self._steps_to_run = self._resolve_required_steps(targets)
 
-    def run_step(self, ctx, step, callback=None):
-        start_time = time.time()
-
-        if callback:
-            callback("step_running", step.name)
-
-        step.run(ctx)
-
-        elapsed = time.time() - start_time
-        logger.info(f"[DAG] Finished {step.name} in {elapsed:.2f}s")
-
-        if callback:
-            callback("step_done", step.name, elapsed)
-
-        step.export(ctx)
-        ctx.metadata["step_hashes"][step.name] = step.fingerprint(ctx)
-
-    def run(self, ctx, targets: List[str] = None, callback=None):
-        """
-        Execute the DAG.
-
-        If targets is None, run entire pipeline
-
-        If targets provided, run only required subset
-        """
-        if self.steps_to_run is None:
-            self.set_targets(targets)
-
-        logger.info(f"[DAG] Execution order: {self.steps_to_run}")
-
-        for i, step_name in enumerate(self.steps_to_run):
-            step = self.steps[step_name]
-
-            if callback:
-                callback("step_start", step_name, i, len(self.steps_to_run))
-
-            if step_name in self.invalidated:
-                logger.info(f"[DAG] Running (invalidated): {step.name}")
-                self.run_step(ctx, step, callback=callback)
-
-                # Invalidate downstream
-                downstream = self._collect_downstream(step_name)
-                self.invalidated.update(downstream)
-                continue
-
-            if not self._should_run(step, ctx):
-                logger.info(f"[DAG] Skipping (valid cache): {step.name}")
-                if callback:
-                    callback("step_skipped", step.name)
-                step.export(ctx)
-                continue
-
-            logger.info(f"[DAG] Running step: {step.name}")
-            self.run_step(ctx, step, callback=callback)
-
-        self.invalidated.clear()
-        self.steps_to_run = None
-
-        if callback:
-            callback("finished")
-
-
-            
-
-    # ------------------------------------------------------------------
-    # Partial execution support
-    # ------------------------------------------------------------------
+        # Always re-run the final target even when cached
+        if self._steps_to_run:
+            self._mark_invalidated(self._steps_to_run[-1])
 
     def _resolve_required_steps(self, targets: List[str]) -> List[str]:
-        """
-        Determine minimal subgraph needed to compute targets.
-        """
+        """Return the minimal topologically-ordered subgraph needed for *targets*."""
+        required: Set[str] = set()
 
-        required = set()
-
-        def collect(step_name):
-            if step_name in required:
+        def collect(name: str) -> None:
+            if name in required:
                 return
-            required.add(step_name)
-
-            step = self.steps[step_name]
+            required.add(name)
+            step = self.steps.get(name)
+            if step is None:
+                raise ValueError(f"Unknown step: '{name}'")
             for key in step.requires:
                 producer = self._find_producer(key)
                 if producer:
@@ -236,26 +240,150 @@ class DAGEngine:
 
         for t in targets:
             if t not in self.steps:
-                raise ValueError(f"Unknown step: {t}")
+                raise ValueError(f"Unknown step: '{t}'")
             collect(t)
 
-        # Preserve topological order
         return [s for s in self.execution_order if s in required]
 
-    def _find_producer(self, key):
+    def _find_producer(self, key: str) -> Optional[str]:
         for step in self.steps.values():
             if key in step.produces:
                 return step.name
         return None
-    
-    def _collect_downstream(self, step_name):
-        visited = set()
 
-        def dfs(node):
-            for child in self.graph[node]:
-                if child not in visited:
-                    visited.add(child)
-                    dfs(child)
+    # ------------------------------------------------------------------
+    # Step execution
+    # ------------------------------------------------------------------
 
-        dfs(step_name)
-        return visited
+    def _run_step(
+        self,
+        ctx,
+        step: BaseStep,
+        callback: Optional[Callable] = None,
+    ) -> None:
+        """Execute a single step, update hashes, and export outputs."""
+        start = time.time()
+
+        if callback:
+            callback("step_running", step.name)
+
+        step.run(ctx)
+
+        elapsed = time.time() - start
+        logger.info(f"[DAG] Finished '{step.name}' in {elapsed:.2f}s")
+
+        if callback:
+            callback("step_done", step.name, elapsed)
+
+        step.export(ctx)
+        ctx.metadata["step_hashes"][step.name] = step.fingerprint(ctx)
+
+    # ------------------------------------------------------------------
+    # Public run interface
+    # ------------------------------------------------------------------
+
+    def run(
+        self,
+        ctx,
+        targets: Optional[List[str]] = None,
+        callback: Optional[Callable] = None,
+    ) -> None:
+        """
+        Execute the DAG, running independent steps in parallel.
+
+        Parameters
+        ----------
+        ctx:
+            Pipeline context (cache, metadata, …).
+        targets:
+            Optional list of step names to compute. Transitive dependencies
+            are included automatically. Pass None to run the full pipeline.
+        callback:
+            Optional callable invoked with progress events:
+            ``("step_start", name, index, total)``
+            ``("step_running", name)``
+            ``("step_done", name, elapsed)``
+            ``("step_skipped", name)``
+            ``("finished")``
+        """
+        if self._steps_to_run is None:
+            self.set_targets(targets)
+
+        steps_to_run = self._steps_to_run
+        waves = self._build_execution_waves(steps_to_run)
+
+        logger.info(
+            f"[DAG] Execution plan: {len(waves)} wave(s), "
+            f"{len(steps_to_run)} step(s) — {[list(w) for w in waves]}"
+        )
+
+        completed = 0
+        total = len(steps_to_run)
+
+        for wave in waves:
+            if len(wave) == 1:
+                # Single step: run directly, no thread overhead
+                self._execute_step_in_run(
+                    ctx, wave[0], completed, total, callback
+                )
+                completed += 1
+            else:
+                # Multiple independent steps: run in parallel
+                futures = {}
+                with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                    for step_name in wave:
+                        future = executor.submit(
+                            self._execute_step_in_run,
+                            ctx, step_name, completed, total, callback,
+                        )
+                        futures[future] = step_name
+
+                    for future in as_completed(futures):
+                        step_name = futures[future]
+                        exc = future.exception()
+                        if exc is not None:
+                            logger.error(
+                                f"[DAG] Step '{step_name}' raised an exception: {exc}"
+                            )
+                            raise exc
+                        completed += 1
+
+        with self._lock:
+            self._invalidated.clear()
+        self._steps_to_run = None
+
+        if callback:
+            callback("finished")
+
+    def _execute_step_in_run(
+        self,
+        ctx,
+        step_name: str,
+        index: int,
+        total: int,
+        callback: Optional[Callable],
+    ) -> None:
+        """Decide whether to run or skip a step, then act accordingly."""
+        step = self.steps[step_name]
+
+        if callback:
+            callback("step_start", step_name, index, total)
+
+        with self._lock:
+            is_invalidated = step_name in self._invalidated
+
+        if is_invalidated:
+            logger.info(f"[DAG] Running (invalidated): '{step_name}'")
+            self._run_step(ctx, step, callback=callback)
+            self._mark_invalidated(step_name)  # propagate to downstream
+            return
+
+        if not self._should_run(step, ctx):
+            logger.info(f"[DAG] Skipping (valid cache): '{step_name}'")
+            if callback:
+                callback("step_skipped", step_name)
+            step.export(ctx)
+            return
+
+        logger.info(f"[DAG] Running step: '{step_name}'")
+        self._run_step(ctx, step, callback=callback)
