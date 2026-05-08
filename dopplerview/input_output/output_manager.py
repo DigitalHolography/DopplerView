@@ -44,15 +44,12 @@ class OutputManager:
             "labeled_mask": output_renderer.LabeledMaskRenderer()
         }
 
-    def save_cache(self, cache):
+    def save_cache(self, ctx):
         """Saves the entire cache to the H5 file"""
-        with h5py.File(self.cache_dir / "cache.h5", "w") as h5_cache:
-            for key in cache:
-                if key in h5_cache:
-                    del h5_cache[key]
-                h5_cache.create_dataset(key, data=cache[key])
+        filepath = self.cache_dir / "cache.h5"
+        ctx.export_cache(filepath)
 
-    def save_h5(self, key, cache):
+    def save_h5(self, key, ctx):
         """Saves a value from the cache to the H5 file based on the provided schema."""
         if key not in self.schema:
             return
@@ -65,7 +62,7 @@ class OutputManager:
             if path in h5:
                 del h5[path]
 
-            value = cache.get(key)
+            value = ctx.get(key)
             h5.create_dataset(path, data=value)
 
     def write_dopplerview_config(self):
@@ -81,9 +78,9 @@ class OutputManager:
             self.output_dir = self.dopplerview_folder.create_output_folder()
             self.write_dopplerview_config()
 
-    def output_cache(self, step_name, key, cache, type=None):
+    def output_cache(self, step_name, key, ctx, type=None):
         """Outputs a value from the cache for debugging purposes based on the provided output configuration."""
-        if key not in self.output_config or key not in cache:
+        if key not in self.output_config or not ctx.has(key):
             return
         
         if type is None:
@@ -102,7 +99,7 @@ class OutputManager:
 
         path = step_dir / f"{key}.png"
 
-        renderer.render(key, cache, path)
+        renderer.render(key, ctx, path)
 
     def output(self, step_name, filename, value, type=None, options=None):
         """Outputs a value manually for debugging purposes based on the provided output configuration."""
@@ -125,6 +122,6 @@ class OutputManager:
 
         renderer.render("value", {"value": value}, path, options=options)
 
-    def save(self, step_name, key, cache):
-        self.save_h5(key, cache)
-        self.output_cache(step_name, key, cache)
+    def save(self, step_name, key, ctx):
+        self.save_h5(key, ctx)
+        self.output_cache(step_name, key, ctx)

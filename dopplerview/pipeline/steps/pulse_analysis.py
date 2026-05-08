@@ -28,9 +28,9 @@ class PreArteryMaskStep(BaseStep):
             }
 
     def run(self, ctx):
-        video = ctx.cache["M0_ff_video"]
-        vessel_mask = ctx.cache["retinal_vessel_mask"]
-        optic_disc_center = ctx.cache["optic_disc_center"]
+        video = ctx.get("M0_ff_video")
+        vessel_mask = ctx.get("retinal_vessel_mask")
+        optic_disc_center = ctx.get("optic_disc_center")
 
         fs = ctx.holodoppler_config["sampling_freq"]
         stride = ctx.holodoppler_config["batch_stride"]
@@ -49,7 +49,7 @@ class PreArteryMaskStep(BaseStep):
         signals = pulse_analysis.get_filtered_branch_signals(video, labeled_vessels, sampling_frequency)
         ctx.output_manager.output("pulse_analysis", "labeled_vessels", labeled_vessels, "labeled_mask")
         signals_n = (signals - signals.mean(axis=1, keepdims=True)) / signals.std(axis=1, keepdims=True)
-        ctx.cache["branch_signals"] = signals_n
+        ctx.set("branch_signals", signals_n)
 
         # --- Step 3: Correct signals by aligning with median heartbeat ---
         beat_period = pulse_analysis.compute_idx0(signals_n, sampling_frequency)
@@ -58,14 +58,15 @@ class PreArteryMaskStep(BaseStep):
         corrected_signals = run_in_parallel(func, signals_n, n_jobs=ctx.dopplerview_config["NumberOfWorkers"], chunking=False, task_name="signal correction")
         # for i, signal in enumerate(signals_n):
         #     corrected_signals[i, :] = pulse_analysis.correct_branch_signal_with_heartbeat(signal, beat_period, k=10)
-        ctx.cache["corrected_signals"] = corrected_signals
+        ctx.set("corrected_signals", corrected_signals)
+
         for i in range(1, labeled_vessels.max() + 1):
             ctx.output_manager.output("pulse_analysis", f"branch_{i}_corrected", (signals_n[i - 1, :], corrected_signals[i - 1, :]), "signal", options={"multiple_signals": True, "legend": ["Original Signal", "Corrected Signal"]})
 
         # --- Step 4: Pre-classify arteries and veins using systolic gradient ---
         pre_artery_mask, pre_vein_mask = pulse_analysis.compute_pre_masks(corrected_signals, labeled_vessels, sampling_frequency)
-        ctx.cache["pre_artery_mask"] = pre_artery_mask
-        ctx.cache["pre_vein_mask"] = pre_vein_mask
+        ctx.set("pre_artery_mask", pre_artery_mask)
+        ctx.set("pre_vein_mask", pre_vein_mask)
 
 class ComputeTemporalCuesStep(BaseStep):
     requires = {"M0_ff_video", "pre_artery_mask", "choroidal_vessel_mask"}

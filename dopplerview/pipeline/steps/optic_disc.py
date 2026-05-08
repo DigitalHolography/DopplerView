@@ -54,12 +54,12 @@ class OpticDiscDetectionStep(BaseStep):
 
     def run(self, ctx):
         use_optic_disc_detector = ctx.dopplerview_config.get("OpticDiskDetectorNet", True)
-        M0 = ctx.cache["M0_ff_image"]
+        M0 = ctx.get("M0_ff_image")
 
         if use_optic_disc_detector:
             center, diameter_x, diameter_y = self.deep_detection(ctx)
         else:
             center = (M0.shape[1] // 2, M0.shape[0] // 2)  # Fallback to image center if no model is used
 
-        ctx.cache["optic_disc_center"] = center
-        ctx.cache["optic_disc_axes"] = (diameter_x, diameter_y)
+        ctx.set("optic_disc_center", center)
+        ctx.set("optic_disc_axes", (diameter_x, diameter_y))

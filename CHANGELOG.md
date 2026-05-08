@@ -4,6 +4,7 @@
 * Handle multiple inputs
 * Resize advanced window when images are displayed
 * Add eye laterality classification
+* Enable parallel step execution
 
 ## 1.2.0
 * Take into account *NumberOfWorkers* params. By default, set at 0.5 : take half of the available workers

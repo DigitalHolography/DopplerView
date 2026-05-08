@@ -62,8 +62,8 @@ class BaseStep(ABC):
         Export step outputs using the output manager.
         """
         for key in self.produces:
-            if key in ctx.cache:
-                ctx.output_manager.save(self.name, key, ctx.cache)
+            if ctx.has(key):
+                ctx.output_manager.save(self.name, key, ctx)
     
 class NestedStep(BaseStep):
     substeps: List[BaseStep] = []
