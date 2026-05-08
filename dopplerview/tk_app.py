@@ -390,21 +390,25 @@ class MainWindow:
 
         self.step_vars = {}
         self.step_checkboxes = {}
+        
+        steps = self.pipeline.get_step_names()
+        waves = self.pipeline.engine.build_execution_waves(steps)
 
-        for i, step in enumerate(self.pipeline.get_step_names()):
-            var = tk.BooleanVar(value=True)
+        for i, wave in enumerate(waves):
+            for j, step in enumerate(wave):
+                var = tk.BooleanVar(value=True)
 
-            cb = tk.Checkbutton(
-                self.steps_frame,
-                text=step,
-                variable=var,
-                command=lambda s=step: self.on_step_toggle(s),
-                fg=self._text_fg,
-            )
-            cb.grid(row=i, column=0, sticky="w")
+                cb = tk.Checkbutton(
+                    self.steps_frame,
+                    text=step,
+                    variable=var,
+                    command=lambda s=step: self.on_step_toggle(s),
+                    fg=self._text_fg,
+                )
+                cb.grid(row=i, column=j, sticky="w")
 
-            self.step_vars[step] = var
-            self.step_checkboxes[step] = cb
+                self.step_vars[step] = var
+                self.step_checkboxes[step] = cb
 
         # --- Run button ---
         state = "disabled" if self.input_folder.get() == "No input selected" else "enabled"
