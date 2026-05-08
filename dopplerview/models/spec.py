@@ -12,4 +12,5 @@ class ModelSpec:
     input_norm: str
     output_activation: str
     input_channels: Optional[list]
+    input_shape: Optional[list]
     revision: Optional[str] = "main"

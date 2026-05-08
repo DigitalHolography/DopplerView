@@ -7,6 +7,7 @@ iternet5_vesselness:
   output_activation: sigmoid
   revision: main
   input_channels: ["M0_ff_image"]
+  input_shape: [512, 512]
 
 nnwnet_av_corr_diasys:
   task: retinal_artery_vein_segmentation
@@ -17,6 +18,7 @@ nnwnet_av_corr_diasys:
   output_activation: argmax
   revision: main
   input_channels: ["M0_ff_image", "correlation", "diasys_image"]
+  input_shape: [512, 512]
 
 iternet5_av_diasys:
   task: retinal_artery_vein_segmentation
@@ -27,6 +29,7 @@ iternet5_av_diasys:
   output_activation: argmax
   revision: main
   input_channels: ["M0_ff_image", "M0_ff_image", "diasys_image"]
+  input_shape: [512, 512]
 
 optic_disc_detector:
   task: optic_disc_detection
@@ -37,3 +40,15 @@ optic_disc_detector:
   output_activation: none
   revision: main
   input_channels: ["M0_ff_image", "M0_ff_image", "M0_ff_image"]
+  input_shape: [512, 512]
+
+eye_laterality_classifier:
+  task: eye_laterality_classification
+  hf_repo: DigitalHolography/YOLO_EyeSide
+  filename: eye_side.onnx
+  format: onnx
+  input_norm: minmax
+  output_activation: none
+  revision: main
+  input_channels: ["M0_ff_image", "M0_ff_image", "M0_ff_image"]
+  input_shape: [640, 640]

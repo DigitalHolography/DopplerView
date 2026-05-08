@@ -475,7 +475,13 @@ class MainWindow:
             self.root.geometry("600x400")
         else:
             self.advanced_view.pack(fill="both", expand=True)
-            self.root.geometry("900x700")
+            self.root.geometry("900x650")
+            self.resize_window()
+
+    def resize_window(self):
+        image_height = self.image_tk.height() if self.image_tk else 0
+        window_height = 650 + image_height  # base height + image height
+        self.root.geometry(f"{self.root.winfo_width()}x{window_height}")
 
     def update_step_color(self, step, state):
         cb = self.step_checkboxes[step]
@@ -741,6 +747,8 @@ class MainWindow:
             img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
         self.image_tk = np_to_tk(img)  # keep reference!
         self.image_label.config(image=self.image_tk)
+        if self.ui_mode_var.get() == "advanced":
+            self.resize_window()
 
     def cleanup_image(self):
         self.image_label.config(image="")
