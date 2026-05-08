@@ -168,6 +168,37 @@ def correct_branch_signal_with_heartbeat(signal, beat_period, k=2):
     corrected_signal = correct_signal(signal, pseudo_signal, k=k)
     return corrected_signal
 
+def remove_bad_beats(signal, video, beat_period, threshold=0.5):
+    """Remove frames on the video corresponding to bad beats from the signal based on correlation with the average beat."""
+    peaks = get_peaks(signal, beat_period)
+    beats = get_beats(signal, peaks)
+    average_beat = np.nanmean(beats, axis=0)
+
+    # Compute correlation of each beat with the average beat
+    correlations = np.array([np.corrcoef(beat, average_beat)[0, 1] for beat in beats])
+    good_beats_mask = correlations > threshold
+
+    # Create a cleaned signal by keeping only good beats
+    beat_signal = get_pseudo_signal(average_beat, peaks, len(signal))
+    cleaned_signal = np.zeros_like(signal)
+    cleaned_video = np.zeros_like(video)
+    for i, is_good in enumerate(good_beats_mask):
+        if is_good:
+            start, end = peaks[i], peaks[i + 1]
+            cleaned_signal[start:end] = signal[start:end]
+            cleaned_video[start:end] = video[start:end]
+        else:
+            start, end = peaks[i], peaks[i + 1]
+            cleaned_signal[start:end] = np.nan
+            beat_signal[start:end] = np.nan
+
+    
+    cleaned_signal = np.trim_zeros(cleaned_signal)
+    cleaned_video = np.trim_zeros(cleaned_video, axis=0)
+    beat_signal = np.trim_zeros(beat_signal)
+
+    return cleaned_signal, cleaned_video, beat_signal
+
 
 def select_regular_peaks(signals_n, method, idx0, threshold=0.1, tolerance=0.3):
     gradient_n = np.gradient(signals_n, axis=1)

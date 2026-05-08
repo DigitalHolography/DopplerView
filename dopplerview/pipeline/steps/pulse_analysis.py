@@ -17,7 +17,7 @@ class PulseAnalysisStep(NestedStep):
             
 class PreArteryMaskStep(BaseStep):
     requires = {"M0_ff_video", "retinal_vessel_mask", "optic_disc_center"}
-    produces = {"labeled_vessels", "pre_artery_mask", "branch_signals", "corrected_signals", "pre_vein_mask"}
+    produces = {"labeled_vessels", "pre_artery_mask", "branch_signals", "corrected_signals", "pre_vein_mask", "beat_period"}
     name = "pre_artery_mask"
 
     def _relevant_config(self, ctx):
@@ -54,7 +54,7 @@ class PreArteryMaskStep(BaseStep):
         # --- Step 3: Correct signals by aligning with median heartbeat ---
         beat_period = pulse_analysis.compute_idx0(signals_n, sampling_frequency)
         corrected_signals = np.zeros_like(signals_n)
-        func = partial(pulse_analysis.correct_branch_signal_with_heartbeat, beat_period=beat_period, k=10)
+        func = partial(pulse_analysis.correct_branch_signal_with_heartbeat, beat_period=beat_period, k=8)
         corrected_signals = run_in_parallel(func, signals_n, n_jobs=ctx.dopplerview_config["NumberOfWorkers"], chunking=False, task_name="signal correction")
         # for i, signal in enumerate(signals_n):
         #     corrected_signals[i, :] = pulse_analysis.correct_branch_signal_with_heartbeat(signal, beat_period, k=10)
@@ -67,9 +67,10 @@ class PreArteryMaskStep(BaseStep):
         pre_artery_mask, pre_vein_mask = pulse_analysis.compute_pre_masks(corrected_signals, labeled_vessels, sampling_frequency)
         ctx.set("pre_artery_mask", pre_artery_mask)
         ctx.set("pre_vein_mask", pre_vein_mask)
+        ctx.set("beat_period", beat_period)
 
 class ComputeTemporalCuesStep(BaseStep):
-    requires = {"M0_ff_video", "pre_artery_mask", "choroidal_vessel_mask"}
+    requires = {"M0_ff_video", "pre_artery_mask", "choroidal_vessel_mask", "beat_period"}
     produces = {"correlation", "diasys_image", "pre_arterial_pulse", "choroidal_pulse", "pre_arterial_pulse_filtered", "choroidal_pulse_filtered", "pre_arterial_pulse_interpolated", "pre_venous_pulse", "pre_venous_pulse_filtered"}
     name = "temporal_cues"
 
@@ -100,9 +101,14 @@ class ComputeTemporalCuesStep(BaseStep):
         venous_pulse_filtered = signal_processing.get_filtered_pulse(venous_pulse, sampling_frequency)
         choroidal_pulse_filtered = signal_processing.get_filtered_pulse(choroidal_pulse, sampling_frequency)
 
+        beat_period = ctx.require("beat_period")
+        arterial_pulse_interpolated, video_cleaned, beat_signal = pulse_analysis.remove_bad_beats(arterial_pulse_filtered, video, beat_period, threshold=0.8)
+        ctx.output_manager.output("pulse_analysis", f"pre_arterial signal corrected", (arterial_pulse_interpolated, beat_signal), "signal", options={"multiple_signals": True, "legend": ["Original Signal", "beat signal"]})
+
+
         # --- Interpolate outlier frames using the filtered signal ---
 
-        video_cleaned, arterial_pulse_interpolated = signal_processing.interpolate_outliers(video, arterial_pulse, pre_artery_mask, sampling_frequency=sampling_frequency)
+        # video_cleaned, arterial_pulse_interpolated = signal_processing.interpolate_outliers(video, arterial_pulse, pre_artery_mask, sampling_frequency=sampling_frequency)
         # ctx.output_manager.output("pulse_analysis", "video_cleaned", video_cleaned, "video")
 
         # --- Compute correlation map with filtered pulses ---
