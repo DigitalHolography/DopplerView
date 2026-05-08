@@ -115,7 +115,7 @@ class DAGEngine:
     # Wave decomposition (parallelism)
     # ------------------------------------------------------------------
 
-    def _build_execution_waves(self, steps_to_run: List[str]) -> List[List[str]]:
+    def build_execution_waves(self, steps_to_run: List[str]) -> List[List[str]]:
         """
         Partition *steps_to_run* into sequential waves.
         All steps within a wave are independent and can run in parallel.
@@ -310,7 +310,7 @@ class DAGEngine:
             self.set_targets(targets)
 
         steps_to_run = self._steps_to_run
-        waves = self._build_execution_waves(steps_to_run)
+        waves = self.build_execution_waves(steps_to_run)
 
         logger.info(
             f"[DAG] Execution plan: {len(waves)} wave(s), "

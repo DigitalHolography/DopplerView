@@ -50,6 +50,6 @@ class ReadMomentsStep(BaseStep):
     def run(self, ctx):
         input_file = ctx.require("input_file")
         M0, M1, M2 = self.read_hdf5(input_file)
-        ctx.cache["moment0"] = M0
-        ctx.cache["moment1"] = M1
-        ctx.cache["moment2"] = M2
+        ctx.set("moment0", M0)
+        ctx.set("moment1", M1)
+        ctx.set("moment2", M2)

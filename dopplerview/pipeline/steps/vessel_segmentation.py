@@ -44,7 +44,7 @@ class RetinalVesselSegmentationStep(VesselSegmentationStep):
         logits = np.squeeze(model.predict(input))
         mask = logits > 0.5
 
-        ctx.cache["vessel_segmentation_logits"] = logits
+        ctx.set("vessel_segmentation_logits", logits)
 
         return mask
     

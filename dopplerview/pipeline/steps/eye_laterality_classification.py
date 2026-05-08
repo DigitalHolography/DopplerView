@@ -25,8 +25,6 @@ class EyeLateralityClassificationStep(BaseStep):
         return pred, confidence
     
     def run(self, ctx):
-        M0 = ctx.cache["M0_ff_image"]
-
         laterality, confidence = self.classify(ctx)
-        ctx.cache["eye_laterality"] = laterality
-        ctx.cache["eye_laterality_confidence"] = confidence
+        ctx.set("eye_laterality", laterality)
+        ctx.set("eye_laterality_confidence", confidence)

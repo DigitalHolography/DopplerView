@@ -4,37 +4,37 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 class OutputRenderer:
-    def render(self, key, cache, path, options=None):
+    def render(self, key, ctx, path, options=None):
         raise NotImplementedError
     
 class ImageRenderer(OutputRenderer):
-    def render(self, key, cache, path, options=None):
-        imageio.imwrite(path, normalize_to_uint8(cache.get(key)))
+    def render(self, key, ctx, path, options=None):
+        imageio.imwrite(path, normalize_to_uint8(ctx.get(key)))
 
 class SignalRenderer(OutputRenderer):
-    def render(self, key, cache, path, options=None):
+    def render(self, key, ctx, path, options=None):
         plt.figure()
         plt.title(key)
         if options and options.get("multiple_signals"):
             legend = options.get("legend", [])
-            for i, signal in enumerate(cache.get(key)):
+            for i, signal in enumerate(ctx.get(key)):
                 plt.plot(signal, label=legend[i] if i < len(legend) else "")
             if legend:
                 plt.legend()
         else:
-            plt.plot(cache.get(key))
+            plt.plot(ctx.get(key))
         plt.savefig(path)
         plt.close()
 
 class VideoRenderer(OutputRenderer):
-    def render(self, key, cache, path, options=None):
-        save_numpy_as_avi(cache.get(key), path.with_suffix(".avi"))
+    def render(self, key, ctx, path, options=None):
+        save_numpy_as_avi(ctx.get(key), path.with_suffix(".avi"))
 
 class OpticDiscRenderer(OutputRenderer):
-    def render(self, key, cache, path, options=None):
-        image = cache.get("M0_ff_image")
-        center = cache.get("optic_disc_center")
-        axes = cache.get("optic_disc_axes")
+    def render(self, key, ctx, path, options=None):
+        image = ctx.get("M0_ff_image")
+        center = ctx.get("optic_disc_center")
+        axes = ctx.get("optic_disc_axes")
 
         x_center, y_center = center
         diameter_x, diameter_y = axes
@@ -66,6 +66,6 @@ class OpticDiscRenderer(OutputRenderer):
         plt.close()
 
 class LabeledMaskRenderer(OutputRenderer):
-    def render(self, key, cache, path, options=None):
-        save_labeled_branches(cache.get(key), path)
+    def render(self, key, ctx, path, options=None):
+        save_labeled_branches(ctx.get(key), path)
         plt.close()
