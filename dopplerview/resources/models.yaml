@@ -42,10 +42,32 @@ optic_disc_detector:
   input_channels: ["M0_ff_image", "M0_ff_image", "M0_ff_image"]
   input_shape: [512, 512]
 
+optic_disc_detector:
+  task: optic_disc_detection
+  hf_repo: DigitalHolography/EyeFlow_OpticDiscDetectorV2
+  filename: opticdisc.onnx
+  format: onnx
+  input_norm: minmax
+  output_activation: none
+  revision: main
+  input_channels: ["M0_ff_image", "M0_ff_image", "M0_ff_image"]
+  input_shape: [512, 512]
+
+optic_disc_segmentation:
+  task: optic_disc_segmentation
+  hf_repo: DigitalHolography/YOLO_OpticDisc
+  filename: optic_disk.onnx
+  format: onnx
+  input_norm: minmax
+  output_activation: none
+  revision: main
+  input_channels: ["M0_ff_image", "M0_ff_image", "M0_ff_image"]
+  input_shape: [512, 512]
+
 eye_laterality_classifier:
   task: eye_laterality_classification
   hf_repo: DigitalHolography/YOLO_EyeSide
-  filename: eye_side.onnx
+  filename: optic_disk.onnx
   format: onnx
   input_norm: minmax
   output_activation: none
