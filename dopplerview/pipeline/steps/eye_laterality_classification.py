@@ -22,7 +22,7 @@ class EyeLateralityClassificationStep(BaseStep):
 
         self.logger.info(f"    - Eye laterality classified as: {laterality} (confidence: {confidence:.2f})")
 
-        return laterality, confidence
+        return pred, confidence
     
     def run(self, ctx):
         M0 = ctx.cache["M0_ff_image"]
