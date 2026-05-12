@@ -104,6 +104,7 @@ class ComputeTemporalCuesStep(BaseStep):
 
         beat_period = ctx.require("beat_period")
         arterial_pulse_interpolated, video_cleaned, beat_signal = pulse_analysis.remove_bad_beats(arterial_pulse_filtered, video, beat_period, threshold=0.8)
+        self.logger.info(f"{arterial_pulse_interpolated.shape=}, {beat_signal.shape=}, {video_cleaned.shape=}, {video.shape=}")
         ctx.output_manager.output("pulse_analysis", f"pre_arterial signal corrected", (arterial_pulse_interpolated, beat_signal), "signal", options={"multiple_signals": True, "legend": ["Original Signal", "beat signal"]})
 
         ctx.set("pre_arterial_pulse", arterial_pulse)
@@ -118,7 +119,7 @@ class ComputeTemporalCuesStep(BaseStep):
 
         # --- Interpolate outlier frames using the filtered signal ---
 
-        # video_cleaned, arterial_pulse_interpolated = signal_processing.interpolate_outliers(video, arterial_pulse, pre_artery_mask, sampling_frequency=sampling_frequency)
+        video_cleaned, arterial_pulse_interpolated = signal_processing.interpolate_outliers(video, arterial_pulse, pre_artery_mask, sampling_frequency=sampling_frequency)
         # ctx.output_manager.output("pulse_analysis", "video_cleaned", video_cleaned, "video")
 
         # --- Compute correlation map with filtered pulses ---
