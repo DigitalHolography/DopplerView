@@ -50,6 +50,7 @@ class PreArteryMaskStep(BaseStep):
         ctx.output_manager.output("pulse_analysis", "labeled_vessels", labeled_vessels, "labeled_mask")
         signals_n = (signals - signals.mean(axis=1, keepdims=True)) / signals.std(axis=1, keepdims=True)
         ctx.set("branch_signals", signals_n)
+        ctx.output_manager.save_h5("branch_signals", ctx)
 
         # --- Step 3: Correct signals by aligning with median heartbeat ---
         beat_period = pulse_analysis.compute_idx0(signals_n, sampling_frequency)
@@ -105,6 +106,15 @@ class ComputeTemporalCuesStep(BaseStep):
         arterial_pulse_interpolated, video_cleaned, beat_signal = pulse_analysis.remove_bad_beats(arterial_pulse_filtered, video, beat_period, threshold=0.8)
         ctx.output_manager.output("pulse_analysis", f"pre_arterial signal corrected", (arterial_pulse_interpolated, beat_signal), "signal", options={"multiple_signals": True, "legend": ["Original Signal", "beat signal"]})
 
+        ctx.set("pre_arterial_pulse", arterial_pulse)
+        ctx.set("pre_venous_pulse", venous_pulse)
+        ctx.set("choroidal_pulse", choroidal_pulse)
+        ctx.set("pre_arterial_pulse_filtered", arterial_pulse_filtered)
+        ctx.set("pre_venous_pulse_filtered", venous_pulse_filtered)
+        ctx.set("pre_arterial_pulse_interpolated", arterial_pulse_interpolated)
+        ctx.set("choroidal_pulse_filtered", choroidal_pulse_filtered)
+
+        ctx.output_manager.save_h5("pre_arterial_pulse_filtered", ctx)
 
         # --- Interpolate outlier frames using the filtered signal ---
 
@@ -122,11 +132,4 @@ class ComputeTemporalCuesStep(BaseStep):
 
         diasys, M0_Systole_img, M0_Diastole_img = pulse_analysis.compute_diasys_image(video_cleaned, arterial_pulse_interpolated, sampling_frequency)
 
-        ctx.set("pre_arterial_pulse", arterial_pulse)
-        ctx.set("pre_venous_pulse", venous_pulse)
-        ctx.set("choroidal_pulse", choroidal_pulse)
-        ctx.set("pre_arterial_pulse_filtered", arterial_pulse_filtered)
-        ctx.set("pre_venous_pulse_filtered", venous_pulse_filtered)
-        ctx.set("pre_arterial_pulse_interpolated", arterial_pulse_interpolated)
-        ctx.set("choroidal_pulse_filtered", choroidal_pulse_filtered)
         ctx.set("diasys_image", diasys)

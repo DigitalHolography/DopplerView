@@ -172,14 +172,14 @@ def remove_bad_beats(signal, video, beat_period, threshold=0.5):
     """Remove frames on the video corresponding to bad beats from the signal based on correlation with the average beat."""
     peaks = get_peaks(signal, beat_period)
     beats = get_beats(signal, peaks)
-    average_beat = np.nanmean(beats, axis=0)
+    median_beat = np.nanmedian(beats, axis=0)
 
     # Compute correlation of each beat with the average beat
-    correlations = np.array([np.corrcoef(beat, average_beat)[0, 1] for beat in beats])
+    correlations = np.array([np.corrcoef(beat, median_beat)[0, 1] for beat in beats])
     good_beats_mask = correlations > threshold
 
     # Create a cleaned signal by keeping only good beats
-    beat_signal = get_pseudo_signal(average_beat, peaks, len(signal))
+    beat_signal = get_pseudo_signal(median_beat, peaks, len(signal))
     cleaned_signal = np.zeros_like(signal)
     cleaned_video = np.zeros_like(video)
     for i, is_good in enumerate(good_beats_mask):
@@ -189,13 +189,13 @@ def remove_bad_beats(signal, video, beat_period, threshold=0.5):
             cleaned_video[start:end] = video[start:end]
         else:
             start, end = peaks[i], peaks[i + 1]
-            cleaned_signal[start:end] = np.nan
-            beat_signal[start:end] = np.nan
+            cleaned_signal[start:end] = 0
+            beat_signal[start:end] = 0
 
     
-    cleaned_signal = np.trim_zeros(cleaned_signal)
-    cleaned_video = np.trim_zeros(cleaned_video, axis=0)
-    beat_signal = np.trim_zeros(beat_signal)
+    cleaned_signal = cleaned_signal[cleaned_signal != 0]
+    cleaned_video = cleaned_video[np.any(cleaned_video != 0, axis=1)]
+    beat_signal = beat_signal[beat_signal != 0]
 
     return cleaned_signal, cleaned_video, beat_signal
 
