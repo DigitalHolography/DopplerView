@@ -61,7 +61,7 @@ def bump_version(part):
 # Build
 # -------------------------
 def build_installer(skip_build=False):
-    run([sys.executable, str(BUILD_SCRIPT), "--skip-build"] if skip_build else [sys.executable, str(BUILD_SCRIPT)])
+    run([sys.executable, str(BUILD_SCRIPT), "--skip-pyinstaller"] if skip_build else [sys.executable, str(BUILD_SCRIPT)])
 
 
 # -------------------------
