@@ -26,5 +26,6 @@ class EyeLateralityClassificationStep(BaseStep):
     
     def run(self, ctx):
         laterality, confidence = self.classify(ctx)
-        ctx.set("eye_laterality", laterality)
+        eye_laterality = "left" if laterality == 0 else "right"
+        ctx.set("eye_laterality", eye_laterality)
         ctx.set("eye_laterality_confidence", confidence)

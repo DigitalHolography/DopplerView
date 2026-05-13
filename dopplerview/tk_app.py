@@ -377,8 +377,15 @@ class MainWindow:
 
         self.optic_disc_model_var, self.optic_disc_model_combo, r = create_model_selector(
             self.models_frame,
-            "Optic disc detection model",
-            "optic_disc_detection",
+            "Optic disc segmentation model",
+            "optic_disc_segmentation",
+            r
+        )
+
+        self.eye_laterality_model_var, self.eye_laterality_model_combo, r = create_model_selector(
+            self.models_frame,
+            "Eye laterality classification model",
+            "eye_laterality_classification",
             r
         )
 
