@@ -5,6 +5,7 @@
 * Resize advanced window when images are displayed
 * Add eye laterality classification
 * Enable parallel step execution
+* Add optic disc segmentation
 * Clean arterial signal (used for artery/vein segmentation): remove heartbeats badly correlated with median beat
 
 ## 1.2.0

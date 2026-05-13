@@ -56,7 +56,7 @@ optic_disc_segmentation:
 eye_laterality_classifier:
   task: eye_laterality_classification
   hf_repo: DigitalHolography/YOLO_EyeSide
-  filename: eye_side.onnx
+  filename: optic_disk.onnx
   format: onnx
   input_norm: minmax
   output_activation: none

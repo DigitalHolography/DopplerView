@@ -120,7 +120,7 @@ class ComputeTemporalCuesStep(BaseStep):
         M0_ff_image_cleaned = image_utils.normalize_to_uint8(np.mean(video_cleaned, axis=0))
         ctx.set("M0_ff_image_cleaned", M0_ff_image_cleaned)
 
-        self.logger.info(f"     - Removed {len(arterial_pulse_filtered) - len(arterial_pulse_interpolated)} frames due to low correlation with median arterial pulse beat pattern")
+        self.logger.info(f"    - Removed {len(arterial_pulse_filtered) - len(arterial_pulse_interpolated)} frames due to low correlation with median arterial pulse beat pattern")
         ctx.output_manager.output("pulse_analysis", f"pre_arterial signal corrected", (arterial_pulse_interpolated, beat_signal), "signal", options={"multiple_signals": True, "legend": ["Original Signal", "beat signal"]})
 
         # --- Compute correlation map with filtered pulses ---
