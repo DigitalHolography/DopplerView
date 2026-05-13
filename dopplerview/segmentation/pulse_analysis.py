@@ -162,7 +162,7 @@ def correct_branch_signal_with_heartbeat(signal, beat_period, k=2):
     signal_length = len(signal)
     peaks = get_peaks(signal, beat_period)
     beats = get_beats(signal, peaks, target_len=signal_length)
-    average_beat = np.nanmean(beats, axis=0)
+    average_beat = np.nanmedian(beats, axis=0)
 
     pseudo_signal = get_pseudo_signal(average_beat, peaks, signal_length)
     corrected_signal = correct_signal(signal, pseudo_signal, k=k)
@@ -642,10 +642,10 @@ def compute_diasys(video, pulse_artery, sampling_frequency, pulse_vein=None):
     return M0_Systole_img, M0_Diastole_img, sysindexes, diasindexes
 
 def compute_diasys_image(video, pulse_artery, sampling_frequency, pulse_vein=None):
-    M0_Systole_img, M0_Diastole_img, _, _, = compute_diasys(video, pulse_artery, sampling_frequency=sampling_frequency, pulse_vein=pulse_vein)
+    M0_Systole_img, M0_Diastole_img, sysindexes, diasindexes = compute_diasys(video, pulse_artery, sampling_frequency=sampling_frequency, pulse_vein=pulse_vein)
 
     sys = image_utils.normalize_image(M0_Systole_img)
     dias = image_utils.normalize_image(M0_Diastole_img)
     diasys_image = image_utils.normalize_image(sys - dias)
-    return diasys_image, M0_Systole_img, M0_Diastole_img
+    return diasys_image, sysindexes, diasindexes
  

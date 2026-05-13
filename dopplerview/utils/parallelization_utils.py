@@ -43,15 +43,19 @@ def run_in_parallel(func, iterable, n_jobs=-1, chunking=True, task_name=None):
         chunks = [[iterable[i] for i in idx] for idx in indices]
 
         # Use threading backend to avoid spawning a new .exe when using multiprocessing in a PyInstaller executable
+        try:
+            results = joblib.Parallel(n_jobs=n_jobs, backend="threading")(
+                joblib.delayed(_process_chunk)(chunk, func)
+                for chunk in chunks
+            )
+            return np.concatenate(results, axis=0)
+        except KeyboardInterrupt:
+            print("Interrupted cleanly")
+
+    try:
         results = joblib.Parallel(n_jobs=n_jobs, backend="threading")(
-            joblib.delayed(_process_chunk)(chunk, func)
-            for chunk in chunks
-        )
-
-        return np.concatenate(results, axis=0)
-
-    results = joblib.Parallel(n_jobs=n_jobs, backend="threading")(
-        joblib.delayed(func)(item) for item in iterable
-    )
-
-    return np.stack(results, axis=0)
+                joblib.delayed(func)(item) for item in iterable
+            )
+        return np.stack(results, axis=0)
+    except KeyboardInterrupt:
+        print("Interrupted cleanly")
