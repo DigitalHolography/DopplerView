@@ -263,7 +263,7 @@ class Pipeline:
             ReadMomentsStep(),
             PreprocessStep(),
             EyeLateralityClassificationStep(),
-            OpticDiscDetectionStep(),
+            # OpticDiscDetectionStep(),
             OpticDiscSegmentationStep(),
             RetinalVesselSegmentationStep(),
             ChoroidalVesselSegmentationStep(),

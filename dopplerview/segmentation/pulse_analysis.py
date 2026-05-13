@@ -162,11 +162,36 @@ def correct_branch_signal_with_heartbeat(signal, beat_period, k=2):
     signal_length = len(signal)
     peaks = get_peaks(signal, beat_period)
     beats = get_beats(signal, peaks, target_len=signal_length)
-    average_beat = np.nanmean(beats, axis=0)
+    average_beat = np.nanmedian(beats, axis=0)
 
     pseudo_signal = get_pseudo_signal(average_beat, peaks, signal_length)
     corrected_signal = correct_signal(signal, pseudo_signal, k=k)
     return corrected_signal
+
+def remove_bad_beats(signal, video, beat_period, threshold=0.5):
+    """Remove frames on the video corresponding to bad beats from the signal based on correlation with the average beat."""
+    peaks = get_peaks(signal, beat_period)
+    beats = get_beats(signal, peaks)
+    median_beat = np.nanmedian(beats, axis=0)
+
+    # Compute correlation of each beat with the average beat
+    correlations = np.array([np.corrcoef(beat, median_beat)[0, 1] for beat in beats])
+    good_beats_mask = correlations > threshold
+
+    # Create a cleaned signal by keeping only good beats
+    beat_signal = get_pseudo_signal(median_beat, peaks, len(signal))
+    mask_signal = np.zeros_like(signal)
+    for i, is_good in enumerate(good_beats_mask):
+        if is_good:
+            start, end = peaks[i], peaks[i + 1]
+
+            mask_signal[start:end] = 1
+
+    cleaned_video = video[mask_signal != 0]
+    cleaned_signal = signal[mask_signal != 0]
+    beat_signal = beat_signal[mask_signal != 0]
+
+    return cleaned_signal, cleaned_video, beat_signal
 
 
 def select_regular_peaks(signals_n, method, idx0, threshold=0.1, tolerance=0.3):
@@ -610,10 +635,10 @@ def compute_diasys(video, pulse_artery, sampling_frequency, pulse_vein=None):
     return M0_Systole_img, M0_Diastole_img, sysindexes, diasindexes
 
 def compute_diasys_image(video, pulse_artery, sampling_frequency, pulse_vein=None):
-    M0_Systole_img, M0_Diastole_img, _, _, = compute_diasys(video, pulse_artery, sampling_frequency=sampling_frequency, pulse_vein=pulse_vein)
+    M0_Systole_img, M0_Diastole_img, sysindexes, diasindexes = compute_diasys(video, pulse_artery, sampling_frequency=sampling_frequency, pulse_vein=pulse_vein)
 
     sys = image_utils.normalize_image(M0_Systole_img)
     dias = image_utils.normalize_image(M0_Diastole_img)
     diasys_image = image_utils.normalize_image(sys - dias)
-    return diasys_image, M0_Systole_img, M0_Diastole_img
+    return diasys_image, sysindexes, diasindexes
  

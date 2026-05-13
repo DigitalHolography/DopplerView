@@ -174,3 +174,33 @@ def clean_vessel_mask(
     clean = raw_mask & largest_component & mask_diaphragm if diaphragm_radius is not None else raw_mask & largest_component
 
     return clean
+
+def mask_to_bbox(mask):
+    """
+    Compute bounding box from a binary mask.
+
+    Parameters
+    ----------
+    mask : np.ndarray
+        Binary mask of shape (H, W)
+
+    Returns
+    -------
+    x_min, y_min, x_max, y_max : int
+        Bounding box coordinates
+
+    Returns None if mask is empty.
+    """
+
+    ys, xs = np.where(mask)
+
+    if len(xs) == 0 or len(ys) == 0:
+        return None
+
+    x_min = xs.min()
+    x_max = xs.max()
+
+    y_min = ys.min()
+    y_max = ys.max()
+
+    return x_min, y_min, x_max, y_max

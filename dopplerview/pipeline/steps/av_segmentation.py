@@ -2,7 +2,7 @@ from dopplerview.pipeline.step import BaseStep
 import numpy as np
 
 class AVSegmentationStep(BaseStep):
-    requires = {"M0_ff_video", "M0_ff_image", "correlation", "diasys_image"}
+    requires = {"M0_ff_video", "M0_ff_image_cleaned", "correlation", "diasys_image"}
     produces = {"retinal_artery_mask", "retinal_vein_mask"}
     name = "retinal_artery_vein_segmentation"
 

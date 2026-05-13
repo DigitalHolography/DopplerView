@@ -6,6 +6,7 @@
 * Add eye laterality classification
 * Enable parallel step execution
 * Add optic disc segmentation
+* Clean arterial signal (used for artery/vein segmentation): remove heartbeats badly correlated with median beat
 
 ## 1.2.0
 * Take into account *NumberOfWorkers* params. By default, set at 0.5 : take half of the available workers

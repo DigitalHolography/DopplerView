@@ -3,7 +3,7 @@ from dopplerview.pipeline.step import BaseStep
 import numpy as np
 
 class EyeLateralityClassificationStep(BaseStep):
-    requires = {"M0_ff_image"}
+    requires = {"M0_ff_image_cleaned"}
     produces = {"eye_laterality", "eye_laterality_confidence"}
     name = "eye_laterality_classification"
 
