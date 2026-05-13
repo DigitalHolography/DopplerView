@@ -43,10 +43,10 @@ class OpticDiscRenderer(OutputRenderer):
     def render(self, key, ctx, path, options=None):
         image = ctx.get("M0_ff_image")
         center = ctx.get("optic_disc_center")
-        axes = ctx.get("optic_disc_axes")
+        diameter_x = ctx.get("optic_disc_width")
+        diameter_y = ctx.get("optic_disc_height")
 
         x_center, y_center = center
-        diameter_x, diameter_y = axes
 
         a = diameter_x / 2
         b = diameter_y / 2

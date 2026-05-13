@@ -1,12 +1,13 @@
 from dopplerview.pipeline.step import BaseStep
 from dopplerview.utils.image_utils import save_bounding_box
+from dopplerview.segmentation import process_masks
 
 import numpy as np
 import cv2
 
 class OpticDiscDetectionStep(BaseStep):
     requires = {"M0_ff_image", "M1_ff_image"}
-    produces = {"optic_disc_center", "optic_disc_axes"}
+    produces = {"optic_disc_center", "optic_disc_width", "optic_disc_height"}
     name = "optic_disc_detection"
 
     def _relevant_config(self, ctx):
@@ -63,12 +64,13 @@ class OpticDiscDetectionStep(BaseStep):
             center, diameter_x, diameter_y = self.return_image_center(ctx)  # Fallback to image center if no model is used
 
         ctx.set("optic_disc_center", center)
-        ctx.set("optic_disc_axes", (diameter_x, diameter_y))
+        ctx.set("optic_disc_width", diameter_x)
+        ctx.set("optic_disc_height", diameter_y)
 
 
 class OpticDiscSegmentationStep(BaseStep):
-    requires = {"M0_ff_image_cleaned"}
-    produces = {"optic_disc_mask"}
+    requires = {"M0_ff_image"}
+    produces = {"optic_disc_mask", "optic_disc_center", "optic_disc_width", "optic_disc_height"}
     name = "optic_disc_segmentation"
 
     def _relevant_config(self, ctx):
@@ -78,7 +80,7 @@ class OpticDiscSegmentationStep(BaseStep):
             "optic_disc_segmentation_model": ctx.get_current_model_for_task(self.name)}
     
     def deep_segmentation(self, ctx):
-        M0 = ctx.get("M0_ff_image_cleaned")
+        M0 = ctx.get("M0_ff_image")
         model = ctx.get_current_model_for_task(self.name)
 
         input = model.prepare_input(ctx)
@@ -167,3 +169,12 @@ class OpticDiscSegmentationStep(BaseStep):
     def run(self, ctx):
         optic_disc_mask = self.deep_segmentation(ctx)
         ctx.set("optic_disc_mask", optic_disc_mask)
+
+        x_min, y_min, x_max, y_max = process_masks.mask_to_bbox(optic_disc_mask)
+        mask_center = ((x_min + x_max) // 2, (y_min + y_max) // 2)
+        width = x_max - x_min
+        height = y_max - y_min
+        ctx.set("optic_disc_center", mask_center)
+        ctx.set("optic_disc_width", width)
+        ctx.set("optic_disc_height", height)
+

@@ -50,13 +50,13 @@ optic_disc_segmentation:
   input_norm: minmax
   output_activation: none
   revision: main
-  input_channels: ["M0_ff_image_cleaned", "M0_ff_image_cleaned", "M0_ff_image_cleaned"]
+  input_channels: ["M0_ff_image", "M0_ff_image", "M0_ff_image"]
   input_shape: [1024, 1024]
 
 eye_laterality_classifier:
   task: eye_laterality_classification
   hf_repo: DigitalHolography/YOLO_EyeSide
-  filename: optic_disk.onnx
+  filename: eye_side.onnx
   format: onnx
   input_norm: minmax
   output_activation: none
