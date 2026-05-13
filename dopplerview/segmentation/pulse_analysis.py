@@ -181,19 +181,12 @@ def remove_bad_beats(signal, video, beat_period, threshold=0.5):
     # Create a cleaned signal by keeping only good beats
     beat_signal = get_pseudo_signal(median_beat, peaks, len(signal))
     mask_signal = np.zeros_like(signal)
-    # cleaned_video = np.zeros_like(video)
     for i, is_good in enumerate(good_beats_mask):
         if is_good:
             start, end = peaks[i], peaks[i + 1]
-            # cleaned_signal[start:end] = signal[start:end]
-            # cleaned_video[start:end] = video[start:end]
-            mask_signal[start:end] = 1
-        # else:
-            # start, end = peaks[i], peaks[i + 1]
-            # cleaned_signal[start:end] = 0
-            # beat_signal[start:end] = 0
 
-    
+            mask_signal[start:end] = 1
+
     cleaned_video = video[mask_signal != 0]
     cleaned_signal = signal[mask_signal != 0]
     beat_signal = beat_signal[mask_signal != 0]
