@@ -14,12 +14,17 @@
         },
         "OpticDisc": {
             "center": "optic_disc_center",
-            "axes": "optic_disc_axes"
+            "width": "optic_disc_width",
+            "height": "optic_disc_height",
+            "mask": "optic_disc_mask"
         }
     },
     "waveform": {
         "Retina": {
-            "M0_vessel_branch": "branch_signals"
+            "M0_vessel_branch": "branch_signals",
+            "pre_arterial_pulse": "pre_arterial_pulse",
+            "pre_arterial_pulse_filtered": "pre_arterial_pulse_filtered",
+            "pre_arterial_pulse_cleaned": "pre_arterial_pulse_cleaned"
         },
         "Choroid": {}
     },
@@ -34,5 +39,9 @@
         "velocitysignal_filtered": "retinal_artery_velocity_signal_filtered",
         "beat_indices": "beat_indices",
         "time_per_beat": "time_per_beat"
+    },
+    "laterality": {
+        "eye_laterality": "eye_laterality",
+        "eye_laterality_confidence": "eye_laterality_confidence"
     }
 }

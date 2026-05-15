@@ -60,8 +60,8 @@ def bump_version(part):
 # -------------------------
 # Build
 # -------------------------
-def build_installer():
-    run([sys.executable, str(BUILD_SCRIPT)])
+def build_installer(skip_build=False):
+    run([sys.executable, str(BUILD_SCRIPT), "--skip-pyinstaller"] if skip_build else [sys.executable, str(BUILD_SCRIPT)])
 
 
 # -------------------------
@@ -136,6 +136,7 @@ def main():
     parser.add_argument("--pre", action="store_true", help="Pre-release mode (no tag/push)")
     parser.add_argument("--finalize", action="store_true", help="Finalize pre-release (tag/push without bumping version)")
     parser.add_argument("--reset", action="store_true", help="Undo last pre-release")
+    parser.add_argument("--skip-build", action="store_true", help="Skip building the .exe (useful if already built)")
     args = parser.parse_args()
 
     if args.reset:
@@ -158,7 +159,7 @@ def main():
 
     # 5. Build installer
     if not args.finalize:
-        build_installer()
+        build_installer(args.skip_build)
 
     if args.pre:
         print("Pre-release mode: skipping tag and push")

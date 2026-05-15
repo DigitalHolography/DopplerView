@@ -1,5 +1,6 @@
 from pathlib import Path
 import os
+import threading
 import time
 from dopplerview.input_output import user_config
 from dopplerview.models.registry import ModelRegistryConfig
@@ -14,7 +15,8 @@ from dopplerview.utils import json_utils
 
 from dopplerview.pipeline.steps.read_moments import ReadMomentsStep
 from dopplerview.pipeline.steps.preprocess import PreprocessStep
-from dopplerview.pipeline.steps.optic_disc import OpticDiscDetectionStep
+from dopplerview.pipeline.steps.optic_disc import OpticDiscDetectionStep, OpticDiscSegmentationStep
+from dopplerview.pipeline.steps.eye_laterality_classification import EyeLateralityClassificationStep
 from dopplerview.pipeline.steps.vessel_segmentation import RetinalVesselSegmentationStep, ChoroidalVesselSegmentationStep
 from dopplerview.pipeline.steps.pulse_analysis import PulseAnalysisStep
 from dopplerview.pipeline.steps.av_segmentation import AVSegmentationStep
@@ -41,7 +43,7 @@ class Context:
         self.metadata = {
             "step_hashes": {}
         }
-        self.input_folder_list = []
+        self.input_list = []
 
         self.measure_folder = None  # The measure folder containing the HD folder and the DV folder, set when loading input
         self.HD_folder = None       # The Holodoppler folder containing the raw input data, set when loading input
@@ -58,7 +60,9 @@ class Context:
         self.holodoppler_config = None
 
         # Runtime data storage
-        self.cache: Dict[str, Any] = {}
+        self.__cache: Dict[str, Any] = {}
+
+        self.lock = threading.RLock()
 
     def load_default_manager(self):
         models_config = user_config.ensure_config_file("models.yaml")
@@ -131,7 +135,7 @@ class Context:
         logger.info(f"[Pipeline] Reading cache from {h5_cache_path}")
         with h5py.File(h5_cache_path, "r") as input_file:
             for key in input_file.keys():
-                self.cache[key] = input_file[key][()]
+                self.__cache[key] = input_file[key][()]
 
     def ensure_directory(self, path):
         path = Path(path)
@@ -144,11 +148,15 @@ class Context:
         return path
 
     def load_input_folder(self, folder_path):
+        measure_folder = self.ensure_directory(folder_path)
+        if measure_folder == self.measure_folder:
+            logger.info(f"[Pipeline] Input folder already loaded: {measure_folder}")
+            return
         self.clear()  # Clear cache before loading new input
-        self.measure_folder = self.ensure_directory(folder_path)
+        self.measure_folder = measure_folder
 
         self.HD_folder = HolodopplerFolder(self.measure_folder)
-        self.cache["input_file"] = self.HD_folder.input_file
+        self.__cache["input_file"] = self.HD_folder.input_file
         self.load_holodoppler_config(self.HD_folder.holodoppler_config)
 
         self.load_DV_folder()
@@ -165,20 +173,25 @@ class Context:
             # Load configs from folder
             self.load_dopplerview_config(self.DV_folder.dopplerview_config)
 
-    def load_folder_list(self, folder_list_path):
+    def load_input_list(self, folder_list_path):
+        """ 
+        Loads a list of input folders for batch processing. 
+        The list can be provided as a text file (one folder path per line) or as a directory containing subdirectories for each input folder.
+        """
         if not os.path.exists(folder_list_path):
             raise FileNotFoundError(f"Folder list file not found: {folder_list_path}")
         
         if os.path.isfile(folder_list_path):
             with open(folder_list_path, "r") as f:
-                self.input_folder_list = [line.strip() for line in f.readlines()]
+                self.input_list = [line.strip() for line in f.readlines()]
         elif os.path.isdir(folder_list_path):
             # Load all subdirectories as folders
             subdirs = [d for d in os.listdir(folder_list_path) if os.path.isdir(os.path.join(folder_list_path, d))]
-            self.input_folder_list = [Path(os.path.join(folder_list_path, d)) for d in subdirs]
+            self.input_list = [Path(os.path.join(folder_list_path, d)) for d in subdirs]
 
     def get(self, key: str):
-        return self.cache.get(key)
+        with self.lock:
+            return self.__cache.get(key)
     
     def change_model_for_task(self, task_name: str, model_name: str):
         self.model_manager.change_task_model(task_name, model_name)
@@ -202,20 +215,33 @@ class Context:
         # Create the output manager. It will lazily create the output folder when needed, to avoid creating empty output folders for runs that don't produce any outputs
         self.output_manager = OutputManager(dopplerview_folder=self.DV_folder, schema=self.h5_schema, dopplerview_config=self.dopplerview_config, output_config=self.output_config)
 
-
     def set(self, key: str, value: Any):
-        self.cache[key] = value
+        with self.lock:
+            self.__cache[key] = value
 
     def has(self, key: str) -> bool:
-        return key in self.cache
+        with self.lock:
+            return key in self.__cache
 
     def require(self, key: str):
-        if key not in self.cache:
-            raise RuntimeError(f"Missing required context key: '{key}'")
-        return self.cache[key]
+        with self.lock:
+            if key not in self.__cache:
+                raise RuntimeError(f"Missing required context key: '{key}'")
+            return self.__cache[key]
 
     def clear(self):
-        self.cache.clear()
+        with self.lock:
+            self.__cache.clear()
+
+    def is_empty(self):
+        return self.__cache == {}
+    
+    def export_cache(self, filepath):
+        with h5py.File(filepath, "w") as h5_cache:
+            for key in self.__cache:
+                if key in h5_cache:
+                    del h5_cache[key]
+                h5_cache.create_dataset(key, data=self.__cache[key])
 
 class Pipeline:
     def __init__(self, debug_mode=False):
@@ -236,7 +262,9 @@ class Pipeline:
         self.steps = {
             ReadMomentsStep(),
             PreprocessStep(),
-            OpticDiscDetectionStep(),
+            EyeLateralityClassificationStep(),
+            # OpticDiscDetectionStep(),
+            OpticDiscSegmentationStep(),
             RetinalVesselSegmentationStep(),
             ChoroidalVesselSegmentationStep(),
             PulseAnalysisStep(),
@@ -251,7 +279,7 @@ class Pipeline:
         return self.engine.execution_order
     
     def is_cached(self, step_name):
-        if self.ctx.cache == {}:
+        if self.ctx.is_empty():
             return False  # Cache not loaded, treat as not cached
         step = self.engine.steps[step_name]
         return self.engine._should_run(step, self.ctx) == False
@@ -275,8 +303,8 @@ class Pipeline:
     def load_input(self, input_path):
         self.ctx.load_input_folder(input_path)
 
-    def load_folder_list(self, folder_list_path):
-        self.ctx.load_folder_list(folder_list_path)
+    def load_input_list(self, folder_list_path):
+        self.ctx.load_input_list(folder_list_path)
 
     def load_model_registry(self, config_path):
         self.ctx.load_manager(config_path)
@@ -312,14 +340,15 @@ class Pipeline:
         # If in debug mode, save the entire cache to the H5 file after execution
         if self.ctx.debug_mode:
             logger.info(f"[Pipeline] Saving cache to H5 file.")
-            self.ctx.output_manager.save_cache(self.ctx.cache)
-        return self.ctx.cache
+            self.ctx.output_manager.save_cache(self.ctx)
+        return self.ctx
 
     def run_batch(self, targets=None, callback=None):
-        for folder in self.ctx.input_folder_list:
+        for folder in self.ctx.input_list:
             try:
                 logger.info(f"[Run Batch] Processing folder: {folder}")
                 self.load_input(folder)
+                callback("input_loaded")
                 self.run(targets=targets, callback=callback)
             except Exception as e:
                 logger.info(f"[Run Batch] Error processing folder {folder}: {e}")

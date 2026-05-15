@@ -4,40 +4,49 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 class OutputRenderer:
-    def render(self, key, cache, path, options=None):
+    def render(self, key, ctx, path, options=None):
         raise NotImplementedError
     
 class ImageRenderer(OutputRenderer):
-    def render(self, key, cache, path, options=None):
-        imageio.imwrite(path, normalize_to_uint8(cache.get(key)))
+    def render(self, key, ctx, path, options=None):
+        imageio.imwrite(path, normalize_to_uint8(ctx.get(key)))
 
 class SignalRenderer(OutputRenderer):
-    def render(self, key, cache, path, options=None):
+    def render(self, key, ctx, path, options=None):
         plt.figure()
         plt.title(key)
-        if options and options.get("multiple_signals"):
+
+        scatter_indices = None
+        if options and options.get("scatter"):
+            scatter_indices = ctx.get(key)[-1] # Only scatter the last signal if multiple_signals is True
+
+        if options and (options.get("multiple_signals") or options.get("scatter")):
             legend = options.get("legend", [])
-            for i, signal in enumerate(cache.get(key)):
+            for i, signal in enumerate(ctx.get(key)):
+                if scatter_indices is not None:
+                    if i == len(ctx.get(key)) - 1:  # Skip las iteration if scatter is True
+                        continue
+                    plt.scatter(scatter_indices, signal[scatter_indices], label=f"{legend[i]} Peaks" if i < len(legend) else "Peaks", s=50)
                 plt.plot(signal, label=legend[i] if i < len(legend) else "")
             if legend:
                 plt.legend()
         else:
-            plt.plot(cache.get(key))
+            plt.plot(ctx.get(key))
         plt.savefig(path)
         plt.close()
 
 class VideoRenderer(OutputRenderer):
-    def render(self, key, cache, path, options=None):
-        save_numpy_as_avi(cache.get(key), path.with_suffix(".avi"))
+    def render(self, key, ctx, path, options=None):
+        save_numpy_as_avi(ctx.get(key), path.with_suffix(".avi"))
 
 class OpticDiscRenderer(OutputRenderer):
-    def render(self, key, cache, path, options=None):
-        image = cache.get("M0_ff_image")
-        center = cache.get("optic_disc_center")
-        axes = cache.get("optic_disc_axes")
+    def render(self, key, ctx, path, options=None):
+        image = ctx.get("M0_ff_image")
+        center = ctx.get("optic_disc_center")
+        diameter_x = ctx.get("optic_disc_width")
+        diameter_y = ctx.get("optic_disc_height")
 
         x_center, y_center = center
-        diameter_x, diameter_y = axes
 
         a = diameter_x / 2
         b = diameter_y / 2
@@ -66,6 +75,6 @@ class OpticDiscRenderer(OutputRenderer):
         plt.close()
 
 class LabeledMaskRenderer(OutputRenderer):
-    def render(self, key, cache, path, options=None):
-        save_labeled_branches(cache.get(key), path)
+    def render(self, key, ctx, path, options=None):
+        save_labeled_branches(ctx.get(key), path)
         plt.close()

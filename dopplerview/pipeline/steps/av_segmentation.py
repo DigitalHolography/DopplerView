@@ -2,7 +2,7 @@ from dopplerview.pipeline.step import BaseStep
 import numpy as np
 
 class AVSegmentationStep(BaseStep):
-    requires = {"M0_ff_video", "M0_ff_image", "correlation", "diasys_image"}
+    requires = {"M0_ff_video", "M0_ff_image_cleaned", "correlation", "diasys_image"}
     produces = {"retinal_artery_mask", "retinal_vein_mask"}
     name = "retinal_artery_vein_segmentation"
 
@@ -32,9 +32,12 @@ class AVSegmentationStep(BaseStep):
     def run(self, ctx):
         if ctx.dopplerview_config.get("AVSegmentationMethod", "AI") == "AI":
             self.logger.info("    - Use deep segmentation model for artery vein segmentation.")
-            ctx.cache["retinal_artery_mask"], ctx.cache["retinal_vein_mask"] = self.deep_segmentation(ctx)
+            artery_mask, vein_mask = self.deep_segmentation(ctx)
             
         else:
             self.logger.info("    - Use hand-made heuristics for artery vein segmentation.")
-            ctx.cache["retinal_artery_mask"], ctx.cache["retinal_vein_mask"] = self.handmade_segmentation(ctx)
+            artery_mask, vein_mask = self.handmade_segmentation(ctx)
+
+        ctx.set("retinal_artery_mask", artery_mask)
+        ctx.set("retinal_vein_mask", vein_mask)
         

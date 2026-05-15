@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 from dopplerview.input_output import log_config, user_config
 import numpy as np
+import matplotlib
 
 from dopplerview.pipeline.pipeline import Pipeline
 from dopplerview.models.registry import ModelRegistryConfig
@@ -23,6 +24,7 @@ def load_dopplerview_config(config_path):
 
 
 def main():
+    matplotlib.use("Agg")
     log_config.setup_logging()
     """Main CLI entry point"""
     parser = argparse.ArgumentParser(
@@ -81,7 +83,7 @@ def main():
     targets = args.targets if args.targets else None
 
     if args.batch:
-        pipeline.load_folder_list(input_folder)
+        pipeline.load_input_list(input_folder)
         pipeline.run_batch(targets=targets)
     else:
         pipeline.load_input(input_folder)

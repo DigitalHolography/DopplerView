@@ -84,6 +84,11 @@ def detect_outliers_moving_median(signal, window=5, threshold_factor=2.0):
     mad = np.median(deviation)
     return deviation > threshold_factor * mad if mad != 0 else np.zeros_like(signal, dtype=bool)
 
+def remove_outliers(video, outlier_mask):
+    cleaned_video = video.copy()
+    cleaned_video[:, :, outlier_mask] = np.nan
+    return cleaned_video
+
 def interpolate_outlier_frames(video, outlier_frames_mask):
     """
     Interpolate outlier frames in a 3D video array.
@@ -114,12 +119,14 @@ def interpolate_outlier_frames(video, outlier_frames_mask):
 
         if prev_frame == next_frame:
             video_cleaned[idx, :, :] = video[prev_frame, :, :]
-        else:
+        elif next_frame - prev_frame <= 2:  # If frames are close, just take the average
             alpha = (idx - prev_frame) / (next_frame - prev_frame)
             video_cleaned[idx, :, :] = (
                 (1 - alpha) * video[prev_frame, :, :] +
                 alpha * video[next_frame, :, :]
             )
+        else:
+            video_cleaned[idx, :, :] = np.nan
 
     return video_cleaned
 
@@ -153,6 +160,7 @@ def interpolate_outliers(video, signal, artery_mask, sampling_frequency):
     outlier_frames_mask = detect_outliers_moving_median(signal, window=5, threshold_factor=2)
     logger.info(f"    - Detected {outlier_frames_mask.sum()} outlier frames based on arterial pulse signal.")
     video = interpolate_outlier_frames(video, outlier_frames_mask)
+    # video = remove_outliers(video, outlier_frames_mask)
     signal = get_pulse_from_mask(video, artery_mask)
     signal_filtered = get_filtered_pulse(signal, sampling_frequency=sampling_frequency)
     return video, signal_filtered

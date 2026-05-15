@@ -9,6 +9,7 @@ import numpy as np
 import torch
 import onnxruntime as ort
 from dopplerview.utils.image_utils import normalize_to_uint8
+import cv2
 
 
 class BaseModelWrapper(ABC):
@@ -26,6 +27,8 @@ class BaseModelWrapper(ABC):
         channels = []
         for ch_name in self.spec.input_channels:
             ch = ctx.require(ch_name)
+            if ch.shape != tuple(self.spec.input_shape):
+                ch = cv2.resize(ch, tuple(self.spec.input_shape))
             channels.append(ch)
         return np.stack(channels, axis=0)
     

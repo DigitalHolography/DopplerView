@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from dopplerview._version import __version__ as app_version
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 INSTALL_DIR = PROJECT_ROOT / "packaging"
 SPEC_FILE = INSTALL_DIR / "DopplerView.spec"
@@ -17,7 +19,6 @@ ONEDIR_BUILD = DIST_DIR / "DopplerView"
 ONEFILE_BUILD = DIST_DIR / "DopplerView.exe"
 PAYLOAD_DIR = PROJECT_ROOT / "build" / "installer_payload"
 INSTALLER_OUTPUT_DIR = DIST_DIR
-VERSION_PATTERN = re.compile(r'^version\s*=\s*"([^"]+)"\s*$')
 INNO_SETUP_CANDIDATES = (
     Path.home() / "AppData" / "Local" / "Programs" / "Inno Setup 6" / "ISCC.exe",
     Path(r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe"),
@@ -57,15 +58,6 @@ def _ensure_supported_python() -> None:
             "build-installer must run with Python 3.10 or newer. "
             f"Current interpreter: {sys.executable} ({version})."
         )
-
-
-def _read_version() -> str:
-    pyproject_path = PROJECT_ROOT / "pyproject.toml"
-    for line in pyproject_path.read_text(encoding="utf-8").splitlines():
-        match = VERSION_PATTERN.match(line)
-        if match:
-            return match.group(1)
-    raise RuntimeError(f"Could not read version from {pyproject_path}")
 
 
 def _find_iscc(explicit_path: Path | None) -> Path:
@@ -189,7 +181,6 @@ def main() -> None:
         raise SystemExit(f"Inno Setup script not found: {ISS_FILE}")
 
     iscc_path = _find_iscc(args.iscc)
-    app_version = _read_version()
 
     if not args.skip_pyinstaller:
         _run_pyinstaller()
