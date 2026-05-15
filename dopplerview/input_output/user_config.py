@@ -4,7 +4,7 @@ from pathlib import Path
 import shutil
 import sys
 from importlib.resources import files
-from importlib.metadata import version
+from dopplerview._version import __version__
 
 
 def get_user_config_dir():
@@ -13,7 +13,7 @@ def get_user_config_dir():
     else:
         base = Path.home() / ".config"
 
-    path = base / "DopplerView" / version("dopplerview")
+    path = base / "DopplerView" / __version__
     path.mkdir(parents=True, exist_ok=True)
     return path
 
