@@ -38,7 +38,7 @@ class HolodopplerFolder:
     def get_input_folder(self):
         raw_folder = self.directory / "h5"
         if not os.path.exists(raw_folder):
-            raise FileNotFoundError(f"Raw folder not found in {self.directory}")
+            raise FileNotFoundError(f"h5 folder not found in {self.directory}")
         return raw_folder
     
     def find_input_file(self):

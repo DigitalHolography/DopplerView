@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.3.1
+* Fix cache saving in debug mode
+
 ## 1.3.0
 * Handle multiple inputs
 * Resize advanced window when images are displayed
