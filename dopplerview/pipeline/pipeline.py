@@ -174,6 +174,7 @@ class Context:
             self.load_dopplerview_config(self.DV_folder.dopplerview_config)
 
     def load_input_list(self, input_list):
+        logger.info(f"[Pipeline] Loading input list with {len(input_list)} items.")
         self.input_list = input_list
 
     def load_input_list_from_file(self, input_list):
@@ -312,15 +313,15 @@ class Pipeline:
     def load_dopplerview_config(self, config_path):
         self.ctx.load_dopplerview_config(config_path)
 
-    def load_input(self, input_path):
+    def load_input_list(self, input_path):
         if not os.path.exists(input_path):
             raise FileNotFoundError(f"Input path not found: {input_path}")
         if os.path.isdir(input_path):
-            return self.load_batch_folder(input_path)
+            self.load_batch_folder(input_path)
         elif input_path.suffix == ".txt":
-            return self.ctx.load_input_list_from_file(input_path)
+            self.ctx.load_input_list_from_file(input_path)
         elif os.path.isfile(input_path) and input_path.suffix == ".holo":
-            return self.ctx.load_input_folder(input_path)
+            self.ctx.load_input_list([input_path])
 
     def load_input_list_from_file(self, folder_list_path):
         self.ctx.load_input_list_from_file(folder_list_path)
@@ -370,12 +371,12 @@ class Pipeline:
         return self.ctx
 
     def run_batch(self, targets=None, callback=None):
-        for folder in self.ctx.input_list:
+        for input in self.ctx.input_list:
             try:
-                logger.info(f"[Run Batch] Processing folder: {folder}")
-                self.load_input(folder)
+                logger.info(f"[Run Batch] Processing file: {input}")
+                self.ctx.load_input_folder(input)
                 if callback:
                     callback("input_loaded")
                 self.run(targets=targets, callback=callback)
             except Exception as e:
-                logger.info(f"[Run Batch] Error processing folder {folder}: {e}")
+                logger.info(f"[Run Batch] Error processing file {input}: {e}")
