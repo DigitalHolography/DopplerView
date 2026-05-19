@@ -173,9 +173,9 @@ class Context:
             # Load configs from folder
             self.load_dopplerview_config(self.DV_folder.dopplerview_config)
 
-    def load_input_list(self, input_list):
-        logger.info(f"[Pipeline] Loading input list with {len(input_list)} items.")
-        self.input_list = input_list
+    def extend_input_list(self, input_list):
+        with self.lock:
+            self.input_list.extend(input_list)
 
     def load_input_list_from_file(self, input_list):
         """ 
@@ -230,6 +230,10 @@ class Context:
             if key not in self.__cache:
                 raise RuntimeError(f"Missing required context key: '{key}'")
             return self.__cache[key]
+        
+    def clear_input_list(self):
+        with self.lock:
+            self.input_list = []
 
     def clear(self):
         with self.lock:
@@ -313,7 +317,7 @@ class Pipeline:
     def load_dopplerview_config(self, config_path):
         self.ctx.load_dopplerview_config(config_path)
 
-    def load_input_list(self, input_path):
+    def load_input(self, input_path):
         if not os.path.exists(input_path):
             raise FileNotFoundError(f"Input path not found: {input_path}")
         if os.path.isdir(input_path):
@@ -321,17 +325,21 @@ class Pipeline:
         elif input_path.suffix == ".txt":
             self.ctx.load_input_list_from_file(input_path)
         elif os.path.isfile(input_path) and input_path.suffix == ".holo":
-            self.ctx.load_input_list([input_path])
+            self.ctx.extend_input_list([input_path])
 
     def load_input_list_from_file(self, folder_list_path):
         self.ctx.load_input_list_from_file(folder_list_path)
+
+    def load_input_list_from_list(self, input_list):
+        for input in input_list:
+            self.load_input(input)
 
     def load_batch_folder(self, folder_path):
         holo_files = read_folder.search_holo_files(folder_path)
         logger.info(f"[Pipeline] Found {len(holo_files)} .holo files in {folder_path} for batch processing: {holo_files}")
         if len(holo_files) == 0:
             raise FileNotFoundError(f"No .holo file found in {folder_path}")
-        self.ctx.load_input_list(holo_files)
+        self.ctx.extend_input_list(holo_files)
 
     def load_model_registry(self, config_path):
         self.ctx.load_manager(config_path)

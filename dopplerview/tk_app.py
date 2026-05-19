@@ -226,7 +226,7 @@ class MainWindow:
 
         self.btn_load = ttk.Button(
             self.buttons_frame,
-            text="Select .holo File",
+            text="Select .holo file(s)",
             command=self.load_holo
         )
         self.btn_load.grid(row=0, column=0, padx=5, sticky="ew")
@@ -527,25 +527,32 @@ class MainWindow:
             cb.config(selectcolor=color)
 
     def load_input(self, folders):
-        self.input_folder.set(folders)
+        # self.input_folder.set(folders)
         self.cleanup_image()
         self.progress["value"] = 0
         self.progress_minimal["value"] = 0
+        self.pipeline.ctx.clear_input_list()
 
-        folder_list = folders.split()
+        if isinstance(folders, str):
+            folder_list = [Path(f) for f in folders.split() if f]
+        else:
+            folder_list = [Path(f) for f in folders]
 
-        self.pipeline.ctx.input_list = folder_list
-        self.pipeline.load_input(folder_list[0])  # load first by default, pipeline will handle the rest in batch mode
-        self.config_path.set(self.pipeline.ctx.dopplerview_config_path)
+        self.pipeline.load_input_list_from_list(folder_list)
+        # self.pipeline
+        # if folder_list[0].suffix == ".holo":
+        #     self.pipeline.ctx.load_input_folder(folder_list[0])  # load first by default, pipeline will handle the rest in batch mode
+        # self.config_path.set(self.pipeline.ctx.dopplerview_config_path)
+        self.input_folder.set(self.pipeline.ctx.input_list)
         self.update_step_display()
 
         self.btn_run.config(state="enabled")
         self.btn_run_minimal.config(state="enabled")
         
     def load_holo(self):
-        file_path = filedialog.askopenfilename(filetypes=[("Holo files", "*.holo")], defaultextension=".holo")
+        file_path = filedialog.askopenfilenames(filetypes=[("Holo files", "*.holo")], defaultextension=".holo")
         if file_path:
-            self.load_input(file_path)
+            self.load_input(list(file_path))
 
     def load_config(self):
         file_path = filedialog.askopenfilename(filetypes=[("JSON files", "*.json")], defaultextension=".json")
@@ -788,11 +795,11 @@ class MainWindow:
     def show_help(self):
         help_text = (
             "DopplerView is a tool for segmentation, classification and analysis of diverse structures and signals on data issued from laser doppler holography.\n"
-            "It takes as input .h5 file(s) resulting from holodoppler processing of raw videos, and produces a variety of outputs including artery/vein segmentation masks, velocity estimates, waveform analyses, and more.\n\n"
-            "1. Load a folder containing your .h5 file\n"
+            "It takes as input measure.holo file(s) with a corresponding measure/measure_HD folder containing the hologram data resulting from holodoppler processing of raw videos, and produces a variety of outputs including artery/vein segmentation masks, velocity estimates, waveform analyses, and more.\n\n"
+            "1. Load a .holo file, or drag-and-drop it into the application. You can also load a batch folder containing multiple .holo files, or a .txt file containing a list of paths to .holo files.\n"
             "2. In advanced UI (View -> Advanced UI), select which pipeline steps to run or run the full pipeline.\n"
             "3. View the results, including artery/vein segmentation overlays.\n\n"
-            "For more information, visit our GitHub repository."
+            "For more information, visit our GitHub repository: https://github.com/DigitalHolography/DopplerView"
         )
         tk.messagebox.showinfo("Help - DopplerView", help_text)
 
