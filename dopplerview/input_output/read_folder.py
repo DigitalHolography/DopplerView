@@ -32,7 +32,12 @@ class HolodopplerFolder:
         json_files = [f for f in os.listdir(config_directory) if f.endswith(".json")]
         if len(json_files) == 0:
             raise FileNotFoundError(f"No JSON configuration file found in {self.directory}")
-        json_path = config_directory / config_name if config_name in json_files else config_directory / json_files[0]
+        json_path = config_directory / config_name
+        if not json_path.exists():
+            config_name = "parameters_holodoppler.json"
+            json_path = config_directory / config_name
+            if not json_path.exists():
+                json_path = config_directory / json_files[0]
         return json_path
     
     def get_input_folder(self):
