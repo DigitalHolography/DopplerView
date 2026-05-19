@@ -1,7 +1,8 @@
 # Changelog
 
-## 1.3.1
+## 1.4.0
 * Fix cache saving in debug mode
+* Enable multiple inputs loading as batch folder (automatic search of .holo files) and .txt file with list of .holo
 
 ## 1.3.0
 * Handle multiple inputs
