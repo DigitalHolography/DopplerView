@@ -2,7 +2,7 @@ from pathlib import Path
 import os
 import threading
 import time
-from dopplerview.input_output import user_config
+from dopplerview.input_output import user_config, read_folder
 from dopplerview.models.registry import ModelRegistryConfig
 import h5py
 import json
@@ -173,21 +173,23 @@ class Context:
             # Load configs from folder
             self.load_dopplerview_config(self.DV_folder.dopplerview_config)
 
-    def load_input_list(self, folder_list_path):
+    def extend_input_list(self, input_list):
+        with self.lock:
+            self.input_list.extend(input_list)
+
+    def load_input_list_from_file(self, input_list):
         """ 
         Loads a list of input folders for batch processing. 
         The list can be provided as a text file (one folder path per line) or as a directory containing subdirectories for each input folder.
         """
-        if not os.path.exists(folder_list_path):
-            raise FileNotFoundError(f"Folder list file not found: {folder_list_path}")
+        if not os.path.exists(input_list):
+            raise FileNotFoundError(f"Folder list file not found: {input_list}")
         
-        if os.path.isfile(folder_list_path):
-            with open(folder_list_path, "r") as f:
-                self.input_list = [line.strip() for line in f.readlines()]
-        elif os.path.isdir(folder_list_path):
-            # Load all subdirectories as folders
-            subdirs = [d for d in os.listdir(folder_list_path) if os.path.isdir(os.path.join(folder_list_path, d))]
-            self.input_list = [Path(os.path.join(folder_list_path, d)) for d in subdirs]
+        with open(input_list, "r") as f:
+            for line in f:
+                line = line.strip()
+                if os.path.isdir(line) or (line.endswith(".holo") and os.path.isfile(line)):
+                    self.input_list.append(line)
 
     def get(self, key: str):
         with self.lock:
@@ -228,6 +230,10 @@ class Context:
             if key not in self.__cache:
                 raise RuntimeError(f"Missing required context key: '{key}'")
             return self.__cache[key]
+        
+    def clear_input_list(self):
+        with self.lock:
+            self.input_list = []
 
     def clear(self):
         with self.lock:
@@ -312,10 +318,28 @@ class Pipeline:
         self.ctx.load_dopplerview_config(config_path)
 
     def load_input(self, input_path):
-        self.ctx.load_input_folder(input_path)
+        if not os.path.exists(input_path):
+            raise FileNotFoundError(f"Input path not found: {input_path}")
+        if os.path.isdir(input_path):
+            self.load_batch_folder(input_path)
+        elif input_path.suffix == ".txt":
+            self.ctx.load_input_list_from_file(input_path)
+        elif os.path.isfile(input_path) and input_path.suffix == ".holo":
+            self.ctx.extend_input_list([input_path])
 
-    def load_input_list(self, folder_list_path):
-        self.ctx.load_input_list(folder_list_path)
+    def load_input_list_from_file(self, folder_list_path):
+        self.ctx.load_input_list_from_file(folder_list_path)
+
+    def load_input_list_from_list(self, input_list):
+        for input in input_list:
+            self.load_input(input)
+
+    def load_batch_folder(self, folder_path):
+        holo_files = read_folder.search_holo_files(folder_path)
+        logger.info(f"[Pipeline] Found {len(holo_files)} .holo files in {folder_path} for batch processing: {holo_files}")
+        if len(holo_files) == 0:
+            raise FileNotFoundError(f"No .holo file found in {folder_path}")
+        self.ctx.extend_input_list(holo_files)
 
     def load_model_registry(self, config_path):
         self.ctx.load_manager(config_path)
@@ -355,11 +379,12 @@ class Pipeline:
         return self.ctx
 
     def run_batch(self, targets=None, callback=None):
-        for folder in self.ctx.input_list:
+        for input in self.ctx.input_list:
             try:
-                logger.info(f"[Run Batch] Processing folder: {folder}")
-                self.load_input(folder)
-                callback("input_loaded")
+                logger.info(f"[Run Batch] Processing file: {input}")
+                self.ctx.load_input_folder(input)
+                if callback:
+                    callback("input_loaded")
                 self.run(targets=targets, callback=callback)
             except Exception as e:
-                logger.info(f"[Run Batch] Error processing folder {folder}: {e}")
+                logger.info(f"[Run Batch] Error processing file {input}: {e}")
