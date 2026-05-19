@@ -56,6 +56,7 @@ class PreArteryMaskStep(BaseStep):
 
         # --- Step 3: Correct signals by aligning with median heartbeat ---
         beat_period = pulse_analysis.compute_idx0(signals_n, sampling_frequency)
+        self.logger.info("    - Sampling frequency: {:.2f} Hz, Beat period: {:.2f} seconds".format(sampling_frequency, beat_period))
         corrected_signals = np.zeros_like(signals_n)
         func = partial(pulse_analysis.correct_branch_signal_with_heartbeat, beat_period=beat_period, k=5)
         corrected_signals = run_in_parallel(func, signals_n, n_jobs=ctx.dopplerview_config["NumberOfWorkers"], chunking=False, task_name="branch signal correction")
@@ -114,14 +115,16 @@ class ComputeTemporalCuesStep(BaseStep):
 
         beat_period = ctx.require("beat_period")
 
-        arterial_pulse_cleaned, video_cleaned, beat_signal = pulse_analysis.remove_bad_beats(arterial_pulse_filtered, video, beat_period, threshold=0.8)
+        arterial_pulse_cleaned, video_cleaned, beat_signal, median_beat, peaks = pulse_analysis.remove_bad_beats(arterial_pulse_filtered, video, beat_period, threshold=0.8)
         ctx.set("pre_arterial_pulse_cleaned", arterial_pulse_cleaned)
 
         M0_ff_image_cleaned = image_utils.normalize_to_uint8(np.mean(video_cleaned, axis=0))
         ctx.set("M0_ff_image_cleaned", M0_ff_image_cleaned)
 
         self.logger.info(f"    - Removed {len(arterial_pulse_filtered) - len(arterial_pulse_cleaned)} frames due to low correlation with median arterial pulse beat pattern")
-        ctx.output_manager.output("pulse_analysis", f"pre_arterial signal corrected", (arterial_pulse_cleaned, beat_signal), "signal", options={"multiple_signals": True, "legend": ["Original Signal", "beat signal"]})
+        ctx.output_manager.output("pulse_analysis", f"outlier removal", (arterial_pulse_filtered, beat_signal), "signal", options={"multiple_signals": True, "legend": ["Original Signal", "beat signal"]})
+        ctx.output_manager.output("pulse_analysis", f"median beat", median_beat, "signal")
+        ctx.output_manager.output("pulse_analysis", f"peaks", (arterial_pulse_filtered, peaks), "signal", options={"scatter": True})
 
         # --- Compute correlation map with filtered pulses ---
 

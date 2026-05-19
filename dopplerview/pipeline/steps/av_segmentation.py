@@ -57,10 +57,14 @@ class AVSegmentationStep(BaseStep):
 
         ctx.set("retinal_artery_mask", artery_mask)
         ctx.set("retinal_vein_mask", vein_mask)
+        ctx.output_manager.save_overlay(self.name, "av_overlay", ctx.require("M0_ff_image_cleaned"), artery_mask, vein_mask)
 
         artery_mask_clean = self.clean_mask(artery_mask, ctx)
+        self.logger.info(f"    - Artery mask: {artery_mask.sum()} pixels, Cleaned artery mask: {artery_mask_clean.sum()} pixels")
         vein_mask_clean = self.clean_mask(vein_mask, ctx)
+        self.logger.info(f"    - Vein mask: {vein_mask.sum()} pixels, Cleaned vein mask: {vein_mask_clean.sum()} pixels")
 
         ctx.set("retinal_artery_mask_clean", artery_mask_clean)
         ctx.set("retinal_vein_mask_clean", vein_mask_clean)
+        ctx.output_manager.save_overlay(self.name, "av_overlay_cleaned", ctx.require("M0_ff_image_cleaned"), artery_mask_clean, vein_mask_clean)
         
