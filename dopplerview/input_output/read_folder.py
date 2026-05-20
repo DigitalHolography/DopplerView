@@ -14,7 +14,7 @@ class HolodopplerFolder:
     def __init__(self, parent_directory):
         self.directory = None
         self.holodoppler_config = None
-        self.raw_folder = None
+        self.h5_folder = None
         self.input_file = None
         self.measure_name = None
 
@@ -32,31 +32,38 @@ class HolodopplerFolder:
         json_files = [f for f in os.listdir(config_directory) if f.endswith(".json")]
         if len(json_files) == 0:
             raise FileNotFoundError(f"No JSON configuration file found in {self.directory}")
-        json_path = config_directory / config_name if config_name in json_files else config_directory / json_files[0]
+        json_path = config_directory / config_name
+        if not json_path.exists():
+            config_name = "parameters_holodoppler.json"
+            json_path = config_directory / config_name
+            if not json_path.exists():
+                json_path = config_directory / json_files[0]
         return json_path
     
     def get_input_folder(self):
-        raw_folder = self.directory / "h5"
-        if not os.path.exists(raw_folder):
-            raise FileNotFoundError(f"Raw folder not found in {self.directory}")
-        return raw_folder
+        h5_folder = self.directory / "h5"
+        if not os.path.exists(h5_folder):
+            h5_folder = self.directory / "raw"
+            if not os.path.exists(h5_folder):
+                raise FileNotFoundError(f"h5 folder not found in {self.directory}")
+        return h5_folder
     
     def find_input_file(self):
-        output_files = glob.glob(os.path.join(self.raw_folder, "*output.h5"))
-        raw_files = glob.glob(os.path.join(self.raw_folder, "*raw.h5"))
+        output_files = glob.glob(os.path.join(self.h5_folder, "*output.h5"))
+        raw_files = glob.glob(os.path.join(self.h5_folder, "*raw.h5"))
         if output_files:
             return Path(output_files[0])
         if raw_files:
             return Path(raw_files[0])
         # If expected .h5 file is not found, take the first .h5 file found
-        input_files = [f for f in os.listdir(self.raw_folder) if f.endswith(".h5")]
+        input_files = [f for f in os.listdir(self.h5_folder) if f.endswith(".h5")]
         if len(input_files) == 0:
-            raise FileNotFoundError(f"No HDF5 file found in {self.raw_folder}.")
-        return self.raw_folder / input_files[0]
+            raise FileNotFoundError(f"No HDF5 file found in {self.h5_folder}.")
+        return self.h5_folder / input_files[0]
 
     def read(self, parent_directory):
         self.get_HD_folder(parent_directory)
-        self.raw_folder = self.get_input_folder()
+        self.h5_folder = self.get_input_folder()
         self.holodoppler_config = self.get_HD_config()
         self.input_file = self.find_input_file()
 
@@ -131,3 +138,12 @@ class DopplerViewFolder():
     
     def get_h5_path(self):
         return self.h5_folder / f"{self.measure_name}_DV.h5"
+    
+def search_holo_files(folder_path):
+    holo_files = []
+    for file in os.listdir(folder_path):
+        if os.path.isdir(os.path.join(folder_path, file)):
+            holo_files.extend(search_holo_files(os.path.join(folder_path, file)))
+        if file.endswith(".holo"):
+            holo_files.append(Path(folder_path) / file)
+    return holo_files

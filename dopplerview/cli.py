@@ -28,28 +28,21 @@ def main():
     log_config.setup_logging()
     """Main CLI entry point"""
     parser = argparse.ArgumentParser(
-        description='DopplerView - Artery/vein segmentation from doppler holograms'
+        description='DopplerView - Artery/vein segmentation from doppler holograms',
+        formatter_class=argparse.RawTextHelpFormatter
     )
     parser.add_argument(
-        'holodoppler_folder',
+        'input',
         type=str,
-        help='Path to holodoppler folder'
-    )
-    parser.add_argument(
-        '-v', '--verbose',
-        action='store_true',
-        help='Enable verbose output'
+        help="""Path to either:
+    - measure.holo file: It must have a corresponding measure/measure_HD folder with the hologram data. The measure.holo file is used to determine the input folder for the pipeline.
+    - batch folder: A folder containing multiple measure.holo files, each with a corresponding measure/measure_HD folder.
+    - a .txt file: Contains a list of paths to measure.holo files, one per line."""
     )
     parser.add_argument(
         '-c', '--config',
         type=str,
         help='Path to JSON configuration file'
-    )
-
-    parser.add_argument(
-        '-b', '--batch',
-        action='store_true',
-        help='Process multiple folders. Folders are either listed in a text file (one folder path per line) or provided as subfolders of the specified path.'
     )
 
     parser.add_argument(
@@ -67,13 +60,13 @@ def main():
     args = parser.parse_args()
     
     # Validate input files
-    input_folder = Path(args.holodoppler_folder)
+    input = Path(args.input)
+
+    if not input.exists():
+        logger.info(f"Error: input not found: {input}", file=sys.stderr)
+        sys.exit(1)
 
     debug = args.debug
-    
-    if not input_folder.exists():
-        logger.info(f"Error: holodoppler folder not found: {input_folder}", file=sys.stderr)
-        sys.exit(1)
     
     pipeline = Pipeline(debug_mode=debug)
 
@@ -82,12 +75,8 @@ def main():
 
     targets = args.targets if args.targets else None
 
-    if args.batch:
-        pipeline.load_input_list(input_folder)
-        pipeline.run_batch(targets=targets)
-    else:
-        pipeline.load_input(input_folder)
-        pipeline.run(targets=targets)
+    pipeline.load_input(input)
+    pipeline.run_batch(targets=targets)
 
     return 0
 

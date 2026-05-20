@@ -1,5 +1,6 @@
 import json
 
+import cv2
 import h5py
 import numpy as np
 from pathlib import Path
@@ -100,6 +101,15 @@ class OutputManager:
         path = step_dir / f"{key}.png"
 
         renderer.render(key, ctx, path)
+    
+    def ensure_step_dir(self, step_name):
+            # Lasily create the output folder when we actually need to output something, to avoid creating empty output folders for runs that don't produce any outputs
+        self.ensure_output_folder()
+
+        step_dir = self.output_dir / step_name
+        step_dir.mkdir(exist_ok=True)
+
+        return step_dir
 
     def output(self, step_name, filename, value, type=None, options=None):
         """Outputs a value manually for debugging purposes based on the provided output configuration."""
@@ -112,11 +122,7 @@ class OutputManager:
             Warning(f"No renderer found for output type '{type}' of key '{step_name}', skipping output.")
             return
 
-        # Lasily create the output folder when we actually need to output something, to avoid creating empty output folders for runs that don't produce any outputs
-        self.ensure_output_folder()
-
-        step_dir = self.output_dir / step_name
-        step_dir.mkdir(exist_ok=True)
+        step_dir = self.ensure_step_dir(step_name)
 
         path = step_dir / f"{filename}.png"
 
@@ -125,3 +131,23 @@ class OutputManager:
     def save(self, step_name, key, ctx):
         self.save_h5(key, ctx)
         self.output_cache(step_name, key, ctx)
+
+    def save_overlay(self, step_name, filename, image, artery_mask, vein_mask):
+        step_dir = self.ensure_step_dir(step_name)
+        path = step_dir / f"{filename}.png"
+
+        img = image.copy()
+
+        if img.ndim == 2:
+            img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+
+        if artery_mask is not None:
+            if vein_mask is not None:
+                img[artery_mask > 0] = [0, 0, 255]
+            else:
+                img[artery_mask > 0] = [255, 250, 250]
+
+        if vein_mask is not None:
+            img[vein_mask > 0] = [255, 0, 0]
+
+        cv2.imwrite(str(path), img)

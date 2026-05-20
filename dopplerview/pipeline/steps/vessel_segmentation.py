@@ -92,7 +92,7 @@ class ChoroidalVesselSegmentationStep(VesselSegmentationStep):
 
     def _relevant_config(self, ctx):
         params = ctx.dopplerview_config["Mask"]
-        d = {"DiaphragmRadius": params["DiaphragmRadius"]}
+        d = {"DiaphragmRadius": params["DiaphragmRadius"],}
         return d
 
     def frangi_segmentation(self, ctx):

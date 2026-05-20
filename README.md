@@ -110,17 +110,14 @@ To create your
 The CLI runs the full pipeline on a Holodoppler acquisition folder.
 
 ```bash
-dopplerview /path/to/holodoppler_folder --config config.json -v
+dopplerview /path/to/measure.holo --config config.json
 ```
 
 ### Arguments
 
 * `-h, --help`            show this help message and exit
-* `-v, --verbose`         Enable verbose output
 *  `-c CONFIG, --config CONFIG`
-                        Path to JSON configuration file
-*  `-b, --batch`           Process multiple folders. Folders are either listed in a text file (one     
-                        folder path per line) or provided as subfolders of the specified path.      
+                        Path to JSON configuration file  
 *  `-t TARGETS [TARGETS ...], --targets TARGETS [TARGETS ...]`
                         List of target steps to run
 *  `-d, --debug`           Enable debug mode. In this mode, steps outputs are read from the .h5, and   
@@ -132,25 +129,7 @@ dopplerview /path/to/holodoppler_folder --config config.json -v
 ```bash
 dopplerview ./data/patient_01 \
     --config ./configs/default.json \
-    -v
 ```
-
-## GUI
-
-Launch the graphical interface:
-
-```bash
-streamlit run dopplerview/app.py
-```
-
-The GUI allows you to:
-
-* Load a Holodoppler folder
-* Automatically run initial preprocessing
-* Visualize M0 full-field image
-* Overlay vessel and AV segmentation masks
-* Run the full pipeline interactively
-
 ---
 
 # Project Structure
@@ -164,7 +143,7 @@ DopplerView/
 │   ├── input_output/      # Folder reading & output handling
 │   ├── utils/
 │   │   └── ...
-│   ├── app.py             # Streamlit GUI
+│   ├── tk_app.py             # Tkinter GUI
 │   ├── cli.py/            # Command-line script
 │   └── ...
 │
