@@ -3,9 +3,8 @@ Pulse analysis module for analyzing temporal pulsatility in vessels
 """
 
 import numpy as np
-from scipy.signal import butter, filtfilt, find_peaks, savgol_filter
-from scipy.ndimage import uniform_filter1d, median_filter
-from scipy.signal import savgol_filter
+from scipy.signal import butter, filtfilt, find_peaks, savgol_filter,detrend
+from scipy.ndimage import gaussian_filter1d
 from scipy.interpolate import CubicSpline
 from scipy.interpolate import interp1d
 
@@ -183,15 +182,14 @@ def remove_bad_beats(signal, video, beat_period, threshold=0.5):
     mask_signal = np.zeros_like(signal)
     for i, is_good in enumerate(good_beats_mask):
         if is_good:
-            start, end = peaks[i], peaks[i + 1]
+            start, end = max(peaks[i]-10,0), peaks[i + 1] # keep the beat and a small window before the peak to capture the systolic upstroke
 
             mask_signal[start:end] = 1
 
     cleaned_video = video[mask_signal != 0]
     cleaned_signal = signal[mask_signal != 0]
-    beat_signal = beat_signal[mask_signal != 0]
 
-    return cleaned_signal, cleaned_video, beat_signal
+    return cleaned_signal, cleaned_video, beat_signal, median_beat, peaks
 
 
 def select_regular_peaks(signals_n, method, idx0, threshold=0.1, tolerance=0.3):
@@ -237,31 +235,49 @@ def _select_minmax(signals_n, gradient_n, idx0):
 
     return s_idx, locs_n
 
-def compute_idx0(signals_n, sampling_frequency):
-    """""
-    Find the index corresponding to the dominant frequency period in the cardiac pulse physiological range in the signals
+def compute_idx0(signals_n, sampling_frequency,
+                 fmin=0.5, fmax=2.0):
     """
+    Robust estimation of cardiac period (idx0)
+    """
+
     num_frames = signals_n.shape[1]
-    avg_signal = signals_n.mean(axis=0)
 
-    # Compute FFT
-    Y = np.fft.fft(avg_signal)
-    P2 = np.abs(Y / num_frames)
-    P1 = P2[:num_frames//2 + 1]
-    P1[1:-1] *= 2
+    # --- Robust average ---
+    avg_signal = np.median(signals_n, axis=0)
 
-    # Frequency vector
-    f = sampling_frequency * np.arange(len(P1)) / num_frames
+    # --- Detrend ---
+    avg_signal = detrend(avg_signal, type='linear')
 
-    # Find dominant frequency in physiological range (e.g. 0.5 - 2 Hz)
-    f_range = (f > 0.5) & (f < 2) # 30 - 120 bpm
-    f_sel = f[f_range]
-    P_sel = P1[f_range]
+    # --- Windowing ---
+    window = np.hanning(num_frames)
+    avg_signal = avg_signal * window
 
-    f0 = f_sel[np.argmax(P_sel)]
+    # --- FFT ---
+    Y = np.fft.rfft(avg_signal)
+    P = np.abs(Y)**2
+
+    # --- Frequency vector ---
+    f = np.fft.rfftfreq(num_frames, d=1/sampling_frequency)
+
+    # --- Physiological band ---
+    mask = (f > fmin) & (f < fmax)
+    f_sel = f[mask]
+    P_sel = P[mask]
+
+    if len(P_sel) == 0 or np.sum(P_sel) == 0:
+        return None
+
+    # --- Smooth spectrum ---
+    P_sel = gaussian_filter1d(P_sel, sigma=2)
+
+    # --- Weighted frequency (robust) ---
+    f0 = np.sum(f_sel * P_sel) / np.sum(P_sel)
+
+    # --- Convert to index ---
     t0 = 1 / f0
-    dt = 1 / sampling_frequency
-    idx0 = int(round(t0 / dt))
+    idx0 = int(round(t0 * sampling_frequency))
+
     return idx0
 
 
