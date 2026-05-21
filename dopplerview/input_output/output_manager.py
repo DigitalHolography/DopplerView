@@ -2,14 +2,8 @@ import json
 
 import cv2
 import h5py
-import numpy as np
-from pathlib import Path
-import os
-from dopplerview.utils.image_utils import normalize_to_uint8
 import dopplerview.utils.json_utils as json_utils
-import imageio
 import dopplerview.input_output.output_renderer as output_renderer
-import re
 
 
 class OutputManager:

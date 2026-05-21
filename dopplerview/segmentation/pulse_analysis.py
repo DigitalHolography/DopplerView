@@ -127,7 +127,7 @@ def correct_signal(signal, pseudo_signal, k=2):
     signal_clean = pseudo_signal + alpha * residual
     return signal_clean
 
-def get_peaks(signal, beat_period, height_percentile=80, distance_tolerance=0.6):
+def get_peaks(signal, beat_period, height_percentile=80, distance_tolerance=0.8):
     """
     Get peaks of the signal using a robust method based on the beat period.
     """
@@ -135,14 +135,21 @@ def get_peaks(signal, beat_period, height_percentile=80, distance_tolerance=0.6)
     min_peak_height = np.percentile(diff_artery_signal, height_percentile)
     min_peak_distance = int(beat_period * distance_tolerance)  # Allow some variability in heart rate
 
-    peaks, _ = find_peaks(
+    positive_peaks, _ = find_peaks(
         diff_artery_signal,
         height=min_peak_height,
         distance=min_peak_distance
     )
-    return peaks
 
-def correct_branch_signal_with_heartbeat(signal, beat_period, k=2):
+    negative_peaks, _ = find_peaks(
+        -diff_artery_signal,
+        height=min_peak_height,
+        distance=min_peak_distance
+    )
+
+    return positive_peaks, negative_peaks
+
+def correct_branch_signal_with_heartbeat(signal, beat_period, k=2, distance_tolerance=0.8):
     """Correct the signal using heartbeat-based correction.
     Parameters
     ----------
@@ -159,7 +166,7 @@ def correct_branch_signal_with_heartbeat(signal, beat_period, k=2):
         The corrected signal.
     """
     signal_length = len(signal)
-    peaks = get_peaks(signal, beat_period)
+    peaks = get_peaks(signal, beat_period, distance_tolerance=distance_tolerance)
     beats = get_beats(signal, peaks, target_len=signal_length)
     average_beat = np.nanmedian(beats, axis=0)
 
@@ -167,9 +174,9 @@ def correct_branch_signal_with_heartbeat(signal, beat_period, k=2):
     corrected_signal = correct_signal(signal, pseudo_signal, k=k)
     return corrected_signal
 
-def remove_bad_beats(signal, video, beat_period, threshold=0.5):
+def remove_bad_beats(signal, video, beat_period, threshold=0.5, distance_tolerance=0.8):
     """Remove frames on the video corresponding to bad beats from the signal based on correlation with the average beat."""
-    peaks = get_peaks(signal, beat_period)
+    peaks = get_peaks(signal, beat_period, distance_tolerance=distance_tolerance)
     beats = get_beats(signal, peaks)
     median_beat = np.nanmedian(beats, axis=0)
 
