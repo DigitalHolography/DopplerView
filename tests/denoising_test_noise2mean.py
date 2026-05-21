@@ -209,7 +209,7 @@ if __name__ == "__main__":
     parser.add_argument("--fps", type=int, default=30)
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--channels", type=int, default=1, help="Base channels for UNet (default:32)")
-    parser.add_argument("--loss", choices=["mse", "l1", "smoothl1", "ssim", "combined"], default="ssim", help="Loss function")
+    parser.add_argument("--loss", choices=["mse", "l1", "smoothl1", "ssim", "combined"], default="l1", help="Loss function")
     parser.add_argument("--preprocess", choices=["none", "gaussian", "median", "bilateral", "hotpixel", "highpass", "anscombe", "wavelet"], default="none", help="Preprocessing to remove specific noise")
     
     train_and_export(parser.parse_args())

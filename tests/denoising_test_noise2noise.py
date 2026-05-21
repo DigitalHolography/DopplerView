@@ -14,31 +14,33 @@ class N2NDataset(Dataset):
         self.dataset = dataset
         self.patch = patch
         self.length = length
+        self.even = None
+        self.odd = None
 
         with h5py.File(h5_path, "r") as f:
-            self.shape = f[dataset].shape
+            M0 = f[dataset]
+            self.even = M0[::2,]
+            self.odd = M0[1::2,]
+            self.shape = M0.shape
 
-        self.T, self.H, self.W = self.shape
+        self.T, self.H, self.W = self.even.shape
 
     def __len__(self):
         return self.length
 
     def __getitem__(self, idx):
-        with h5py.File(self.h5_path, "r") as f:
-            dset = f[self.dataset]
+        i = np.random.randint(0, self.T)
 
-            i = np.random.randint(0, self.T)
+        # delta = 1
+        # j = np.clip(i + delta, 0, self.T - 1)
+        # if j == i:
+        #     j = (j + 1) % self.T
 
-            delta = np.random.randint(-4, 5)
-            j = np.clip(i + delta, 0, self.T - 1)
-            if j == i:
-                j = (j + 1) % self.T
+        y = np.random.randint(0, self.H - self.patch + 1)
+        x = np.random.randint(0, self.W - self.patch + 1)
 
-            y = np.random.randint(0, self.H - self.patch + 1)
-            x = np.random.randint(0, self.W - self.patch + 1)
-
-            a = dset[i, y:y+self.patch, x:x+self.patch].astype(np.float32)
-            b = dset[j, y:y+self.patch, x:x+self.patch].astype(np.float32)
+        a = self.even[i, y:y+self.patch, x:x+self.patch].astype(np.float32)
+        b = self.odd[i, y:y+self.patch, x:x+self.patch].astype(np.float32)
 
         a = normalize_(a)
         b = normalize_(b)
@@ -113,8 +115,8 @@ def denoise_video(
         T, H, W = dset.shape
 
         sample = dset[:min(T, 64)].astype(np.float32)
-        lo = np.percentile(sample, 1)
-        hi = np.percentile(sample, 99)
+        lo = np.percentile(sample, 0)
+        hi = np.percentile(sample, 100)
         scale = max(hi - lo, 1e-6)
 
         writer_denoised = cv2.VideoWriter(
