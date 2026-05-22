@@ -31,6 +31,7 @@ class ModelRegistryConfig:
                 revision=cfg.get("revision", "main"),
                 input_channels=cfg["input_channels"],
                 input_shape=cfg["input_shape"],
+                output_shape=cfg["output_shape"],
             )
             if cfg["task"] not in tasks:
                 tasks[cfg["task"]] = []

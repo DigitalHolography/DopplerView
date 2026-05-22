@@ -8,6 +8,7 @@ iternet5_vesselness:
   revision: main
   input_channels: ["M0_ff_image"]
   input_shape: [512, 512]
+  output_shape: [512, 512]
 
 nnwnet_av_corr_diasys:
   task: retinal_artery_vein_segmentation
@@ -19,6 +20,7 @@ nnwnet_av_corr_diasys:
   revision: main
   input_channels: ["M0_ff_image_cleaned", "correlation", "diasys_image"]
   input_shape: [512, 512]
+  output_shape: [512, 512]
 
 iternet5_av_diasys:
   task: retinal_artery_vein_segmentation
@@ -30,17 +32,7 @@ iternet5_av_diasys:
   revision: main
   input_channels: ["M0_ff_image_cleaned", "M0_ff_image_cleaned", "diasys_image"]
   input_shape: [512, 512]
-
-optic_disc_detector:
-  task: optic_disc_detection
-  hf_repo: DigitalHolography/EyeFlow_OpticDiscDetectorV2
-  filename: opticdisc.onnx
-  format: onnx
-  input_norm: minmax
-  output_activation: none
-  revision: main
-  input_channels: ["M0_ff_image", "M0_ff_image", "M0_ff_image"]
-  input_shape: [512, 512]
+  output_shape: [512, 512]
 
 YOLO_OpticDisc:
   task: optic_disc_segmentation
@@ -52,6 +44,19 @@ YOLO_OpticDisc:
   revision: main
   input_channels: ["M0_ff_image", "M0_ff_image", "M0_ff_image"]
   input_shape: [1024, 1024]
+  output_shape: [1024, 1024]
+
+optic_disc_detector:
+  task: optic_disc_detection
+  hf_repo: DigitalHolography/EyeFlow_OpticDiscDetectorV2
+  filename: opticdisc.onnx
+  format: onnx
+  input_norm: minmax
+  output_activation: none
+  revision: main
+  input_channels: ["M0_ff_image", "M0_ff_image", "M0_ff_image"]
+  input_shape: [512, 512]
+  output_shape: [512, 512]
 
 YOLO_EyeSide:
   task: eye_laterality_classification
@@ -63,3 +68,4 @@ YOLO_EyeSide:
   revision: main
   input_channels: ["M0_ff_image_cleaned", "M0_ff_image_cleaned", "M0_ff_image_cleaned"]
   input_shape: [640, 640]
+  output_shape: [640, 640]
