@@ -13,4 +13,5 @@ class ModelSpec:
     output_activation: str
     input_channels: Optional[list]
     input_shape: Optional[list]
+    output_shape: Optional[list]
     revision: Optional[str] = "main"
