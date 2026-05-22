@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.4.1
+* Ensure stacktrace when a step fails
+
 ## 1.4.0
 * Fix cache saving in debug mode
 * Enable multiple inputs loading as batch folder (automatic search of .holo files) and .txt file with list of .holo
