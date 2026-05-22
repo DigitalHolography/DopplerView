@@ -1,6 +1,7 @@
 # Changelog
 
 ## 1.4.1
+* Ensure stacktrace when a step fails
 * If optic disc segmentation confidence is too low, fallback to detection, and infer mask from bounding box
 * Add output shape to model specs
 
