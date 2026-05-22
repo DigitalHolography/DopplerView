@@ -54,7 +54,7 @@ class OpticDiscDetectionStep(BaseStep):
         return (x_center, y_center), diameter_x, diameter_y
 
     def run(self, ctx):
-        optic_disc_detection_method = ctx.dopplerview_config.get("OpticDiskDetectorMethod", True)
+        optic_disc_detection_method = ctx.dopplerview_config.get("Mask", {}).get("OpticDiskDetectorMethod", "deep")
 
         if optic_disc_detection_method == "deep":
             center, diameter_x, diameter_y = self.deep_detection(ctx)
