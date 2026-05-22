@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.1
+* If optic disc segmentation confidence is too low, fallback to detection, and infer mask from bounding box
+* Add output shape to model specs
+
 ## 1.4.0
 * Fix cache saving in debug mode
 * Enable multiple inputs loading as batch folder (automatic search of .holo files) and .txt file with list of .holo
