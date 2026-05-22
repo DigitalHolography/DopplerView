@@ -15,7 +15,7 @@ from dopplerview.utils import json_utils
 
 from dopplerview.pipeline.steps.read_moments import ReadMomentsStep
 from dopplerview.pipeline.steps.preprocess import PreprocessStep
-from dopplerview.pipeline.steps.optic_disc import OpticDiscDetectionStep, OpticDiscSegmentationStep
+from dopplerview.pipeline.steps.optic_disc import OpticDiscSegmentationStep
 from dopplerview.pipeline.steps.eye_laterality_classification import EyeLateralityClassificationStep
 from dopplerview.pipeline.steps.vessel_segmentation import RetinalVesselSegmentationStep, ChoroidalVesselSegmentationStep
 from dopplerview.pipeline.steps.pulse_analysis import PulseAnalysisStep
@@ -206,6 +206,9 @@ class Context:
 
         return self.model_instances[model_name]
     
+    def get_current_model_name_for_task(self, task_name):
+        return self.model_manager.get_current_model_name_for_task(task_name)
+    
     def get_current_model_for_task(self, task_name):
         model_name = self.model_manager.get_current_model_name_for_task(task_name)
         return self.get_model(model_name)
@@ -280,8 +283,8 @@ class Pipeline:
             ReadMomentsStep(),
             PreprocessStep(),
             EyeLateralityClassificationStep(),
-            OpticDiscDetectionStep(),
-            # OpticDiscSegmentationStep(),
+            # OpticDiscDetectionStep(),
+            OpticDiscSegmentationStep(),
             RetinalVesselSegmentationStep(),
             ChoroidalVesselSegmentationStep(),
             PulseAnalysisStep(),

@@ -204,3 +204,32 @@ def mask_to_bbox(mask):
     y_max = ys.max()
 
     return x_min, y_min, x_max, y_max
+
+def bbox_to_mask(center, width, height, target_shape):
+        x_center, y_center = center
+
+        h, w = target_shape
+
+        # Coordinate grid
+        X, Y = np.meshgrid(
+            np.arange(1, w + 1),
+            np.arange(1, h + 1)
+        )
+
+        # Ellipse radii
+        rx = width / 2
+        ry = height / 2
+
+        if rx > 0 and ry > 0:
+
+            norm_dist = (
+                ((X - x_center) ** 2) / (rx ** 2)
+                + ((Y - y_center) ** 2) / (ry ** 2)
+            )
+
+            optic_disk_mask = norm_dist <= 1
+
+        else:
+            optic_disk_mask = np.zeros((h, w), dtype=bool)
+
+        return optic_disk_mask
