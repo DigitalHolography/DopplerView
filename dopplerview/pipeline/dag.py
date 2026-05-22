@@ -266,9 +266,14 @@ class DAGEngine:
 
         if callback:
             callback("step_running", step.name)
-
-        step.run(ctx)
-
+            
+        try :
+            step.run(ctx)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            print(f"Error occured during {step.name} : {e}")
+            
         elapsed = time.time() - start
         logger.info(f"[DAG] Finished '{step.name}' in {elapsed:.2f}s")
 

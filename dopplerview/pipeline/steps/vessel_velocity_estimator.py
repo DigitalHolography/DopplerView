@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 class VesselVelocityEstimatorStep(BaseStep):
     name = "retinal_vessel_velocity_estimator"
     requires = {"M0_ff_video", "M2_ff_video", "retinal_artery_mask", "retinal_vein_mask", "optic_disc_center"}
-    produces = {"retinal_vessel_velocity","velocity_map_avg","fRMS_avg","fRMS_bkg_avg","retinal_artery_velocity_signal","retinal_vein_velocity_signal"}
+    produces = {"velocity_map_avg","fRMS_avg","fRMS_bkg_avg","retinal_artery_velocity_signal","retinal_vein_velocity_signal"}
 
     def _relevant_config(self, ctx):
         return {
@@ -67,17 +67,22 @@ class VesselVelocityEstimatorStep(BaseStep):
         
         ctx.set("section_mask", section_mask)
         
-        def calculate_velocity_histogram(velocity_map, mask):
-            num_bins = 512 # TODO parameterize
-            hist_matrix = np.zeros((velocity_map.shape[0], num_bins))
-            v_range = (velocity_map.min(),velocity_map.max())
+        from joblib import Parallel, delayed
 
-            for i in range(velocity_map.shape[0]):
-                masked_pixels = velocity_map[:,:,i][mask]  # select only pixels under mask
-                hist, _ = np.histogram(masked_pixels, bins=num_bins, range=v_range)
-                hist_matrix[i,:] = hist
-                
-            return hist_matrix
+        def calculate_velocity_histogram(velocity_map, mask, n_jobs=-1):
+            num_bins = 512
+            masked_data = velocity_map[:, mask]
+            v_min, v_max = velocity_map.min(), velocity_map.max()
+            
+            def hist_parallel(row):
+                return np.histogram(row, bins=num_bins, range=(v_min, v_max))[0]
+            
+            hist_matrix = Parallel(n_jobs=n_jobs)(
+                delayed(hist_parallel)(masked_data[i]) 
+                for i in range(velocity_map.shape[0])
+            )
+            
+            return np.array(hist_matrix)
         
         hist_matrix_artery = calculate_velocity_histogram(velocity_map, artery_mask * section_mask)
         hist_matrix_vein = calculate_velocity_histogram(velocity_map, vein_mask * section_mask)
@@ -96,3 +101,4 @@ class VesselVelocityEstimatorStep(BaseStep):
         # ctx.set("retinal_vessel_velocity", velocity_map) 
         ctx.set("retinal_artery_velocity_signal", artery_sig)
         ctx.set("retinal_vein_velocity_signal", vein_sig)
+        
