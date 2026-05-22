@@ -91,8 +91,11 @@ def get_pseudo_signal(beat, peaks, length):
     Create a pseudo beat by repeating the average beat and aligning it with the peaks.
     """
     x_old = np.linspace(0, 1, len(beat))
-    pseudo_signal = fill_with_beat(beat, int(peaks[0]), length - int(peaks[-1]), length)
+    if peaks is None or len(peaks) == 0:
+        pseudo_signal = np.tile(beat, (length // len(beat) + 1))[:length]
+        return pseudo_signal
 
+    pseudo_signal = fill_with_beat(beat, int(peaks[0]), length - int(peaks[-1]), length)
     f = interp1d(x_old, beat, kind='linear', fill_value="extrapolate")
     for i in range(len(peaks) - 1):
         pseudo_signal[peaks[i]:peaks[i + 1]] = f(np.linspace(0, 1, peaks[i + 1] - peaks[i]))
@@ -145,7 +148,7 @@ def get_peaks(signal, beat_period, height_percentile=80, distance_tolerance=0.8)
 
     return peaks
 
-def correct_branch_signal_with_heartbeat(signal, beat_period, k=2, distance_tolerance=0.8):
+def correct_branch_signal_with_heartbeat(signal, beat_period, k=2, distance_tolerance=0.8, use_peaks=True):
     """Correct the signal using heartbeat-based correction.
     Parameters
     ----------
@@ -155,6 +158,10 @@ def correct_branch_signal_with_heartbeat(signal, beat_period, k=2, distance_tole
         The estimated period of the heartbeat in samples.
     k : float
         Tuning parameter for the soft rejection (default: 2).
+    distance_tolerance : float
+        Tolerance for peak distance (default: 0.8).
+    use_peaks : bool
+        Whether to use peaks for correction (default: True).
 
     Returns
     -------
@@ -162,11 +169,15 @@ def correct_branch_signal_with_heartbeat(signal, beat_period, k=2, distance_tole
         The corrected signal.
     """
     signal_length = len(signal)
-    peaks = get_peaks(signal, beat_period, distance_tolerance=distance_tolerance)
-    beats = get_beats(signal, peaks, target_len=signal_length)
-    average_beat = np.nanmedian(beats, axis=0)
+    if use_peaks:
+        peaks = get_peaks(signal, beat_period, distance_tolerance=distance_tolerance)
+        beats = get_beats(signal, peaks, target_len=signal_length)
+        average_beat = np.nanmedian(beats, axis=0)
+    else:
+        peaks = None
+        average_beat, beat_period = get_cycle_template(signal, beat_period, return_period=True)
 
-    pseudo_signal = get_pseudo_signal(average_beat, peaks, signal_length)
+    pseudo_signal = get_pseudo_signal(average_beat, peaks=peaks, length=signal_length)
     corrected_signal = correct_signal(signal, pseudo_signal, k=k)
     return corrected_signal
 
@@ -281,7 +292,7 @@ def compute_period(signal, sampling_frequency,
     return idx0
 
 
-def check_validity(signal, sampling_frequency):
+def check_validity(signal, sampling_frequency, beat_period=None):
     """
     CHECK_VALIDITY  Check if a temporal signal is periodic and not noise.
 
