@@ -57,18 +57,6 @@ class VesselVelocityEstimatorStep(BaseStep):
 
         velocity_map = 2 * 852e-9 / np.sin(0.25) * deltafRMS * 1e6  # mm/s
 
-        ctx.set("velocity_map", velocity_map)
-
-        # num_bins = 256  # for 8-bit grayscale
-        # hist_matrix = np.zeros((velocity_map.shape[2], num_bins))
-        # v_range = (velocity_map.min(),velocity_map.max())
-
-        # for i in range(velocity_map.shape[2]):
-        #     masked_pixels = velocity_map[:,:,i][mask]  # select only pixels under mask
-        #     hist, _ = np.histogram(masked_pixels, bins=num_bins, range=v_range)
-        #     hist_matrix[i,:] = hist
-
-        # ctx.set("hist_matrix", hist_matrix)
         ctx.set("velocity_map_avg", np.mean(velocity_map,axis=0))
         ctx.set("fRMS_avg", np.mean(fRMS,axis=0))
         ctx.set("fRMS_bkg_avg", np.mean(fRMSbkg,axis=0))
@@ -76,11 +64,35 @@ class VesselVelocityEstimatorStep(BaseStep):
         sz = velocity_map.shape
 
         section_mask = elliptical_mask(sz[-2], sz[-1], 0.5) & (~(elliptical_mask(sz[-2], sz[-1], 0.2)))
+        
+        ctx.set("section_mask", section_mask)
+        
+        def calculate_velocity_histogram(velocity_map, mask):
+            num_bins = 512 # TODO parameterize
+            hist_matrix = np.zeros((velocity_map.shape[0], num_bins))
+            v_range = (velocity_map.min(),velocity_map.max())
+
+            for i in range(velocity_map.shape[0]):
+                masked_pixels = velocity_map[:,:,i][mask]  # select only pixels under mask
+                hist, _ = np.histogram(masked_pixels, bins=num_bins, range=v_range)
+                hist_matrix[i,:] = hist
+                
+            return hist_matrix
+        
+        hist_matrix_artery = calculate_velocity_histogram(velocity_map, artery_mask * section_mask)
+        hist_matrix_vein = calculate_velocity_histogram(velocity_map, vein_mask * section_mask)
+        
+        ctx.set("velocity_histogram_artery", hist_matrix_artery)
+        ctx.set("velocity_histogram_vein", hist_matrix_vein)
 
         artery_sig = np.sum(velocity_map * section_mask * artery_mask, axis=(-2,-1)) / np.count_nonzero(section_mask * artery_mask)
 
         vein_sig = np.sum(velocity_map * section_mask * vein_mask, axis=(-2,-1)) / np.count_nonzero(section_mask * vein_mask)
+        
+        
+        ctx.set("section_mask", section_mask)
 
-        ctx.set("retinal_vessel_velocity", velocity_map)
+        # too big to save
+        # ctx.set("retinal_vessel_velocity", velocity_map) 
         ctx.set("retinal_artery_velocity_signal", artery_sig)
         ctx.set("retinal_vein_velocity_signal", vein_sig)

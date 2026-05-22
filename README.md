@@ -74,7 +74,6 @@ Install in editable mode:
 
 ```bash
 pip install -e .
-pip install -r requirements.txt
 ```
 
 ---
