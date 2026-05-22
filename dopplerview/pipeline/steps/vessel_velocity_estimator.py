@@ -69,21 +69,20 @@ class VesselVelocityEstimatorStep(BaseStep):
         
         from joblib import Parallel, delayed
 
-        def calculate_velocity_histogram(velocity_map, mask, n_jobs=-1):
+        def calculate_velocity_histogram(velocity_map, mask, chunk_size=100):
             num_bins = 512
-            masked_data = velocity_map[:, mask]
-            v_min, v_max = velocity_map.min(), velocity_map.max()
+            n_frames = velocity_map.shape[0]
+            v_range = (velocity_map.min(), velocity_map.max())
             
-            def hist_parallel(row):
-                return np.histogram(row, bins=num_bins, range=(v_min, v_max))[0]
-            
-            hist_matrix = Parallel(n_jobs=n_jobs)(
-                delayed(hist_parallel)(masked_data[i]) 
-                for i in range(velocity_map.shape[0])
-            )
-            
-            return np.array(hist_matrix)
+            def _frame_hist(velocity_frame, mask):
+                masked_pixels = velocity_frame[mask]
+                hist, _ = np.histogram(masked_pixels, bins=num_bins, range=v_range)
+                return hist
+                
+            hist_matrix = run_in_parallel(partial(_frame_hist, mask=mask), velocity_map, n_jobs=n_jobs, chunking=False, task_name="hist_matrix")
+            return hist_matrix
         
+        print(" - Running velocity histograms")
         hist_matrix_artery = calculate_velocity_histogram(velocity_map, artery_mask * section_mask)
         hist_matrix_vein = calculate_velocity_histogram(velocity_map, vein_mask * section_mask)
         
