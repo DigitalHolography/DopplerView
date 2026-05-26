@@ -2,7 +2,7 @@
 
 ## 1.4.1
 * Ensure stacktrace when a step fails
-* If optic disc segmentation confidence is too low, fallback to detection, and infer mask from bounding box
+* If optic disc segmentation confidence is too low, fallback to detection, and infer mask from bounding box. If detection confidence is also too low, fallback to M1 argmax to estimate optic disc center
 * Add output shape to model specs
 
 ## 1.4.0
