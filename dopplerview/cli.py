@@ -40,9 +40,15 @@ def main():
     - a .txt file: Contains a list of paths to measure.holo files, one per line."""
     )
     parser.add_argument(
-        '-c', '--config',
+        '-p', '--params',
         type=str,
         help='Path to JSON configuration file'
+    )
+
+    parser.add_argument(
+        '-c', '--config_mode',
+        type=str,
+        help='Configuration mode to use : either "default" or "local" . If no config is provided using --params argument, "default" will use the default configuration file included in the user\'s config directory, while "local" will use a configuration file located in the processed DopplerView directory.'
     )
 
     parser.add_argument(
@@ -70,8 +76,15 @@ def main():
     
     pipeline = Pipeline(debug_mode=debug)
 
-    if args.config:
-        pipeline.load_dopplerview_config(args.config)
+    if args.params:
+        pipeline.load_dopplerview_config(args.params)
+    else:
+        config_mode = args.config_mode if args.config_mode else "default"
+        pipeline.set_config_mode(config_mode)
+        logger.info(f"No configuration file provided. Using {config_mode} configuration.")
+        if config_mode == "default":
+            config_path = user_config.ensure_config_file("default_DV_params.json")
+            pipeline.load_dopplerview_config(config_path)
 
     targets = args.targets if args.targets else None
 

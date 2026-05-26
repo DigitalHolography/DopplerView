@@ -34,6 +34,14 @@ class OpticDiscSegmentationStep(BaseStep):
 
         idx = np.argmax(boxes[:, 4, :])  # Assuming the confidence score is in the 5th column
         bestbox = boxes[:, :, idx].flatten()
+
+                # Keep detections above confidence threshold
+        if bestbox[4] < 0.05:
+            self.logger.warning(
+                "Optic disc detection: no confident bounding box found."
+            )
+            return np.zeros((target_h, target_w), dtype=bool)
+
         x_center = bestbox[0] * scale_x
         y_center = bestbox[1] * scale_y
         diameter_x = bestbox[2] * scale_x
@@ -136,13 +144,19 @@ class OpticDiscSegmentationStep(BaseStep):
                 height = y_max - y_min
             except Exception as e:
                 self.logger.error(f"    - Error occurred during deep optic disc segmentation: {e}. Falling back to mask generation from detected center and diameter.")
-                center, width, height = self.deep_detection(ctx)
-                optic_disc_mask = process_masks.bbox_to_mask(center, width, height, M0_shape)
-        else:
-            if optic_disc_detection_method == "moment1":
-                center, width, height = self.moment1_detection(ctx)
-            else:
-                center, width, height = self.return_image_center(ctx)  # Fallback to image center if no model is used
+                try:
+                    center, width, height = self.deep_detection(ctx)
+                    optic_disc_mask = process_masks.bbox_to_mask(center, width, height, M0_shape)
+                except Exception as e:
+                    self.logger.error(f"    - Error occurred during deep optic disc detection: {e}. Falling back to non-deep approach.")
+                    optic_disc_detection_method = "moment1"  # Fallback to moment1 detection if deep segmentation fails
+
+        if optic_disc_detection_method == "moment1":
+            center, width, height = self.moment1_detection(ctx)
+            optic_disc_mask = process_masks.bbox_to_mask(center, width, height, M0_shape)
+        
+        if optic_disc_detection_method not in ["deep", "moment1"]:
+            center, width, height = self.return_image_center(ctx)  # Fallback to image center if no model is used
             optic_disc_mask = process_masks.bbox_to_mask(center, width, height, M0_shape)
 
         ctx.set("optic_disc_mask", optic_disc_mask)
