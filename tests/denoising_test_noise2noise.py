@@ -16,14 +16,16 @@ class N2NDataset(Dataset):
         self.length = length
         self.even = None
         self.odd = None
+        self.shape = None
 
         with h5py.File(h5_path, "r") as f:
-            M0 = f[dataset]
+            M0 = np.array(f[dataset]).squeeze()
             self.even = M0[::2,]
             self.odd = M0[1::2,]
             self.shape = M0.shape
 
-        self.T, self.H, self.W = self.even.shape
+        T, self.H, self.W = self.shape
+        self.T = T // 2
 
     def __len__(self):
         return self.length
@@ -111,7 +113,7 @@ def denoise_video(
     model.eval()
 
     with h5py.File(h5_path, "r") as f:
-        dset = f[dataset]
+        dset = np.array(f[dataset]).squeeze()
         T, H, W = dset.shape
 
         sample = dset[:min(T, 64)].astype(np.float32)
