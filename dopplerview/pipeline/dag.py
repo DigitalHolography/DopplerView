@@ -323,10 +323,14 @@ class DAGEngine:
         for wave in waves:
             if len(wave) == 1:
                 # Single step: run directly, no thread overhead
-                self._execute_step_in_run(
-                    ctx, wave[0], completed, total, callback
-                )
-                completed += 1
+                try:
+                    self._execute_step_in_run(
+                        ctx, wave[0], completed, total, callback
+                    )
+                    completed += 1
+                except Exception:
+                    logger.exception(f"[DAG] Step '{wave[0]}' failed")
+                    raise
             else:
                 # Multiple independent steps: run in parallel
                 futures = {}
@@ -339,13 +343,15 @@ class DAGEngine:
                         futures[future] = step_name
 
                     for future in as_completed(futures):
-                        step_name = futures[future]
-                        exc = future.exception()
-                        if exc is not None:
-                            logger.error(
-                                f"[DAG] Step '{step_name}' raised an exception: {exc}"
+                        try:
+                            future.result()
+
+                        except Exception:
+                            logger.exception(
+                                f"[DAG] Step '{step_name}' failed"
                             )
-                            raise exc
+                            raise
+
                         completed += 1
 
         with self._lock:
