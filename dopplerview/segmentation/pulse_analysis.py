@@ -720,8 +720,6 @@ def compute_diasys(video, pulse_artery, sampling_frequency, pulse_vein=None):
 def compute_diasys_image(video, pulse_artery, sampling_frequency, pulse_vein=None):
     M0_Systole_img, M0_Diastole_img, sysindexes, diasindexes = compute_diasys(video, pulse_artery, sampling_frequency=sampling_frequency, pulse_vein=pulse_vein)
 
-    sys = image_utils.normalize_image(M0_Systole_img)
-    dias = image_utils.normalize_image(M0_Diastole_img)
-    diasys_image = image_utils.normalize_image(sys - dias)
-    return diasys_image, sysindexes, diasindexes
+    diasys_image = M0_Systole_img - M0_Diastole_img
+    return diasys_image, sysindexes, diasindexes, M0_Systole_img, M0_Diastole_img
  

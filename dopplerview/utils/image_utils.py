@@ -7,6 +7,7 @@ from PIL import Image
 from skimage.measure import regionprops
 import matplotlib.pyplot as plt
 import cv2
+from skimage.color import lab2rgb
 
 import logging
 logger = logging.getLogger(__name__)
@@ -160,3 +161,54 @@ def save_numpy_as_avi(video: np.ndarray, filename: str, fps: int = 30):
         out.write(frame)
 
     out.release()
+
+def lab_duo_image(image_1, image_2, h=45):
+    """
+    Parameters
+    ----------
+    image_1 : ndarray
+        First image (controls L channel).
+    image_2 : ndarray
+        Second image (controls a/b channels).
+    h : float, optional
+        Hue angle in degrees.
+
+    Returns
+    -------
+    rgb : ndarray
+        RGB image in range [0, 1].
+    """
+    h = np.mod(h, 360)
+
+    cos_h = np.cos(np.deg2rad(h))
+    sin_h = np.sin(np.deg2rad(h))
+
+    if abs(h) <= 45 or abs(h - 180) <= 45:
+        rx = np.sign(cos_h)
+        ry = np.sign(sin_h) * (1 / (cos_h**2) - 1)
+    else:
+        ry = np.sign(sin_h)
+        rx = np.sign(cos_h) * (1 / (sin_h**2) - 1)
+
+    image_1 = image_1.astype(np.float32)
+    image_2 = image_2.astype(np.float32)
+
+    # Normalize to [-1, 1]
+    denom1 = max(np.max(np.abs(image_1)), np.abs(np.min(image_1)))
+    denom2 = max(np.max(np.abs(image_2)), np.abs(np.min(image_2)))
+
+    if denom1 > 0:
+        image_1 = image_1 / denom1
+    if denom2 > 0:
+        image_2 = image_2 / denom2
+
+    L = 100.0 * image_1
+
+    a = 128 * image_2 * rx
+    b = 128 * image_2 * ry
+
+    lab = np.stack([L, a, b], axis=-1)
+
+    rgb = lab2rgb(lab)
+
+    return rgb
