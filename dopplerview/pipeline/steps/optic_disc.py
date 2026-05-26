@@ -62,7 +62,6 @@ class OpticDiscSegmentationStep(BaseStep):
 
         return (x_center, y_center), diameter_x, diameter_y
     
-    
     def YOLO_segmentation(self, ctx):
         M0 = ctx.get("M0_ff_image")
         model = ctx.get_current_model_for_task(self.name)
@@ -133,6 +132,8 @@ class OpticDiscSegmentationStep(BaseStep):
                 optic_disc_mask = self.deep_segmentation(ctx)
                 x_min, y_min, x_max, y_max = process_masks.mask_to_bbox(optic_disc_mask)
                 center = ((x_min + x_max) // 2, (y_min + y_max) // 2)
+                width = x_max - x_min
+                height = y_max - y_min
             except Exception as e:
                 self.logger.error(f"    - Error occurred during deep optic disc segmentation: {e}. Falling back to mask generation from detected center and diameter.")
                 center, width, height = self.deep_detection(ctx)
