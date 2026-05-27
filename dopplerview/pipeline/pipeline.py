@@ -63,6 +63,11 @@ class Context:
 
         self.lock = threading.RLock()
 
+    def _init_cache(self, initial_data: Dict[str, Any] = None):
+        with self.lock:
+            for key, value in (initial_data or {}).items():
+                self.__cache[key] = (value, 'cached')
+
     def load_default_manager(self):
         models_config = user_config.ensure_config_file("models.yaml")
         logger.info(f"[Pipeline] Loading model registry from {models_config}")
@@ -132,7 +137,9 @@ class Context:
             return
         
         logger.info(f"[Pipeline] Reading cache from {h5_cache_path}")
-        self.__cache = h5_file.read_h5_to_dict(h5_cache_path)
+
+        cache = h5_file.read_h5_to_dict(h5_cache_path)
+        self._init_cache(cache)
 
     def ensure_directory(self, path):
         path = Path(path)
@@ -153,7 +160,7 @@ class Context:
         self.measure_folder = measure_folder
 
         self.HD_folder = HolodopplerFolder(self.measure_folder)
-        self.__cache["input_file"] = self.HD_folder.input_file
+        self.set("input_file", self.HD_folder.input_file)
         self.load_holodoppler_config(self.HD_folder.holodoppler_config)
 
         self.load_DV_folder()
@@ -187,10 +194,6 @@ class Context:
                 line = line.strip()
                 if os.path.isdir(line) or (line.endswith(".holo") and os.path.isfile(line)):
                     self.input_list.append(line)
-
-    def get(self, key: str):
-        with self.lock:
-            return self.__cache.get(key)
     
     def change_model_for_task(self, task_name: str, model_name: str):
         self.model_manager.change_task_model(task_name, model_name)
@@ -219,7 +222,11 @@ class Context:
 
     def set(self, key: str, value: Any):
         with self.lock:
-            self.__cache[key] = value
+            self.__cache[key] = (value, 'produced')
+
+    def get(self, key: str):
+        with self.lock:
+            return self.__cache.get(key)[0] if key in self.__cache else None
 
     def has(self, key: str) -> bool:
         with self.lock:
@@ -229,7 +236,7 @@ class Context:
         with self.lock:
             if key not in self.__cache:
                 raise RuntimeError(f"Missing required context key: '{key}'")
-            return self.__cache[key]
+            return self.get(key)
         
     def clear_input_list(self):
         with self.lock:
@@ -242,8 +249,18 @@ class Context:
     def is_empty(self):
         return self.__cache == {}
     
+    def cache_value(self, key):
+        with self.lock:
+            self.__cache[key] = (self.__cache[key][0], 'cached')
+    
     def export_cache(self, filepath):
-        h5_file.write_dict_to_h5(self.__cache, filepath)
+        cache = {}
+        with self.lock:
+            for key, (value, status) in self.__cache.items():
+                if status == 'produced':  # Only export values that were produced and not yet cached
+                    cache[key] = value
+                    self.cache_value(key)  # Mark as cached after exporting
+        h5_file.write_dict_to_h5(cache, filepath, overwrite=False)
 
 
 class Pipeline:
@@ -357,10 +374,10 @@ class Pipeline:
         elapsed = time.time() - start_time
         logger.info(f"[Pipeline] Finished execution in {elapsed:.2f}s")
 
-        # If in debug mode, save the entire cache to the H5 file after execution
-        if self.ctx.debug_mode:
-            logger.info(f"[Pipeline] Saving cache to H5 file.")
-            self.ctx.output_manager.save_cache(self.ctx)
+        # # If in debug mode, save the entire cache to the H5 file after execution
+        # if self.ctx.debug_mode:
+        #     logger.info(f"[Pipeline] Saving cache to H5 file.")
+        #     self.ctx.output_manager.save_cache(self.ctx)
         return self.ctx
 
     def run_batch(self, targets=None, callback=None):

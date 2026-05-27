@@ -17,7 +17,7 @@ class PulseAnalysisStep(NestedStep):
             
 class PreArteryMaskStep(BaseStep):
     requires = {"M0_ff_video", "retinal_vessel_mask", "optic_disc_center"}
-    produces = {"labeled_vessels", "pre_artery_mask", "branch_signals", "corrected_signals", "pre_vein_mask"}
+    produces = {"labeled_vessels", "pre_artery_mask", "branch_signals", "pre_vein_mask"}
     name = "pre_artery_mask"
 
     def _relevant_config(self, ctx):
