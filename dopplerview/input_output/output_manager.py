@@ -2,15 +2,10 @@ import json
 
 import cv2
 import h5py
-import numpy as np
-from pathlib import Path
-import os
-from dopplerview.utils.image_utils import normalize_to_uint8
 import dopplerview.utils.json_utils as json_utils
-import imageio
 import dopplerview.input_output.output_renderer as output_renderer
-import re
-
+import matplotlib.pyplot as plt
+import numpy as np
 
 class OutputManager:
     def __init__(
@@ -151,3 +146,23 @@ class OutputManager:
             img[vein_mask > 0] = [255, 0, 0]
 
         cv2.imwrite(str(path), img)
+
+    def save_clusterization(self, step_name, filename, labels, z):
+        plt.figure(figsize=(6,6))
+        theta = np.linspace(0, 2*np.pi, 500)
+
+        for lab in np.unique(labels):
+            idx = labels == lab
+
+            plt.scatter(
+                np.real(z[idx]),
+                np.imag(z[idx]),
+                label=f'cluster {lab}'
+            )
+
+        plt.plot(np.cos(theta), np.sin(theta), 'k--', alpha=0.3)
+
+        plt.axis('equal')
+        plt.legend()
+        plt.savefig(self.ensure_step_dir(step_name) / f"{filename}.png")
+        plt.close()

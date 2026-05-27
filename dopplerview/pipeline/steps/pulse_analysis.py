@@ -19,7 +19,7 @@ class PulseAnalysisStep(NestedStep):
             
 class PreArteryMaskStep(BaseStep):
     requires = {"M0_ff_video", "retinal_vessel_mask", "optic_disc_center"}
-    produces = {"labeled_vessels", "pre_artery_mask", "branch_signals", "corrected_signals", "pre_vein_mask", "beat_period"}
+    produces = {"labeled_vessels", "pre_artery_mask", "branch_signals", "corrected_signals", "pre_vein_mask"}
     name = "pre_artery_mask"
 
     def _relevant_config(self, ctx):
@@ -54,28 +54,28 @@ class PreArteryMaskStep(BaseStep):
         ctx.set("branch_signals", signals_n)
         ctx.output_manager.save_h5("branch_signals", ctx)
 
-        # --- Step 3: Correct signals by aligning with median heartbeat ---
-        beat_period = pulse_analysis.compute_idx0(signals_n, sampling_frequency)
-        self.logger.info("    - Sampling frequency: {:.2f} Hz, Beat period: {:.2f} seconds".format(sampling_frequency, beat_period))
-        corrected_signals = np.zeros_like(signals_n)
-        func = partial(pulse_analysis.correct_branch_signal_with_heartbeat, beat_period=beat_period, k=5)
-        corrected_signals = run_in_parallel(func, signals_n, n_jobs=ctx.dopplerview_config["NumberOfWorkers"], chunking=False, task_name="branch signal correction")
-        # for i, signal in enumerate(signals_n):
-        #     corrected_signals[i, :] = pulse_analysis.correct_branch_signal_with_heartbeat(signal, beat_period, k=10)
-        ctx.set("corrected_signals", corrected_signals)
+        # # --- Step 3: Correct signals by aligning with median heartbeat ---
+        # self.logger.info("    - Sampling frequency: {:.2f} Hz, Beat period: {:.2f} seconds".format(sampling_frequency, beat_period))
+        # corrected_signals = np.zeros_like(signals_n)
+        # func = partial(pulse_analysis.correct_branch_signal_with_heartbeat, beat_period=beat_period, k=5)
+        # corrected_signals = run_in_parallel(func, signals_n, n_jobs=ctx.dopplerview_config["NumberOfWorkers"], chunking=False, task_name="branch signal correction")
+        # # for i, signal in enumerate(signals_n):
+        # #     corrected_signals[i, :] = pulse_analysis.correct_branch_signal_with_heartbeat(signal, beat_period, k=10)
+        # ctx.set("corrected_signals", corrected_signals)
 
-        for i in range(1, labeled_vessels.max() + 1):
-            ctx.output_manager.output("pulse_analysis", f"branch_{i}_corrected", (signals_n[i - 1, :], corrected_signals[i - 1, :]), "signal", options={"multiple_signals": True, "legend": ["Original Signal", "Corrected Signal"]})
+        # for i in range(1, labeled_vessels.max() + 1):
+        #     ctx.output_manager.output("pulse_analysis", f"branch_{i}_corrected", (signals_n[i - 1, :], corrected_signals[i - 1, :]), "signal", options={"multiple_signals": True, "legend": ["Original Signal", "Corrected Signal"]})
 
         # --- Step 4: Pre-classify arteries and veins using systolic gradient ---
-        pre_artery_mask, pre_vein_mask = pulse_analysis.compute_pre_masks(corrected_signals, labeled_vessels, sampling_frequency)
+        pre_artery_mask, pre_vein_mask, labels, z = pulse_analysis.compute_pre_masks(signals_n, labeled_vessels, sampling_frequency)
+        ctx.output_manager.save_clusterization("pulse_analysis", "pre_mask_clusterization", labels, z)
+        ctx.output_manager.save_overlay("pulse_analysis", "av_overlay_pre_masks", ctx.require("M0_ff_image"), pre_artery_mask, pre_vein_mask)
         ctx.set("pre_artery_mask", pre_artery_mask)
         ctx.set("pre_vein_mask", pre_vein_mask)
-        ctx.set("beat_period", beat_period)
 
 class ComputeTemporalCuesStep(BaseStep):
-    requires = {"M0_ff_video", "pre_artery_mask", "choroidal_vessel_mask", "beat_period"}
-    produces = {"correlation", "diasys_image", "pre_arterial_pulse", "choroidal_pulse", "pre_arterial_pulse_filtered", "choroidal_pulse_filtered", "pre_arterial_pulse_cleaned", "pre_venous_pulse", "pre_venous_pulse_filtered", "M0_ff_image_cleaned"}
+    requires = {"M0_ff_video", "pre_artery_mask", "choroidal_vessel_mask"}
+    produces = {"correlation", "diasys_image", "pre_arterial_pulse", "choroidal_pulse", "pre_arterial_pulse_filtered", "choroidal_pulse_filtered", "pre_arterial_pulse_cleaned", "pre_venous_pulse", "pre_venous_pulse_filtered", "M0_ff_image_cleaned", "beat_period", "systole_image", "diastole_image"}
     name = "temporal_cues"
 
     def _relevant_config(self, ctx):
@@ -113,7 +113,8 @@ class ComputeTemporalCuesStep(BaseStep):
 
         # --- Remove bad beats from arterial pulse by comparing to median beat pattern ---
 
-        beat_period = ctx.require("beat_period")
+        beat_period = pulse_analysis.compute_period(arterial_pulse_filtered, sampling_frequency)
+        ctx.set("beat_period", beat_period)
 
         arterial_pulse_cleaned, video_cleaned, beat_signal, median_beat, peaks = pulse_analysis.remove_bad_beats(arterial_pulse_filtered, video, beat_period, threshold=0.8)
         ctx.set("pre_arterial_pulse_cleaned", arterial_pulse_cleaned)
@@ -130,15 +131,19 @@ class ComputeTemporalCuesStep(BaseStep):
 
         correlation_artery = signal_processing.compute_correlation(video_cleaned, arterial_pulse_cleaned)
         ctx.set("correlation", correlation_artery)
+        ctx.output_manager.output("pulse_analysis", f"correlation map RGB", correlation_artery, "image", options={"blue_gray_red": True, "M0_ff_image": M0_ff_image_cleaned})
         # correlation_vein = pulse_analysis.compute_correlation(video, venous_pulse_filtered)
         # ctx.set("correlation_vein", correlation_vein)
 
         # --- Accumulate frames at the systolic and diastolic peaks of the filtered pulses ---
 
-        diasys, sysindexes, diasindexes = pulse_analysis.compute_diasys_image(video_cleaned, arterial_pulse_cleaned, sampling_frequency)
+        diasys, sysindexes, diasindexes, systole, diastole = pulse_analysis.compute_diasys_image(video_cleaned, arterial_pulse_cleaned, sampling_frequency)
+        ctx.output_manager.output("pulse_analysis", f"diasys image RGB", diasys, "image", options={"blue_gray_red": True, "M0_ff_image": M0_ff_image_cleaned})
         ctx.output_manager.output("pulse_analysis", f"diasys plot", (arterial_pulse_cleaned, sysindexes), "signal", options={"scatter": True})
 
         ctx.set("diasys_image", diasys)
+        ctx.set("systole_image", systole)
+        ctx.set("diastole_image", diastole)
 
 
 
