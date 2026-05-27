@@ -2,9 +2,8 @@ from pathlib import Path
 import os
 import threading
 import time
-from dopplerview.input_output import user_config, read_folder
+from dopplerview.input_output import user_config, read_folder, h5_file
 from dopplerview.models.registry import ModelRegistryConfig
-import h5py
 import json
 from typing import Any, Dict
 
@@ -133,9 +132,7 @@ class Context:
             return
         
         logger.info(f"[Pipeline] Reading cache from {h5_cache_path}")
-        with h5py.File(h5_cache_path, "r") as input_file:
-            for key in input_file.keys():
-                self.__cache[key] = input_file[key][()]
+        self.__cache = h5_file.read_h5_to_dict(h5_cache_path)
 
     def ensure_directory(self, path):
         path = Path(path)
@@ -245,22 +242,8 @@ class Context:
     def is_empty(self):
         return self.__cache == {}
     
-    def hdf5_safe(self, x):
-        if isinstance(x, Path):
-            return str(x)
-        return x
-    
     def export_cache(self, filepath):
-        with h5py.File(filepath, "w") as h5_cache:
-            for key in self.__cache:
-                if key in h5_cache:
-                    del h5_cache[key]
-                try:
-                    h5_cache.create_dataset(key, data=self.hdf5_safe(self.__cache[key]))
-                except Exception as e:
-                    logger.error(f"Error occurred while creating dataset for key '{key}': {e}")
-                    logger.error(f"Value for key '{key}': {self.__cache[key]}")
-                    logger.error(f"Type of value for key '{key}': {type(self.__cache[key])}")
+        h5_file.write_dict_to_h5(self.__cache, filepath)
 
 
 class Pipeline:
@@ -283,7 +266,6 @@ class Pipeline:
             ReadMomentsStep(),
             PreprocessStep(),
             EyeLateralityClassificationStep(),
-            # OpticDiscDetectionStep(),
             OpticDiscSegmentationStep(),
             RetinalVesselSegmentationStep(),
             ChoroidalVesselSegmentationStep(),

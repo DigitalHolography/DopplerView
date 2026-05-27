@@ -6,12 +6,11 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from dopplerview.pipeline.pipeline import Pipeline
 from dopplerview.input_output import log_config, user_config
-import numpy as np
 import matplotlib
 
-from dopplerview.pipeline.pipeline import Pipeline
-from dopplerview.models.registry import ModelRegistryConfig
+
 import dopplerview.input_output.user_config as user_config
 
 import logging

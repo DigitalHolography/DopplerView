@@ -1,4 +1,3 @@
-import json
 import os
 
 def ordered(obj):

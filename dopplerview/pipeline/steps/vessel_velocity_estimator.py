@@ -1,8 +1,5 @@
 import numpy as np
 
-from scipy.ndimage import gaussian_filter as np_gaussian_filter
-from scipy.signal import filtfilt, find_peaks, butter
-from skimage.filters import frangi
 from skimage.morphology import disk, dilation
 from skimage.restoration import inpaint
 from dopplerview.pipeline.step import BaseStep
@@ -10,8 +7,6 @@ import joblib
 from dopplerview.segmentation.process_masks import elliptical_mask
 from dopplerview.utils.parallelization_utils import run_in_parallel
 from functools import partial
-
-import matplotlib.pyplot as plt
 
 class VesselVelocityEstimatorStep(BaseStep):
     name = "retinal_vessel_velocity_estimator"

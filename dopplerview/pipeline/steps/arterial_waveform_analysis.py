@@ -1,14 +1,7 @@
 import numpy as np
 
-from scipy.ndimage import gaussian_filter as np_gaussian_filter
 from scipy.signal import filtfilt, find_peaks, butter
-from skimage.filters import frangi
-from skimage.morphology import disk, dilation
-from skimage.restoration import inpaint
 from dopplerview.pipeline.step import BaseStep
-
-import matplotlib.pyplot as plt
-from scipy.interpolate import interp1d
 
 class ArterialWaveformAnalysisStep(BaseStep):
     name = "arterial_waveform_analysis"

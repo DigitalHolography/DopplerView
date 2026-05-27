@@ -1,7 +1,6 @@
 from dopplerview.pipeline.step import BaseStep
 from abc import abstractmethod
-from dopplerview.segmentation import process_masks
-from dopplerview.segmentation.process_masks import clean_vessel_mask
+from dopplerview.segmentation.process_masks import clean_vessel_mask, disk_mask
 import numpy as np
 from skimage.filters import frangi
 
@@ -109,7 +108,7 @@ class ChoroidalVesselSegmentationStep(VesselSegmentationStep):
 
         diaphragm_radius = params["DiaphragmRadius"]
         h, w = raw_mask.shape
-        mask_diaphragm = process_masks.disk_mask(h, w, diaphragm_radius)
+        mask_diaphragm = disk_mask(h, w, diaphragm_radius)
 
         clean_mask = raw_mask & mask_diaphragm
 
