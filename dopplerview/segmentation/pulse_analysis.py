@@ -454,8 +454,8 @@ def compute_pre_masks(signals, labeled_vessels, sampling_frequency):
     cluster0 = np.where(labels == 0)[0]
     cluster1 = np.where(labels == 1)[0]
 
-    mask1 = np.isin(labeled_vessels, cluster0+1)
-    mask2 = np.isin(labeled_vessels, cluster1+1)
+    mask0 = np.isin(labeled_vessels, cluster0+1)
+    mask1 = np.isin(labeled_vessels, cluster1+1)
 
     cluster0_period = np.median(np.array(periods)[cluster0], axis=0)
     cluster1_period = np.median(np.array(periods)[cluster1], axis=0)
@@ -468,11 +468,13 @@ def compute_pre_masks(signals, labeled_vessels, sampling_frequency):
     cluster1_peaks = get_nb_of_positive_peaks(cluster1_signal, cluster1_period)
 
     if cluster0_peaks > cluster1_peaks:
-        mask_artery = mask1
-        mask_vein = mask2
-    else:
-        mask_artery = mask2
+        mask_artery = mask0
         mask_vein = mask1
+        labels = np.where(labels == 0, 0, 1)  # artery=0, vein=1
+    else:
+        mask_artery = mask1
+        mask_vein = mask0
+        labels = np.where(labels == 0, 1, 0)  # artery=1, vein=0
 
     return mask_artery, mask_vein, labels, z
 
