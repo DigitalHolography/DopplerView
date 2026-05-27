@@ -6,12 +6,10 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from dopplerview.input_output import log_config, user_config
-import numpy as np
-import matplotlib
-
 from dopplerview.pipeline.pipeline import Pipeline
-from dopplerview.models.registry import ModelRegistryConfig
+from dopplerview.input_output import log_config, user_config
+
+
 import dopplerview.input_output.user_config as user_config
 
 import logging
@@ -24,7 +22,6 @@ def load_dopplerview_config(config_path):
 
 
 def main():
-    matplotlib.use("Agg")
     log_config.setup_logging()
     """Main CLI entry point"""
     parser = argparse.ArgumentParser(

@@ -1,8 +1,6 @@
 from dopplerview.pipeline.step import BaseStep, NestedStep
 from dopplerview.segmentation import process_masks, pulse_analysis, signal_processing
-from dopplerview.utils.parallelization_utils import run_in_parallel
 import dopplerview.utils.image_utils as image_utils
-from functools import partial
 
 
 import numpy as np

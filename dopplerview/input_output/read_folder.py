@@ -2,12 +2,10 @@
 Read a holodoppler folder
 """
 
-import json
 import os
 import glob
 import shutil
 from pathlib import Path
-import sys
 import dopplerview.input_output.user_config as user_config
 
 class HolodopplerFolder:
