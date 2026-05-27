@@ -87,7 +87,7 @@ class RetinalVesselSegmentationStep(VesselSegmentationStep):
 
 class ChoroidalVesselSegmentationStep(VesselSegmentationStep):
     name = "choroidal_vessel_segmentation"
-    requires = {"M0_ff_image", "retinal_vessel_mask", "optic_disc_center"}
+    requires = {"M0_ff_image", "retinal_vessel_mask"}
     produces = {"choroidal_vessel_mask"}
 
     def _relevant_config(self, ctx):
@@ -106,11 +106,10 @@ class ChoroidalVesselSegmentationStep(VesselSegmentationStep):
     
     def clean_vessel_mask(self, raw_mask, ctx):
         params = ctx.dopplerview_config["Mask"]
-        center = ctx.require("optic_disc_center")
 
         diaphragm_radius = params["DiaphragmRadius"]
         h, w = raw_mask.shape
-        mask_diaphragm = process_masks.disk_mask(h, w, diaphragm_radius, center=(center[0] / w, center[1] / h))
+        mask_diaphragm = process_masks.disk_mask(h, w, diaphragm_radius)
 
         clean_mask = raw_mask & mask_diaphragm
 
