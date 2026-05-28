@@ -52,8 +52,6 @@ class OutputManager:
         self.cache_queue = queue.Queue()
         self.cache_worker = threading.Thread(target=self._cache_worker, daemon=True)
 
-
-
     def _output_worker(self):
         while self.running:
             step_name, key, ctx = self.output_queue.get()
@@ -79,11 +77,6 @@ class OutputManager:
         if self.cache_worker.is_alive():
             self.cache_queue.put(None)  # Unblock the cache worker
             self.cache_worker.join()
-
-    def save_cache(self, ctx):
-        """Saves the entire cache to the H5 file"""
-        filepath = self.cache_dir / "cache.h5"
-        ctx.export_cache(filepath)
 
     def save_h5(self, key, ctx):
         """Saves a value from the cache to the H5 file based on the provided schema."""
@@ -166,7 +159,14 @@ class OutputManager:
     def save_async(self, step_name, key, ctx):
         self.output_queue.put((step_name, key, ctx))
 
+    def save_cache(self, ctx):
+        """Saves the entire cache to the H5 file"""
+        filepath = self.cache_dir / "cache.h5"
+        ctx.export_cache(filepath)
+
     def cache_async(self, ctx):
+        if not self.cache_worker.is_alive():
+            self.cache_worker.start()
         self.cache_queue.put(ctx)
 
     def save(self, step_name, key, ctx):
