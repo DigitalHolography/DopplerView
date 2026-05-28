@@ -243,7 +243,6 @@ class Context:
                     self.cache_value(key)  # Mark as cached after exporting
         h5_file.write_dict_to_h5(cache, filepath, overwrite=False)
 
-
 class Pipeline:
     def __init__(self, output_manager, debug_mode=False):
         """

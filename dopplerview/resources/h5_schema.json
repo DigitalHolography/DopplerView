@@ -4,8 +4,10 @@
             "vessel_mask": "retinal_vessel_mask",
             "labeled_vessels": "labeled_vessels",
             "vessel_segmentation_logits": "vessel_segmentation_logits",
-            "artery_mask": "retinal_artery_mask_clean",
-            "vein_mask": "retinal_vein_mask_clean"
+            "artery_mask": "retinal_artery_mask",
+            "vein_mask": "retinal_vein_mask",
+            "artery_mask_clean": "retinal_artery_mask_clean",
+            "vein_mask_clean": "retinal_vein_mask_clean"
         },
         "Choroid": {
             "vessel_mask": "choroidal_vessel_mask",

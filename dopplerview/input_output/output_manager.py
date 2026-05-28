@@ -92,7 +92,7 @@ class OutputManager:
             if ctx is None:
                 break
             try:
-                self.save_cache(ctx)
+                ctx.export_cache(self.cache_path)
             except Exception as e:
                 logger.exception(f"Error saving cache: {e}")
             self.cache_queue.task_done()
@@ -211,21 +211,17 @@ class OutputManager:
         renderer.render("value", {"value": value}, path, options=options)
 
     def save_async(self, step_name, key, ctx):
-        self.output_queue.put((step_name, key, ctx))
-
-    def save_cache(self, ctx):
-        """Save the 'produced' cache values to disk, for debugging purposes. The h5 file is lazyly created when the first value is saved."""
-        os.makedirs(self.cache_path.parent, exist_ok=True)
-        ctx.export_cache(self.cache_path)
+        self.output_queue.put((step_name, key, ctx)) 
 
     def cache_async(self, ctx):
-        """Saves the cache to disk asynchronously using a worker thread."""
+        """Save the 'produced' cache values to disk, using a worker thread. The h5 file is lazily created when the first value is saved."""
         if self.cache_worker is None:
             self.cache_worker = threading.Thread(
                 target=self._cache_worker,
                 daemon=True
             )
             self.cache_worker.start()
+            os.makedirs(self.cache_path.parent, exist_ok=True)
             logger.info(f"[OutputManager] Saving cache to {self.cache_path}")
         self.cache_queue.put(ctx)
 
