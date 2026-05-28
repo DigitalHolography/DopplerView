@@ -13,6 +13,7 @@ import numpy as np
 import cv2
 from PIL import Image, ImageTk
 
+from dopplerview.input_output.output_manager import OutputManager
 from dopplerview.pipeline.pipeline import Pipeline
 
 import logging
@@ -50,17 +51,16 @@ class MainWindow:
 
         # --- pipeline init ---
 
-        self.pipeline = Pipeline()
+        h5_schema_path = user_config.ensure_config_file("h5_schema.json")
+        output_config_path = user_config.ensure_config_file("output_config.json")
+        output_manager = OutputManager(h5_schema_path, output_config_path)
+        self.pipeline = Pipeline(output_manager=output_manager)
 
         models_config = user_config.ensure_config_file("models.yaml")
         self.pipeline.load_model_registry(models_config)
         
-        h5_schema_config = user_config.ensure_config_file("h5_schema.json")
-        output_config = user_config.ensure_config_file("output_config.json")
-        self.pipeline.load_h5_schema(h5_schema_config)
-        self.pipeline.load_output_config(output_config)
         config_path = user_config.ensure_config_file("default_DV_params.json")
-        self.pipeline.load_dopplerview_config(config_path)
+        # self.pipeline.load_dopplerview_config(config_path)
         self.config_path = tk.StringVar(value=str(config_path))
 
         self.image_tk = None  # keep reference (IMPORTANT)

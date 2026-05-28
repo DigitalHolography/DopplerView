@@ -35,7 +35,7 @@ class Context:
         - services (models, output, etc.)
     """
 
-    def __init__(self, debug_mode=False):
+    def __init__(self, output_manager, debug_mode=False):
         self.model_registry_path = None
         self.model_manager = None
         self.model_instances = {}
@@ -47,11 +47,7 @@ class Context:
         self.measure_folder = None  # The measure folder containing the HD folder and the DV folder, set when loading input
         self.HD_folder = None       # The Holodoppler folder containing the raw input data, set when loading input
         self.DV_folder = None       # The DopplerView folder containing the output and cache, set when running the pipeline
-        self.output_manager = None
-        self.h5_schema = None
-        self.h5_schema_path = None
-        self.output_config = None
-        self.output_config_path = None
+        self.output_manager = output_manager
         self.debug_mode = debug_mode
         self.dopplerview_config = None
         self.dopplerview_config_path = None
@@ -80,34 +76,10 @@ class Context:
         self.model_registry_path = config_path
         registry = ModelRegistryConfig(config_path)
         self.model_manager = ModelManager(registry, cache_dir="~/.cache/dopplerview/models")
-        
-    def load_default_h5_schema(self):
-        self.h5_schema_path = user_config.ensure_config_file("h5_schema.json")
-        logger.info(f"[Pipeline] Loading default H5 schema from {self.h5_schema_path}")
-        self.h5_schema = json.load(open(self.h5_schema_path))
-
-    def load_h5_schema(self, config_path):
-        self.h5_schema_path = config_path
-        logger.info(f"[Pipeline] Loading H5 schema from {config_path}")
-        self.h5_schema = json.load(open(config_path))
-
-    def load_default_output_config(self):
-        self.output_config_path = user_config.ensure_config_file("output_config.json")
-        logger.info(f"[Pipeline] Loading default output config from {self.output_config_path}")
-        self.output_config = json.load(open(self.output_config_path))
-
-    def load_output_config(self, config_path):
-        self.output_config_path = config_path
-        logger.info(f"[Pipeline] Loading output config from {config_path}")
-        self.output_config = json.load(open(config_path))
 
     def ensure_config(self):
         if self.model_manager is None:
             self.load_default_manager()
-        if self.h5_schema is None:
-            self.load_default_h5_schema()
-        if self.output_config is None:
-            self.load_default_output_config()
 
     def load_config(self, config_path):
         config = json.load(open(config_path))
@@ -130,7 +102,7 @@ class Context:
     def _read_h5_into_cache(self):
         if self.DV_folder is None:
             raise RuntimeError("DopplerView folder not initialized. Cannot read from H5 cache.")
-        cache_folder = self.DV_folder.cache_folder
+        cache_folder = self.output_manager.cache_dir
         h5_cache_path = cache_folder / "cache.h5"
 
         if not h5_cache_path.exists():
@@ -164,7 +136,9 @@ class Context:
         self.set("input_file", self.HD_folder.input_file)
         self.load_holodoppler_config(self.HD_folder.holodoppler_config)
 
+        self.output_manager.unset_DV_folder()  # Unset previous DV folder to avoid accidentally writing outputs to the wrong place if the new input doesn't have a DV folder
         self.load_DV_folder()
+        self.output_manager.set_DV_folder(self.DV_folder)
 
         if self.debug_mode:
             self._read_h5_into_cache()
@@ -218,12 +192,9 @@ class Context:
         if self.DV_folder is None:
             self.load_DV_folder()
 
-        # Create the output manager. It will lazily create the output folder when needed, to avoid creating empty output folders for runs that don't produce any outputs
-        self.output_manager = OutputManager(dopplerview_folder=self.DV_folder, schema=self.h5_schema, dopplerview_config=self.dopplerview_config, output_config=self.output_config)
-
-    def close_output_manager(self):
-        if self.output_manager is not None:
-            self.output_manager.close()
+        self.output_manager.set_DV_folder(self.DV_folder)
+        self.output_manager.set_dopplerview_config(self.dopplerview_config)
+        self.output_manager.ensure_output_folder()  # Lazily create the output folder when we actually need to output something, to avoid creating empty output folders for runs that don't produce any outputs
 
     def set(self, key: str, value: Any):
         with self.lock:
@@ -269,17 +240,17 @@ class Context:
 
 
 class Pipeline:
-    def __init__(self, debug_mode=False):
+    def __init__(self, output_manager, debug_mode=False):
         """
         Initializes the pipeline with the given model registry and configuration.
         Args:
             model_registry: Configuration for available models.
             h5_schema: Schema defining how to store outputs in HDF5.
-            output_config: Configuration for debug outputs (optional). If None, outputs are manually saved.
             dopplerview_config: DopplerView configuration dictionary (optional). If None, the dopplerview configuration found in the dopplerview folder will be used.
             debug_mode: If True, steps outputs are read from the .h5, and only targeted steps are re-run. This is useful for debugging specific steps without having to re-run the entire pipeline.
         """
         self.ctx = Context(
+            output_manager=output_manager,
             debug_mode=debug_mode
         )
 
@@ -372,7 +343,6 @@ class Pipeline:
         self.ctx.ensure_config()
 
         self.ctx.create_output_folder()
-        logger.info(f"[Pipeline] Created output folder: {self.ctx.output_manager.output_dir}")
 
         start_time = time.time()
         self.engine.run(self.ctx, targets, callback=callback)
@@ -383,7 +353,6 @@ class Pipeline:
         # if self.ctx.debug_mode:
         #     logger.info(f"[Pipeline] Saving cache to H5 file.")
         #     self.ctx.output_manager.save_cache(self.ctx)
-        self.ctx.close_output_manager()
         
         return self.ctx
 
@@ -396,4 +365,4 @@ class Pipeline:
                     callback("input_loaded")
                 self.run(targets=targets, callback=callback)
             except Exception as e:
-                logger.info(f"[Run Batch] Error processing file {input}: {e}")
+                logger.exception(f"[Run Batch] Error processing file {input}: {e}")

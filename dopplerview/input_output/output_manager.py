@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import cv2
 import h5py
@@ -10,29 +11,19 @@ import numpy as np
 import queue
 import threading
 
+import logging
+logger = logging.getLogger(__name__)
+
 class OutputManager:
     def __init__(
         self,
-        dopplerview_folder,
-        schema,
-        dopplerview_config,
-        output_config=None
+        schema_path,
+        output_config_path
     ):
-        self.h5_path = dopplerview_folder.get_h5_path()
-        # Create an empty H5 file if it doesn't exist, and overwrite it if it does (to ensure a clean slate for each run)
-        with h5py.File(self.h5_path, "w") as h5:
-            pass
+        self.schema = self.load_h5_schema(schema_path)
 
-        self.schema = json_utils.flatten_schema(schema)
-
-        self.dopplerview_folder = dopplerview_folder
         self.output_dir = None # It will be created when needed
-        self.output_config = output_config or {}
-
-        self.dopplerview_config = dopplerview_config
-
-        self.cache_dir = dopplerview_folder.get_cache_folder()
-        self.cache_dir.mkdir(exist_ok=True)
+        self.output_config = self.load_output_config(output_config_path)
 
         self.renderers = {
             "image": output_renderer.ImageRenderer(),
@@ -52,13 +43,21 @@ class OutputManager:
         self.cache_queue = queue.Queue()
         self.cache_worker = threading.Thread(target=self._cache_worker, daemon=True)
 
+    def __del__(self):
+        self.running = False
+        self.output_queue.put((None, None, None))  # Unblock the output worker
+        self.output_worker.join()
+        if self.cache_worker.is_alive():
+            self.cache_queue.put(None)  # Unblock the cache worker
+            self.cache_worker.join()
+
     def _output_worker(self):
         while self.running:
             step_name, key, ctx = self.output_queue.get()
             try:
                 self.save(step_name, key, ctx)
             except Exception as e:
-                print(f"Error saving output for step '{step_name}' and key '{key}': {e}")
+                logger.exception(f"Error saving output for step '{step_name}' and key '{key}': {e}")
             self.output_queue.task_done()
 
     def _cache_worker(self):
@@ -67,16 +66,18 @@ class OutputManager:
             try:
                 self.save_cache(ctx)
             except Exception as e:
-                print(f"Error saving cache: {e}")
+                logger.exception(f"Error saving cache: {e}")
             self.cache_queue.task_done()
 
-    def close(self):
-        self.running = False
-        self.output_queue.put((None, None, None))  # Unblock the output worker
-        self.output_worker.join()
-        if self.cache_worker.is_alive():
-            self.cache_queue.put(None)  # Unblock the cache worker
-            self.cache_worker.join()
+    def load_h5_schema(self, schema_path):
+        schema = json.load(open(schema_path))
+        logger.info(f"[OutputManager] Loading H5 schema from {schema_path}")
+        return json_utils.flatten_schema(schema)
+    
+    def load_output_config(self, output_config_path):
+        output_config = json.load(open(output_config_path))
+        logger.info(f"[OutputManager] Loading output configuration from {output_config_path}")
+        return output_config
 
     def save_h5(self, key, ctx):
         """Saves a value from the cache to the H5 file based on the provided schema."""
@@ -102,10 +103,34 @@ class OutputManager:
         with open(config_path, "w") as f:
             json.dump(self.dopplerview_config, f)
 
+    def set_dopplerview_config(self, config):
+        self.dopplerview_config = config
+
+    def set_DV_folder(self, DV_folder):
+        self.dopplerview_folder = DV_folder
+        self.h5_path = self.dopplerview_folder.get_h5_path()
+        # Create an empty H5 file if it doesn't exist, and overwrite it if it does (to ensure a clean slate for each run)
+        with h5py.File(self.h5_path, "w") as h5:
+            pass
+        self.cache_dir = Path("~/.cache/dopplerview/cache") / self.dopplerview_folder.measure_name
+
+    def unset_DV_folder(self):
+        self.close_output_folder()
+        self.dopplerview_folder = None
+        self.h5_path = None
+        self.cache_dir = None
+
     def ensure_output_folder(self):
+        if self.dopplerview_folder is None:
+            raise ValueError("DopplerView folder is not set. Cannot ensure output folder.")
         if self.output_dir is None:
             self.output_dir = self.dopplerview_folder.create_output_folder()
             self.write_dopplerview_config()
+            logger.info(f"[OutputManager] Created output folder: {self.output_dir}")
+
+
+    def close_output_folder(self):
+        self.output_dir = None
 
     def output_cache(self, step_name, key, ctx, type=None):
         """Outputs a value from the cache for debugging purposes based on the provided output configuration."""
@@ -117,7 +142,7 @@ class OutputManager:
         renderer = self.renderers.get(type)
 
         if renderer is None:
-            Warning(f"No renderer found for output type '{type}' of key '{key}', skipping output.")
+            logger.warning(f"No renderer found for output type '{type}' of key '{key}', skipping output.")
             return
         
         # Lasily create the output folder when we actually need to output something, to avoid creating empty output folders for runs that don't produce any outputs
@@ -142,12 +167,12 @@ class OutputManager:
     def output(self, step_name, filename, value, type=None, options=None):
         """Outputs a value manually for debugging purposes based on the provided output configuration."""
         if type is None:
-            Warning(f"No output type specified for key '{step_name}', skipping debug output.")
+            logger.warning(f"No output type specified for key '{step_name}', skipping debug output.")
             return
         
         renderer = self.renderers.get(type)
         if renderer is None:
-            Warning(f"No renderer found for output type '{type}' of key '{step_name}', skipping output.")
+            logger.warning(f"No renderer found for output type '{type}' of key '{step_name}', skipping output.")
             return
 
         step_dir = self.ensure_step_dir(step_name)
@@ -162,6 +187,7 @@ class OutputManager:
     def save_cache(self, ctx):
         """Saves the entire cache to the H5 file"""
         filepath = self.cache_dir / "cache.h5"
+        self.cache_dir.mkdir(exist_ok=True)
         ctx.export_cache(filepath)
 
     def cache_async(self, ctx):
