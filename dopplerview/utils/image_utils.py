@@ -203,9 +203,10 @@ def lab_duo_image(image_1, image_2, h=45):
         image_2 = image_2 / denom2
 
     L = 100.0 * image_1
+    chroma = image_2 / (np.max(image_2) + 1e-8)
 
-    a = 128 * image_2 * rx
-    b = 128 * image_2 * ry
+    a = 100 * chroma * rx
+    b = 100 * chroma * ry
 
     lab = np.stack([L, a, b], axis=-1)
 
