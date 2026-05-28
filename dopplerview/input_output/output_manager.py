@@ -62,8 +62,6 @@ class OutputManager:
         if not self.running:
             return
 
-        self.running = False
-
         self.output_queue.put((None, None, None))
         self.cache_queue.put(None)
 
@@ -73,11 +71,13 @@ class OutputManager:
         if self.cache_worker is not None:
             self.cache_worker.join()
 
+        self.running = False
+
     def _output_worker(self):
         while self.running:
             step_name, key, ctx = self.output_queue.get()
             if step_name is None and key is None and ctx is None:
-                continue
+                break
             try:
                 self.save(step_name, key, ctx)
             except Exception as e:
@@ -90,7 +90,7 @@ class OutputManager:
         while self.running:
             ctx = self.cache_queue.get()
             if ctx is None:
-                continue
+                break
             try:
                 self.save_cache(ctx)
             except Exception as e:
