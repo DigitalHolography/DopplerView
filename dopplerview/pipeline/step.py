@@ -5,7 +5,9 @@ import numpy as np
 from abc import ABC
 
 import logging
-import threading
+
+from dopplerview._version import __version__
+
 
 class BaseStep(ABC):
     """
@@ -33,7 +35,8 @@ class BaseStep(ABC):
 
         payload = {
             "config": self._relevant_config(ctx),
-            "inputs": self._input_signature(ctx)
+            "inputs": self._input_signature(ctx),
+            "version": __version__
         }
 
         serialized = json.dumps(payload, sort_keys=True, default=str)
