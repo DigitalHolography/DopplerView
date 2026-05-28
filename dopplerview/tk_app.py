@@ -816,7 +816,7 @@ if __name__ == "__main__":
         root = tk.Tk()
     log_config.setup_logging()
 
-    # matplotlib.use('Agg')
+    matplotlib.use('Agg')
 
     app = MainWindow(root)
     root.mainloop()

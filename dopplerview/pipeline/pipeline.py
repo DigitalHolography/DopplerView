@@ -102,8 +102,7 @@ class Context:
     def _read_h5_into_cache(self):
         if self.DV_folder is None:
             raise RuntimeError("DopplerView folder not initialized. Cannot read from H5 cache.")
-        cache_folder = self.output_manager.cache_dir
-        h5_cache_path = cache_folder / "cache.h5"
+        h5_cache_path = self.output_manager.cache_path
 
         if not h5_cache_path.exists():
             logger.info(f"[Pipeline] No cache file found at {h5_cache_path}. Skipping cache loading.")
