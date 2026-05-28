@@ -275,7 +275,7 @@ class DAGEngine:
         if callback:
             callback("step_done", step.name, elapsed)
 
-        step.export(ctx)
+        step.export(ctx, debug_mode=self.debug_mode)
         ctx.metadata["step_hashes"][step.name] = step.fingerprint(ctx)
 
     # ------------------------------------------------------------------
@@ -388,7 +388,7 @@ class DAGEngine:
             logger.info(f"[DAG] Skipping (valid cache): '{step_name}'")
             if callback:
                 callback("step_skipped", step_name)
-            step.export(ctx)
+            step.export(ctx, debug_mode=self.debug_mode)
             return
 
         logger.info(f"[DAG] Running step: '{step_name}'")

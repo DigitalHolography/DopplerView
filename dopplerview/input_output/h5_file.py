@@ -14,9 +14,10 @@ def hdf5_safe(x):
         return str(x)
     return x
 
-def write_dict_to_h5(data_dict, h5_path):
-    with h5py.File(h5_path, "w") as h5_cache:
+def write_dict_to_h5(data_dict, h5_path, overwrite=True):
+    open_mode = "w" if overwrite else "a"
+    with h5py.File(h5_path, open_mode) as h5_cache:
         for key, value in data_dict.items():
             if key in h5_cache:
-                    del h5_cache[key]
+                continue
             h5_cache.create_dataset(key, data=hdf5_safe(value))

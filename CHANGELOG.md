@@ -3,6 +3,7 @@
 ## 1.5.0
 * Pre-classify branch signals by clustering of their first harmonic feature in the complex domain
 * Fix choroid mask diaphragm removal, by using image center instead of optic disc center
+* Accelerate pipeline by handling output saving in a separate thread
 
 ## 1.4.1
 * Ensure stacktrace when a step fails

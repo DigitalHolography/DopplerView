@@ -6,6 +6,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from dopplerview.input_output.output_manager import OutputManager
 from dopplerview.pipeline.pipeline import Pipeline
 from dopplerview.input_output import log_config, user_config
 import matplotlib
@@ -73,7 +74,10 @@ def main():
 
     debug = args.debug
     
-    pipeline = Pipeline(debug_mode=debug)
+    schema_path = user_config.ensure_config_file("h5_schema.json")
+    output_config_path = user_config.ensure_config_file("output_config.json")
+    output_manager = OutputManager(schema_path=schema_path, output_config_path=output_config_path)
+    pipeline = Pipeline(output_manager=output_manager, debug_mode=debug)
 
     if args.params:
         pipeline.load_dopplerview_config(args.params)

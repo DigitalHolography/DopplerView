@@ -17,7 +17,7 @@ class PulseAnalysisStep(NestedStep):
             
 class PreArteryMaskStep(BaseStep):
     requires = {"M0_ff_video", "retinal_vessel_mask", "optic_disc_center"}
-    produces = {"labeled_vessels", "pre_artery_mask", "branch_signals", "corrected_signals", "pre_vein_mask"}
+    produces = {"labeled_vessels", "pre_artery_mask", "branch_signals", "pre_vein_mask"}
     name = "pre_artery_mask"
 
     def _relevant_config(self, ctx):
@@ -50,7 +50,6 @@ class PreArteryMaskStep(BaseStep):
         ctx.output_manager.output("pulse_analysis", "labeled_vessels", labeled_vessels, "labeled_mask")
         signals_n = (signals - signals.mean(axis=1, keepdims=True)) / signals.std(axis=1, keepdims=True)
         ctx.set("branch_signals", signals_n)
-        ctx.output_manager.save_h5("branch_signals", ctx)
 
         # # --- Step 3: Correct signals by aligning with median heartbeat ---
         # self.logger.info("    - Sampling frequency: {:.2f} Hz, Beat period: {:.2f} seconds".format(sampling_frequency, beat_period))

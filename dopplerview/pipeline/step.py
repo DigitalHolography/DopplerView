@@ -5,6 +5,7 @@ import numpy as np
 from abc import ABC
 
 import logging
+import threading
 
 class BaseStep(ABC):
     """
@@ -57,14 +58,17 @@ class BaseStep(ABC):
             return hashlib.sha256(val.tobytes()).hexdigest()
         return str(val)
     
-    def export(self, ctx):
+    def export(self, ctx, debug_mode=False):
         """
         Export step outputs using the output manager.
         """
         for key in self.produces:
             if ctx.has(key):
-                ctx.output_manager.save(self.name, key, ctx)
-    
+                ctx.output_manager.save_async(self.name, key, ctx)
+
+        if debug_mode:
+            ctx.output_manager.cache_async(ctx)
+
 class NestedStep(BaseStep):
     substeps: List[BaseStep] = []
 
