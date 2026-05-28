@@ -34,7 +34,7 @@ class OutputManager:
             "labeled_mask": output_renderer.LabeledMaskRenderer()
         }
 
-        self.running = True
+        self.running = False
 
         self.output_queue = queue.Queue()
         self.output_worker = threading.Thread(target=self._output_worker, daemon=True)
@@ -44,6 +44,12 @@ class OutputManager:
         self.cache_worker = threading.Thread(target=self._cache_worker, daemon=True)
 
     def __del__(self):
+        self.close_workers()
+
+    def start(self):
+        self.running = True
+
+    def close_workers(self):
         self.running = False
         self.output_queue.put((None, None, None))  # Unblock the output worker
         self.output_worker.join()

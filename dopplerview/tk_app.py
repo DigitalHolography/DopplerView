@@ -7,6 +7,7 @@ from tkinter import filedialog, ttk
 from pathlib import Path
 import threading
 import queue
+import matplotlib
 
 from dopplerview.input_output import log_config, user_config
 import numpy as np
@@ -814,6 +815,8 @@ if __name__ == "__main__":
     else:
         root = tk.Tk()
     log_config.setup_logging()
+
+    # matplotlib.use('Agg')
 
     app = MainWindow(root)
     root.mainloop()
