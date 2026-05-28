@@ -7,6 +7,9 @@ import dopplerview.input_output.output_renderer as output_renderer
 import matplotlib.pyplot as plt
 import numpy as np
 
+import queue
+import threading
+
 class OutputManager:
     def __init__(
         self,
@@ -39,6 +42,43 @@ class OutputManager:
             "optic_disc": output_renderer.OpticDiscRenderer(),
             "labeled_mask": output_renderer.LabeledMaskRenderer()
         }
+
+        self.running = True
+
+        self.output_queue = queue.Queue()
+        self.output_worker = threading.Thread(target=self._output_worker, daemon=True)
+        self.output_worker.start()
+
+        self.cache_queue = queue.Queue()
+        self.cache_worker = threading.Thread(target=self._cache_worker, daemon=True)
+
+
+
+    def _output_worker(self):
+        while self.running:
+            step_name, key, ctx = self.output_queue.get()
+            try:
+                self.save(step_name, key, ctx)
+            except Exception as e:
+                print(f"Error saving output for step '{step_name}' and key '{key}': {e}")
+            self.output_queue.task_done()
+
+    def _cache_worker(self):
+        while self.running:
+            ctx = self.cache_queue.get()
+            try:
+                self.save_cache(ctx)
+            except Exception as e:
+                print(f"Error saving cache: {e}")
+            self.cache_queue.task_done()
+
+    def close(self):
+        self.running = False
+        self.output_queue.put((None, None, None))  # Unblock the output worker
+        self.output_worker.join()
+        if self.cache_worker.is_alive():
+            self.cache_queue.put(None)  # Unblock the cache worker
+            self.cache_worker.join()
 
     def save_cache(self, ctx):
         """Saves the entire cache to the H5 file"""
@@ -122,6 +162,12 @@ class OutputManager:
         path = step_dir / f"{filename}.png"
 
         renderer.render("value", {"value": value}, path, options=options)
+
+    def save_async(self, step_name, key, ctx):
+        self.output_queue.put((step_name, key, ctx))
+
+    def cache_async(self, ctx):
+        self.cache_queue.put(ctx)
 
     def save(self, step_name, key, ctx):
         self.save_h5(key, ctx)

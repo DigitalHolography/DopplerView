@@ -62,6 +62,7 @@ class Context:
         self.__cache: Dict[str, Any] = {}
 
         self.lock = threading.RLock()
+        self.cache_lock = threading.Lock()
 
     def _init_cache(self, initial_data: Dict[str, Any] = None):
         with self.lock:
@@ -220,6 +221,10 @@ class Context:
         # Create the output manager. It will lazily create the output folder when needed, to avoid creating empty output folders for runs that don't produce any outputs
         self.output_manager = OutputManager(dopplerview_folder=self.DV_folder, schema=self.h5_schema, dopplerview_config=self.dopplerview_config, output_config=self.output_config)
 
+    def close_output_manager(self):
+        if self.output_manager is not None:
+            self.output_manager.close()
+
     def set(self, key: str, value: Any):
         with self.lock:
             self.__cache[key] = (value, 'produced')
@@ -255,7 +260,7 @@ class Context:
     
     def export_cache(self, filepath):
         cache = {}
-        with self.lock:
+        with self.cache_lock:
             for key, (value, status) in self.__cache.items():
                 if status == 'produced':  # Only export values that were produced and not yet cached
                     cache[key] = value
@@ -378,6 +383,8 @@ class Pipeline:
         # if self.ctx.debug_mode:
         #     logger.info(f"[Pipeline] Saving cache to H5 file.")
         #     self.ctx.output_manager.save_cache(self.ctx)
+        self.ctx.close_output_manager()
+        
         return self.ctx
 
     def run_batch(self, targets=None, callback=None):

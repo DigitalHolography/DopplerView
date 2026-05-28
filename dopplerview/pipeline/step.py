@@ -62,31 +62,13 @@ class BaseStep(ABC):
         """
         Export step outputs using the output manager.
         """
-        # def _save(step_name, ctx):
-        #     for key in self.produces:
-        #         if ctx.has(key):
-        #             ctx.output_manager.save(step_name, key, ctx)
-        #     return 1
-        # thread = threading.Thread(
-        #     target=_save,
-        #     args=(self.name, ctx),
-        #     daemon=True)
-        # thread.start()
-
         for key in self.produces:
             if ctx.has(key):
-                ctx.output_manager.save(self.name, key, ctx)
+                ctx.output_manager.save_async(self.name, key, ctx)
 
         if debug_mode:
-            ctx.output_manager.save_cache(ctx)
+            ctx.output_manager.cache_async(ctx)
 
-        # if debug_mode:
-        #     thread_debug = threading.Thread(
-        #         target=ctx.output_manager.save_cache,
-        #         args=(ctx,),
-        #         daemon=True)
-        #     thread_debug.start()
-    
 class NestedStep(BaseStep):
     substeps: List[BaseStep] = []
 
