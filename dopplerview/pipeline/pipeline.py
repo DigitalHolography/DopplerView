@@ -102,8 +102,7 @@ class Context:
     def _read_h5_into_cache(self):
         if self.DV_folder is None:
             raise RuntimeError("DopplerView folder not initialized. Cannot read from H5 cache.")
-        cache_folder = self.output_manager.cache_dir
-        h5_cache_path = cache_folder / "cache.h5"
+        h5_cache_path = self.output_manager.cache_path
 
         if not h5_cache_path.exists():
             logger.info(f"[Pipeline] No cache file found at {h5_cache_path}. Skipping cache loading.")
@@ -195,6 +194,12 @@ class Context:
         self.output_manager.set_DV_folder(self.DV_folder)
         self.output_manager.set_dopplerview_config(self.dopplerview_config)
         self.output_manager.ensure_output_folder()  # Lazily create the output folder when we actually need to output something, to avoid creating empty output folders for runs that don't produce any outputs
+    
+    def start_output_manager(self):
+        self.output_manager.start()
+
+    def stop_output_manager(self):
+        self.output_manager.close_workers()
 
     def set(self, key: str, value: Any):
         with self.lock:
@@ -237,7 +242,6 @@ class Context:
                     cache[key] = value
                     self.cache_value(key)  # Mark as cached after exporting
         h5_file.write_dict_to_h5(cache, filepath, overwrite=False)
-
 
 class Pipeline:
     def __init__(self, output_manager, debug_mode=False):
@@ -343,6 +347,7 @@ class Pipeline:
         self.ctx.ensure_config()
 
         self.ctx.create_output_folder()
+        self.ctx.start_output_manager()
 
         start_time = time.time()
         self.engine.run(self.ctx, targets, callback=callback)
@@ -353,7 +358,7 @@ class Pipeline:
         # if self.ctx.debug_mode:
         #     logger.info(f"[Pipeline] Saving cache to H5 file.")
         #     self.ctx.output_manager.save_cache(self.ctx)
-        
+        self.ctx.stop_output_manager()
         return self.ctx
 
     def run_batch(self, targets=None, callback=None):

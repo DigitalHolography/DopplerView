@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 import cv2
@@ -34,26 +35,49 @@ class OutputManager:
             "labeled_mask": output_renderer.LabeledMaskRenderer()
         }
 
-        self.running = True
+        self.running = False
 
         self.output_queue = queue.Queue()
-        self.output_worker = threading.Thread(target=self._output_worker, daemon=True)
-        self.output_worker.start()
+        self.output_worker = None
 
         self.cache_queue = queue.Queue()
-        self.cache_worker = threading.Thread(target=self._cache_worker, daemon=True)
+        self.cache_worker = None
 
     def __del__(self):
-        self.running = False
-        self.output_queue.put((None, None, None))  # Unblock the output worker
-        self.output_worker.join()
-        if self.cache_worker.is_alive():
-            self.cache_queue.put(None)  # Unblock the cache worker
+        self.close_workers()
+
+    def start(self):
+        if self.running:
+            return
+
+        self.running = True
+
+        self.output_worker = threading.Thread(
+            target=self._output_worker,
+            daemon=True
+        )
+        self.output_worker.start()
+
+    def close_workers(self):
+        if not self.running:
+            return
+
+        self.output_queue.put((None, None, None))
+        self.cache_queue.put(None)
+
+        if self.output_worker is not None:
+            self.output_worker.join()
+
+        if self.cache_worker is not None:
             self.cache_worker.join()
+
+        self.running = False
 
     def _output_worker(self):
         while self.running:
             step_name, key, ctx = self.output_queue.get()
+            if step_name is None and key is None and ctx is None:
+                break
             try:
                 self.save(step_name, key, ctx)
             except Exception as e:
@@ -61,10 +85,14 @@ class OutputManager:
             self.output_queue.task_done()
 
     def _cache_worker(self):
+        """Worker thread that saves the cache to disk asynchronously. It listens on the cache_queue for contexts to save, and calls save_cache on them.
+        """
         while self.running:
             ctx = self.cache_queue.get()
+            if ctx is None:
+                break
             try:
-                self.save_cache(ctx)
+                ctx.export_cache(self.cache_path)
             except Exception as e:
                 logger.exception(f"Error saving cache: {e}")
             self.cache_queue.task_done()
@@ -112,13 +140,14 @@ class OutputManager:
         # Create an empty H5 file if it doesn't exist, and overwrite it if it does (to ensure a clean slate for each run)
         with h5py.File(self.h5_path, "w") as h5:
             pass
-        self.cache_dir = Path("~/.cache/dopplerview/cache") / self.dopplerview_folder.measure_name
+        cache_dir = Path(os.path.expanduser("~/.cache/dopplerview/cache")) / self.dopplerview_folder.measure_name
+        self.cache_path = cache_dir / "cache.h5"
 
     def unset_DV_folder(self):
         self.close_output_folder()
         self.dopplerview_folder = None
         self.h5_path = None
-        self.cache_dir = None
+        self.cache_path = None
 
     def ensure_output_folder(self):
         if self.dopplerview_folder is None:
@@ -182,17 +211,18 @@ class OutputManager:
         renderer.render("value", {"value": value}, path, options=options)
 
     def save_async(self, step_name, key, ctx):
-        self.output_queue.put((step_name, key, ctx))
-
-    def save_cache(self, ctx):
-        """Saves the entire cache to the H5 file"""
-        filepath = self.cache_dir / "cache.h5"
-        self.cache_dir.mkdir(exist_ok=True)
-        ctx.export_cache(filepath)
+        self.output_queue.put((step_name, key, ctx)) 
 
     def cache_async(self, ctx):
-        if not self.cache_worker.is_alive():
+        """Save the 'produced' cache values to disk, using a worker thread. The h5 file is lazily created when the first value is saved."""
+        if self.cache_worker is None:
+            self.cache_worker = threading.Thread(
+                target=self._cache_worker,
+                daemon=True
+            )
             self.cache_worker.start()
+            os.makedirs(self.cache_path.parent, exist_ok=True)
+            logger.info(f"[OutputManager] Saving cache to {self.cache_path}")
         self.cache_queue.put(ctx)
 
     def save(self, step_name, key, ctx):

@@ -79,10 +79,7 @@ class DopplerViewFolder():
         self.output_parent_folder.mkdir(exist_ok=True)
         self.output_folder = None  # Will be set when creating a new output folder
 
-        self.cache_folder = self.directory / "cache"
-        self.cache_folder.mkdir(exist_ok=True)
-
-        self.config_folder = self.directory / "config"
+        self.config_folder = self.directory / "json"
         self.config_folder.mkdir(exist_ok=True)
         self.config_name = "DV_params.json"
 
