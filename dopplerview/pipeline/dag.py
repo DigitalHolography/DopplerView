@@ -304,7 +304,6 @@ class DAGEngine:
             ``("step_running", name)``
             ``("step_done", name, elapsed)``
             ``("step_skipped", name)``
-            ``("finished")``
         """
         if self._steps_to_run is None:
             self.set_targets(targets)
@@ -357,9 +356,6 @@ class DAGEngine:
         with self._lock:
             self._invalidated.clear()
         self._steps_to_run = None
-
-        if callback:
-            callback("finished")
 
     def _execute_step_in_run(
         self,
