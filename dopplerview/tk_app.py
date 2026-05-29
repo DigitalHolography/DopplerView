@@ -48,7 +48,6 @@ class MainWindow:
         self.root.title("DopplerView")
 
         self._minimal_title_font: tkfont.Font | None = None
-        self.input_folder = tk.StringVar(value="No input selected")
 
         # --- pipeline init ---
 
@@ -78,6 +77,9 @@ class MainWindow:
 
         self.config_mode_var = tk.StringVar(value="default")
         self.update_config_mode() # set initial config mode
+
+        self.step_index = 0
+        self.measure_index = 0
 
 
     def _apply_theme(self) -> None:
@@ -210,24 +212,55 @@ class MainWindow:
         self.btn_load = ttk.Button(container, text="Select .holo file(s)", command=self.load_holo)
         self.btn_load.grid(row=2, column=0, pady=(0, 10))
 
-        self.input_path_label = tk.Label(
-            container,
-            textvariable=self.input_folder,
-            bg=self._bg_color,
-            fg=self._muted_fg,
-            justify="center",
-            wraplength=420,
-        ).grid(row=3, column=0, pady=(0, 10))
+        # -------------------------------------------------
+        # Input measures list
+        # -------------------------------------------------
 
-        state = "disabled" if self.input_folder.get() == "No input selected" else "enabled"
+        list_container = ttk.Frame(container)
+        list_container.grid(
+            row=3,
+            column=0,
+            sticky="ew",
+            pady=(0, 10),
+        )
+
+        list_container.grid_columnconfigure(0, weight=1)
+        list_container.grid_rowconfigure(0, weight=1)
+
+        self.minimal_input_listbox = tk.Listbox(
+            list_container,
+            height=3,
+            width=50,
+            bg=self._surface_color,
+            fg=self._text_fg,
+            selectbackground=self._accent_color,
+            activestyle="none",
+        )
+
+        self.minimal_input_listbox.grid(
+            row=0,
+            column=0,
+            sticky="ew",
+        )
+
+        minimal_scrollbar = ttk.Scrollbar(
+            list_container,
+            orient="vertical",
+            command=self.minimal_input_listbox.yview,
+        )
+
+        minimal_scrollbar.grid(row=0, column=1, sticky="ns")
+
+        self.minimal_input_listbox.config(
+            yscrollcommand=minimal_scrollbar.set
+        )
+
+        state = "disabled"
         self.btn_run_minimal = ttk.Button(container, text="Run Full Pipeline", command=self.run_full_pipelines, state=state)
         self.btn_run_minimal.grid(row=4, column=0, pady=10)
 
         self.progress_minimal = ttk.Progressbar(container, maximum=100)
         self.progress_minimal.grid(row=5, column=0, sticky="ew", padx=10, pady=(0, 10))
-
-        self.progress_minimal_batch = ttk.Progressbar(container, maximum=100)
-        self.progress_minimal_batch.grid(row=6, column=0, sticky="ew", padx=10, pady=(0, 10))
 
     def _build_advanced_ui(self):
         frame = self.advanced_frame
@@ -261,17 +294,6 @@ class MainWindow:
 
         row += 1
 
-        # --- Labels (back to full-width single column) ---
-        self.input_path_label = tk.Label(
-            self.buttons_frame,
-            textvariable=self.input_folder,
-            bg=self._bg_color,
-            fg=self._muted_fg,
-            justify="center",
-            wraplength=600,  # increase since now full width
-        )
-        self.input_path_label.grid(row=row, column=0, pady=5, sticky="ew")
-
         self.config_path_label = tk.Label(
             self.buttons_frame,
             textvariable=self.config_path,
@@ -281,6 +303,65 @@ class MainWindow:
             wraplength=600,
         )
         self.config_path_label.grid(row=row, column=1, pady=5, sticky="ew")
+        row += 1
+
+        # -------------------------------------------------
+        # Input measures panel
+        # -------------------------------------------------
+
+        self.input_panel = tk.LabelFrame(frame, text="Input Measures")
+        self.input_panel.grid(
+            row=row,
+            column=0,
+            padx=5,
+            pady=5,
+            sticky="nsew"
+        )
+
+        self.input_panel.grid_columnconfigure(0, weight=1)
+        self.input_panel.grid_rowconfigure(0, weight=1)
+
+        # Listbox + scrollbar container
+        list_container = ttk.Frame(self.input_panel)
+        list_container.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+
+        list_container.grid_columnconfigure(0, weight=1)
+        list_container.grid_rowconfigure(0, weight=1)
+
+        self.input_listbox = tk.Listbox(
+            list_container,
+            height=6,
+            bg=self._surface_color,
+            fg=self._text_fg,
+            selectbackground=self._accent_color,
+            activestyle="none",
+        )
+
+        self.input_listbox.grid(row=0, column=0, sticky="nsew")
+
+        scrollbar = ttk.Scrollbar(
+            list_container,
+            orient="vertical",
+            command=self.input_listbox.yview
+        )
+
+        scrollbar.grid(row=0, column=1, sticky="ns")
+
+        self.input_listbox.config(yscrollcommand=scrollbar.set)
+
+        self.progress_batch = ttk.Progressbar(
+            self.input_panel,
+            maximum=100
+        )
+
+        self.progress_batch.grid(
+            row=1,
+            column=0,
+            sticky="ew",
+            padx=5,
+            pady=(0, 5)
+        )
+
         row += 1
 
         row += 1
@@ -314,7 +395,7 @@ class MainWindow:
                 self.step_checkboxes[step] = cb
 
         # --- Run button ---
-        state = "disabled" if self.input_folder.get() == "No input selected" else "enabled"
+        state = "disabled"
         self.btn_run = ttk.Button(frame, text="Run Pipeline", command=self.run_pipelines_with_steps, state=state)
         self.btn_run.grid(row=row, column=0, pady=5, sticky="ew")
         row += 1
@@ -322,10 +403,6 @@ class MainWindow:
         # --- Progress bar ---
         self.progress = ttk.Progressbar(frame, maximum=100)
         self.progress.grid(row=row, column=0, sticky="ew", padx=5)
-        row += 1
-
-        self.progress_batch = ttk.Progressbar(frame, maximum=100)
-        self.progress_batch.grid(row=row, column=0, sticky="ew", padx=5)
         row += 1
 
         # --- Image display ---
@@ -576,7 +653,6 @@ class MainWindow:
         self.progress["value"] = 0
         self.progress_minimal["value"] = 0
         self.progress_batch["value"] = 0
-        self.progress_minimal_batch["value"] = 0
         self.pipeline.ctx.clear_input_list()
 
         if isinstance(folders, str):
@@ -589,12 +665,28 @@ class MainWindow:
         # if folder_list[0].suffix == ".holo":
         #     self.pipeline.ctx.load_input_folder(folder_list[0])  # load first by default, pipeline will handle the rest in batch mode
         # self.config_path.set(self.pipeline.ctx.dopplerview_config_path)
-        self.input_folder.set(self.pipeline.ctx.input_list)
         self.update_step_display()
 
         self.btn_run.config(state="enabled")
         self.btn_run_minimal.config(state="enabled")
-        
+
+        self.refresh_input_listbox()
+
+    def refresh_input_listbox(self):
+        # Advanced UI list
+        if hasattr(self, "input_listbox"):
+            self.input_listbox.delete(0, tk.END)
+
+            for path in self.pipeline.ctx.input_list:
+                self.input_listbox.insert(tk.END, str(path))
+
+        # Minimal UI list
+        if hasattr(self, "minimal_input_listbox"):
+            self.minimal_input_listbox.delete(0, tk.END)
+
+            for path in self.pipeline.ctx.input_list:
+                self.minimal_input_listbox.insert(tk.END, str(path))
+
     def load_holo(self):
         file_path = filedialog.askopenfilenames(filetypes=[("Holo files", "*.holo")], defaultextension=".holo")
         if file_path:
@@ -711,28 +803,39 @@ class MainWindow:
             while True:
                 event, data = self.queue.get_nowait()
                 if event == "pipeline_start":
-                    self.progress["value"] = 0
-                    self.progress_minimal["value"] = 0
-                    self.progress_batch["value"] = 0
-                    self.progress_minimal_batch["value"] = 0
 
                     self.config_path.set(self.pipeline.ctx.dopplerview_config_path) # refresh config path
 
                     i, total = data
+                    self.measure_index = i
+                    self.input_listbox.selection_clear(0, tk.END)
+                    self.minimal_input_listbox.selection_clear(0, tk.END)
+
+                    if i < self.input_listbox.size():
+                        self.input_listbox.selection_set(i)
+                        self.input_listbox.activate(i)
+                        self.input_listbox.see(i)
+
+                    if i < self.minimal_input_listbox.size():
+                        self.minimal_input_listbox.selection_set(i)
+                        self.minimal_input_listbox.activate(i)
+                        self.minimal_input_listbox.see(i)
+
+                    self.progress["value"] = 0
                     progress = (i / total) * 100
                     self.progress_batch["value"] = progress
-                    self.progress_minimal_batch["value"] = progress
+                    self.progress_minimal["value"] = progress
 
                 elif event == "batch_start":
                     self.progress_batch["value"] = 0
-                    self.progress_minimal_batch["value"] = 0
 
                 elif event == "step_start":
                     step_name, i, total = data
-                    progress = (i / total) * 100
-                    self.progress["value"] = progress
-                    self.progress_minimal["value"] = progress
+                    step_ratio = i / total
+                    measure_ratio = self.measure_index / len(self.pipeline.ctx.input_list)
+                    self.progress["value"] = step_ratio * 100
 
+                    self.progress_minimal["value"] = measure_ratio * 100 + step_ratio * 100 / len(self.pipeline.ctx.input_list)
                     self.update_step_color(step_name, "running")
 
                 elif event == "step_done":
@@ -748,14 +851,13 @@ class MainWindow:
                     self.progress["value"] = 100
                     self.btn_run.config(state="enabled")
 
-                    self.progress_minimal["value"] = 100
                     self.btn_run_minimal.config(state="enabled")
 
                     self.update_step_display()  # refresh colors to reflect final cache status
 
                 elif event == "batch_done":
                     self.progress_batch["value"] = 100
-                    self.progress_minimal_batch["value"] = 100
+                    self.progress_minimal["value"] = 100
 
                 elif event == "error":
                     logger.error("Error:", data)
