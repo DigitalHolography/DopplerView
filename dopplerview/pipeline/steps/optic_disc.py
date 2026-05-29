@@ -1,11 +1,7 @@
-from cv2.gapi import mask
-
 from dopplerview.pipeline.step import BaseStep
-from dopplerview.utils.image_utils import save_bounding_box
 from dopplerview.segmentation import process_masks
 
 import numpy as np
-import cv2
 
 class OpticDiscSegmentationStep(BaseStep):
     requires = {"M0_ff_image", "M1_ff_image"}

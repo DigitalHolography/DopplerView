@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.0
+* Pre-classify branch signals by clustering of their first harmonic feature in the complex domain
+* Fix choroid mask diaphragm removal, by using image center instead of optic disc center
+* Accelerate pipeline by handling output saving in a separate thread
+* Save debug cache in user ~/.cache/dopplerview folder, to avoid heavy reading on NAS, and automatically invalidate steps when the release version does not match.
+
 ## 1.4.1
 * Ensure stacktrace when a step fails
 * If optic disc segmentation confidence is too low, fallback to detection, and infer mask from bounding box. If detection confidence is also too low, fallback to M1 argmax to estimate optic disc center

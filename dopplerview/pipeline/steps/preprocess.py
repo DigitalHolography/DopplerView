@@ -1,11 +1,8 @@
 from dopplerview.pipeline.step import BaseStep
 
-from dopplerview.preprocessing.registration import register_video
-from dopplerview.preprocessing import normalization, resize
+from dopplerview.preprocessing import normalization
 from dopplerview.utils import image_utils
-from dopplerview.utils.parallelization_utils import run_in_parallel
 
-from functools import partial
 import numpy as np
 
 class PreprocessStep(BaseStep):

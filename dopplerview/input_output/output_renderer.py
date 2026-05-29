@@ -1,7 +1,8 @@
 import imageio
-from dopplerview.utils.image_utils import normalize_to_uint8, save_numpy_as_avi, save_labeled_branches
+from dopplerview.utils.image_utils import normalize_to_uint8, save_numpy_as_avi, save_labeled_branches, normalize_image, lab_duo_image
 import matplotlib.pyplot as plt
 import numpy as np
+import matplotlib.pyplot as plt
 
 class OutputRenderer:
     def render(self, key, ctx, path, options=None):
@@ -9,7 +10,14 @@ class OutputRenderer:
     
 class ImageRenderer(OutputRenderer):
     def render(self, key, ctx, path, options=None):
-        imageio.imwrite(path, normalize_to_uint8(ctx.get(key)))
+        if options and options.get("blue_gray_red"):
+            M0_ff_image = normalize_image(options.get("M0_ff_image"))
+            img = lab_duo_image(M0_ff_image, ctx.get(key))
+            imageio.imwrite(path, normalize_to_uint8(img))
+
+            # plt.imsave(path, normalize_to_uint8(img), cmap=cmap, vmin=0, vmax=255)
+        else:
+            imageio.imwrite(path, normalize_to_uint8(ctx.get(key)))
 
 class SignalRenderer(OutputRenderer):
     def render(self, key, ctx, path, options=None):

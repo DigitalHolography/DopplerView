@@ -10,6 +10,7 @@ from scipy.interpolate import interp1d
 
 from skimage.measure import label
 from skimage import measure
+from sklearn.cluster import KMeans
 
 from dopplerview.segmentation import signal_processing
 from dopplerview.utils import image_utils
@@ -81,7 +82,8 @@ def fill_with_beat(beat, start_offset, end_offset, length):
 
     # Fill the remaining part with the appropriate segment of the beat
     pseudo_signal[:start_offset % l] = beat[-(start_offset % l):]
-    pseudo_signal[-(end_offset % l):] = beat[:(end_offset % l)]
+    if end_offset % l > 0:
+        pseudo_signal[-(end_offset % l):] = beat[:(end_offset % l)]
     return pseudo_signal
 
 def get_pseudo_signal(beat, peaks, length):
@@ -89,8 +91,11 @@ def get_pseudo_signal(beat, peaks, length):
     Create a pseudo beat by repeating the average beat and aligning it with the peaks.
     """
     x_old = np.linspace(0, 1, len(beat))
-    pseudo_signal = fill_with_beat(beat, int(peaks[0]), length - int(peaks[-1]), length)
+    if peaks is None or len(peaks) == 0:
+        pseudo_signal = np.tile(beat, (length // len(beat) + 1))[:length]
+        return pseudo_signal
 
+    pseudo_signal = fill_with_beat(beat, int(peaks[0]), length - int(peaks[-1]), length)
     f = interp1d(x_old, beat, kind='linear', fill_value="extrapolate")
     for i in range(len(peaks) - 1):
         pseudo_signal[peaks[i]:peaks[i + 1]] = f(np.linspace(0, 1, peaks[i + 1] - peaks[i]))
@@ -127,7 +132,7 @@ def correct_signal(signal, pseudo_signal, k=2):
     signal_clean = pseudo_signal + alpha * residual
     return signal_clean
 
-def get_peaks(signal, beat_period, height_percentile=80, distance_tolerance=0.6):
+def get_peaks(signal, beat_period, height_percentile=80, distance_tolerance=0.8):
     """
     Get peaks of the signal using a robust method based on the beat period.
     """
@@ -140,9 +145,10 @@ def get_peaks(signal, beat_period, height_percentile=80, distance_tolerance=0.6)
         height=min_peak_height,
         distance=min_peak_distance
     )
+
     return peaks
 
-def correct_branch_signal_with_heartbeat(signal, beat_period, k=2):
+def correct_branch_signal_with_heartbeat(signal, beat_period, k=2, distance_tolerance=0.8, use_peaks=True):
     """Correct the signal using heartbeat-based correction.
     Parameters
     ----------
@@ -152,6 +158,10 @@ def correct_branch_signal_with_heartbeat(signal, beat_period, k=2):
         The estimated period of the heartbeat in samples.
     k : float
         Tuning parameter for the soft rejection (default: 2).
+    distance_tolerance : float
+        Tolerance for peak distance (default: 0.8).
+    use_peaks : bool
+        Whether to use peaks for correction (default: True).
 
     Returns
     -------
@@ -159,17 +169,21 @@ def correct_branch_signal_with_heartbeat(signal, beat_period, k=2):
         The corrected signal.
     """
     signal_length = len(signal)
-    peaks = get_peaks(signal, beat_period)
-    beats = get_beats(signal, peaks, target_len=signal_length)
-    average_beat = np.nanmedian(beats, axis=0)
+    if use_peaks:
+        peaks = get_peaks(signal, beat_period, distance_tolerance=distance_tolerance)
+        beats = get_beats(signal, peaks, target_len=signal_length)
+        average_beat = np.nanmedian(beats, axis=0)
+    else:
+        peaks = None
+        average_beat, beat_period = get_cycle_template(signal, beat_period, return_period=True)
 
-    pseudo_signal = get_pseudo_signal(average_beat, peaks, signal_length)
+    pseudo_signal = get_pseudo_signal(average_beat, peaks=peaks, length=signal_length)
     corrected_signal = correct_signal(signal, pseudo_signal, k=k)
     return corrected_signal
 
-def remove_bad_beats(signal, video, beat_period, threshold=0.5):
+def remove_bad_beats(signal, video, beat_period, threshold=0.5, distance_tolerance=0.8):
     """Remove frames on the video corresponding to bad beats from the signal based on correlation with the average beat."""
-    peaks = get_peaks(signal, beat_period)
+    peaks = get_peaks(signal, beat_period, distance_tolerance=distance_tolerance)
     beats = get_beats(signal, peaks)
     median_beat = np.nanmedian(beats, axis=0)
 
@@ -235,26 +249,23 @@ def _select_minmax(signals_n, gradient_n, idx0):
 
     return s_idx, locs_n
 
-def compute_idx0(signals_n, sampling_frequency,
+def compute_period(signal, sampling_frequency,
                  fmin=0.5, fmax=2.0):
     """
     Robust estimation of cardiac period (idx0)
     """
 
-    num_frames = signals_n.shape[1]
-
-    # --- Robust average ---
-    avg_signal = np.median(signals_n, axis=0)
+    num_frames = len(signal)
 
     # --- Detrend ---
-    avg_signal = detrend(avg_signal, type='linear')
+    signal = detrend(signal, type='linear')
 
     # --- Windowing ---
     window = np.hanning(num_frames)
-    avg_signal = avg_signal * window
+    signal = signal * window
 
     # --- FFT ---
-    Y = np.fft.rfft(avg_signal)
+    Y = np.fft.rfft(signal)
     P = np.abs(Y)**2
 
     # --- Frequency vector ---
@@ -281,7 +292,7 @@ def compute_idx0(signals_n, sampling_frequency,
     return idx0
 
 
-def check_validity(signal, sampling_frequency):
+def check_validity(signal, sampling_frequency, beat_period=None):
     """
     CHECK_VALIDITY  Check if a temporal signal is periodic and not noise.
 
@@ -381,34 +392,92 @@ def get_filtered_branch_signals(video, labeled_vessels, sampling_frequency):
 
     return signals
 
+def get_cycle_template(signal, sampling_freq, return_period=False):
+    beat_period = compute_period(signal, sampling_freq)
+    n_cycles = len(signal)//beat_period
+
+    cycles = signal[:n_cycles*beat_period].reshape(
+        n_cycles,
+        beat_period
+    )
+    result = np.average(cycles, axis=0)
+    if return_period:
+        return result, beat_period
+    return result
+
+def compute_z(template):
+    template = template - np.mean(template)
+
+    H1 = np.fft.rfft(template)[1]
+
+    if np.abs(H1) < 1e-12:
+        return np.nan + 1j*np.nan
+
+    return H1 / np.abs(H1)
+
+def get_nb_of_positive_peaks(signal, beat_period):
+    gradient = np.gradient(signal)
+    # --- find peaks in |gradient| ---
+    peaks, properties = find_peaks(
+        np.abs(gradient),
+        distance=int(0.8 * beat_period),
+        prominence=1e-6   # helps avoid spurious peaks
+    )
+
+    # values of gradient at peak positions
+    peaks_v = gradient[peaks]
+
+    # count positive peaks
+    return np.sum(peaks_v > 0)
+
 
 def compute_pre_masks(signals, labeled_vessels, sampling_frequency):
     """
     Compute a preliminary artery mask based on pulse analysis of the video frames within the vessel mask
     """
 
-    idx0 = compute_idx0(signals, sampling_frequency)
-    s_idx, _ = select_regular_peaks(signals, "minmax", idx0)
+    # --- Compute median heartbeat template for each branch ---
+    cycle_templates = [get_cycle_template(branch, sampling_frequency, return_period=True) for branch in signals]
+    templates, periods = zip(*cycle_templates)
+    z = np.array([compute_z(template) for template in templates])
+    X = np.column_stack([
+        np.real(z),
+        np.imag(z)
+    ])
 
-    is_pure = np.array([check_validity(sig, sampling_frequency) for sig in signals])
-    if not is_pure.any():
-        is_pure[:] = True
+    # --- Cluster branches based on heartbeat template shape ---
+    labels = KMeans(
+        n_clusters=2,
+        random_state=0
+    ).fit_predict(X)
 
-    # Step 4: Combine into artery / vein masks
-    pre_mask_artery = np.zeros_like(labeled_vessels, bool)
-    pre_mask_vein = np.zeros_like(labeled_vessels, bool)
+    cluster0 = np.where(labels == 0)[0]
+    cluster1 = np.where(labels == 1)[0]
 
-    num_branches = labeled_vessels.max()
+    mask0 = np.isin(labeled_vessels, cluster0+1)
+    mask1 = np.isin(labeled_vessels, cluster1+1)
 
-    for i in range(1, num_branches+1):
-        if not is_pure[i-1]:
-            continue
-        if s_idx[i-1] == 1:
-            pre_mask_artery |= labeled_vessels == i
-        else:
-            pre_mask_vein |= labeled_vessels == i
+    cluster0_period = np.median(np.array(periods)[cluster0], axis=0)
+    cluster1_period = np.median(np.array(periods)[cluster1], axis=0)
 
-    return pre_mask_artery, pre_mask_vein
+    cluster0_signal = np.median(signals[cluster0], axis=0)
+    cluster1_signal = np.median(signals[cluster1], axis=0)
+
+    # --- Classify based on number of positive peaks in the median heartbeat ---
+    cluster0_peaks = get_nb_of_positive_peaks(cluster0_signal, cluster0_period)
+    cluster1_peaks = get_nb_of_positive_peaks(cluster1_signal, cluster1_period)
+
+    if cluster0_peaks > cluster1_peaks:
+        mask_artery = mask0
+        mask_vein = mask1
+        labels = np.where(labels == 0, 0, 1)  # artery=0, vein=1
+    else:
+        mask_artery = mask1
+        mask_vein = mask0
+        labels = np.where(labels == 0, 1, 0)  # artery=1, vein=0
+
+    return mask_artery, mask_vein, labels, z
+
 
 # ================================ Correlation ============================================== #
 
@@ -653,8 +722,6 @@ def compute_diasys(video, pulse_artery, sampling_frequency, pulse_vein=None):
 def compute_diasys_image(video, pulse_artery, sampling_frequency, pulse_vein=None):
     M0_Systole_img, M0_Diastole_img, sysindexes, diasindexes = compute_diasys(video, pulse_artery, sampling_frequency=sampling_frequency, pulse_vein=pulse_vein)
 
-    sys = image_utils.normalize_image(M0_Systole_img)
-    dias = image_utils.normalize_image(M0_Diastole_img)
-    diasys_image = image_utils.normalize_image(sys - dias)
-    return diasys_image, sysindexes, diasindexes
+    diasys_image = M0_Systole_img - M0_Diastole_img
+    return diasys_image, sysindexes, diasindexes, M0_Systole_img, M0_Diastole_img
  

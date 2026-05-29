@@ -7,10 +7,6 @@ from skimage.morphology import skeletonize, disk
 from skimage.measure import label
 from skimage.segmentation import watershed, find_boundaries
 from scipy.ndimage import distance_transform_edt, binary_dilation, convolve
-from skimage import morphology
-from scipy.ndimage import rotate
-from skimage.measure import label
-from skimage import exposure
 
 import logging
 logger = logging.getLogger(__name__)

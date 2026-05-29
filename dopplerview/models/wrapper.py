@@ -4,13 +4,9 @@ Supports .pt (state_dict recommended) and .onnx.
 """
 
 from abc import ABC, abstractmethod
-from email.mime import image
 import numpy as np
-import torch
-import onnxruntime as ort
 from dopplerview.utils.image_utils import normalize_to_uint8
 import cv2
-
 
 class BaseModelWrapper(ABC):
     def __init__(self, spec, model_path):
@@ -69,10 +65,9 @@ class BaseModelWrapper(ABC):
     @abstractmethod
     def _forward(self, x):
         pass
-
-
 class TorchModelWrapper(BaseModelWrapper):
     def __init__(self, spec, model_path, device=None):
+        import torch
         super().__init__(spec, model_path)
 
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
@@ -96,15 +91,17 @@ class TorchModelWrapper(BaseModelWrapper):
         self.model.to(self.device)
         self.model.eval()
 
-    @torch.no_grad()
     def _forward(self, x):
-        x = torch.from_numpy(x).float().unsqueeze(0).to(self.device)
-        y = self.model(x)
-        return y.cpu().numpy()
+        import torch
+        with torch.no_grad():
+            x = torch.from_numpy(x).float().unsqueeze(0).to(self.device)
+            y = self.model(x)
+            return y.cpu().numpy()
 
 
 class ONNXModelWrapper(BaseModelWrapper):
     def __init__(self, spec, model_path):
+        import onnxruntime as ort
         super().__init__(spec, model_path)
 
         providers = (

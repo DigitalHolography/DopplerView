@@ -6,6 +6,9 @@ from abc import ABC
 
 import logging
 
+from dopplerview._version import __version__
+
+
 class BaseStep(ABC):
     """
     Base class for pipeline steps.
@@ -32,7 +35,8 @@ class BaseStep(ABC):
 
         payload = {
             "config": self._relevant_config(ctx),
-            "inputs": self._input_signature(ctx)
+            "inputs": self._input_signature(ctx),
+            "version": __version__
         }
 
         serialized = json.dumps(payload, sort_keys=True, default=str)
@@ -57,14 +61,17 @@ class BaseStep(ABC):
             return hashlib.sha256(val.tobytes()).hexdigest()
         return str(val)
     
-    def export(self, ctx):
+    def export(self, ctx, debug_mode=False):
         """
         Export step outputs using the output manager.
         """
         for key in self.produces:
             if ctx.has(key):
-                ctx.output_manager.save(self.name, key, ctx)
-    
+                ctx.output_manager.save_async(self.name, key, ctx)
+
+        if debug_mode:
+            ctx.output_manager.cache_async(ctx)
+
 class NestedStep(BaseStep):
     substeps: List[BaseStep] = []
 

@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 from huggingface_hub import hf_hub_download
-from dopplerview.models.wrapper import TorchModelWrapper, ONNXModelWrapper
+from dopplerview.models.wrapper import ONNXModelWrapper, TorchModelWrapper
 
 import logging
 logger = logging.getLogger(__name__)
