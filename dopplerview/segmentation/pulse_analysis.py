@@ -249,11 +249,59 @@ def _select_minmax(signals_n, gradient_n, idx0):
 
     return s_idx, locs_n
 
+# def compute_idx0(signals_n, sampling_frequency,
+#                  fmin=0.5, fmax=2.0):
+#     """
+#     Robust estimation of cardiac period (idx0)
+#     """
+
+#     num_frames = signals_n.shape[1]
+
+#     # --- Robust average ---
+#     avg_signal = np.median(signals_n, axis=0)
+
+#     # --- Detrend ---
+#     avg_signal = detrend(avg_signal, type='linear')
+
+#     # --- Windowing ---
+#     window = np.hanning(num_frames)
+#     avg_signal = avg_signal * window
+
+#     # --- FFT ---
+#     Y = np.fft.rfft(avg_signal)
+#     P = np.abs(Y)**2
+
+#     # --- Frequency vector ---
+#     f = np.fft.rfftfreq(num_frames, d=1/sampling_frequency)
+
+#     # --- Physiological band ---
+#     mask = (f > fmin) & (f < fmax)
+#     f_sel = f[mask]
+#     P_sel = P[mask]
+
+#     if len(P_sel) == 0 or np.sum(P_sel) == 0:
+#         return None
+
+#     # --- Smooth spectrum ---
+#     P_sel = gaussian_filter1d(P_sel, sigma=2)
+
+#     # --- Weighted frequency (robust) ---
+#     f0 = np.sum(f_sel * P_sel) / np.sum(P_sel)
+
+#     # --- Convert to index ---
+#     t0 = 1 / f0
+#     idx0 = int(round(t0 * sampling_frequency))
+
+#     return idx0
+
 def compute_period(signal, sampling_frequency,
                  fmin=0.5, fmax=2.0):
     """
     Robust estimation of cardiac period (idx0)
     """
+    signal = np.squeeze(signal)
+    if len(signal.shape) == 2:
+        signal = np.median(signal, axis=0)
 
     num_frames = len(signal)
 
