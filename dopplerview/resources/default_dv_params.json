@@ -12,7 +12,7 @@
     "ForcedMasks": -1,
     "VesselSegmentationMethod": "AI",
     "DiaphragmRadius": 0.45,
-    "CropChoroidRadius": 0.1,
+    "CenterRadius": 0.1,
     "ForceVesselWidth": false,
     "OpticDiskDetectorMethod": "deep",
     "PreMaskMethod": "clustering",
