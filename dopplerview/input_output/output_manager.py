@@ -21,9 +21,11 @@ class OutputManager:
         schema_path,
         output_config_path
     ):
+        self.schema_path = schema_path
         self.schema = self.load_h5_schema(schema_path)
 
         self.output_dir = None # It will be created when needed
+        self.output_config_path = output_config_path
         self.output_config = self.load_output_config(output_config_path)
 
         self.renderers = {
