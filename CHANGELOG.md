@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.6.0
+* Add parameters for pre-mask method and and branch signal correction
+
 ## 1.5.0
 * Pre-classify branch signals by clustering of their first harmonic feature in the complex domain
 * Fix choroid mask diaphragm removal, by using image center instead of optic disc center

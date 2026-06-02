@@ -478,8 +478,36 @@ def get_nb_of_positive_peaks(signal, beat_period):
     # count positive peaks
     return np.sum(peaks_v > 0)
 
+def compute_pre_masks_by_systolic_gradient(signals, labeled_vessels, sampling_frequency):
+    """
+    Compute a preliminary artery mask based on pulse analysis of the video frames within the vessel mask
+    """
 
-def compute_pre_masks(signals, labeled_vessels, sampling_frequency):
+    idx0 = compute_period(signals, sampling_frequency)
+    s_idx, _ = select_regular_peaks(signals, "minmax", idx0)
+
+    is_pure = np.array([check_validity(sig, sampling_frequency) for sig in signals])
+    if not is_pure.any():
+        is_pure[:] = True
+
+    # Step 4: Combine into artery / vein masks
+    pre_mask_artery = np.zeros_like(labeled_vessels, bool)
+    pre_mask_vein = np.zeros_like(labeled_vessels, bool)
+
+    num_branches = labeled_vessels.max()
+
+    for i in range(1, num_branches+1):
+        if not is_pure[i-1]:
+            continue
+        if s_idx[i-1] == 1:
+            pre_mask_artery |= labeled_vessels == i
+        else:
+            pre_mask_vein |= labeled_vessels == i
+
+    return pre_mask_artery, pre_mask_vein
+
+
+def compute_pre_masks_by_clustering(signals, labeled_vessels, sampling_frequency):
     """
     Compute a preliminary artery mask based on pulse analysis of the video frames within the vessel mask
     """
