@@ -28,6 +28,14 @@ class BaseStep(ABC):
     def run(self, ctx):
         raise NotImplementedError
     
+    def config_fingerprint(self, ctx):
+        """
+        Compute deterministic fingerprint of the step configuration.
+        """
+        relevant_config = self._relevant_config(ctx)
+        serialized = json.dumps(relevant_config, sort_keys=True, default=str)
+        return hashlib.sha256(serialized.encode()).hexdigest()
+    
     def fingerprint(self, ctx):
         """
         Compute deterministic fingerprint of this step.
@@ -70,7 +78,7 @@ class BaseStep(ABC):
                 ctx.output_manager.save_async(self.name, key, ctx)
 
         if debug_mode:
-            ctx.output_manager.cache_async(ctx)
+            ctx.output_manager.cache_async(ctx, self.config_fingerprint(ctx), self.name)
 
 class NestedStep(BaseStep):
     substeps: List[BaseStep] = []
