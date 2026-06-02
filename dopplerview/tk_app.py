@@ -408,11 +408,12 @@ class MainWindow:
 
                 self.step_vars[step] = var
                 self.step_checkboxes[step] = cb
+        self.update_step_display()
 
         # --- Run button ---
         state = "disabled"
         self.btn_run = ttk.Button(frame, text="Run Pipeline", command=self.run_pipelines_with_steps, state=state)
-        self.btn_run.grid(row=row, column=0, pady=5, sticky="ew")
+        self.btn_run.grid(row=row, column=0, pady=5, padx=3, sticky="ew")
         row += 1
 
         # --- Progress bar ---
@@ -625,12 +626,12 @@ class MainWindow:
 
         elif mode == "advanced":
             self.advanced_frame.pack(fill="both", expand=True)
-            self.root.geometry("900x650")
+            self.root.geometry("850x580")
             self.resize_window()
 
     def resize_window(self):
         image_height = self.image_tk.height() if self.image_tk else 0
-        window_height = 650 + image_height  # base height + image height
+        window_height = 580 + image_height  # base height + image height
         self.root.geometry(f"{self.root.winfo_width()}x{window_height}")
 
     def update_step_color(self, step, state):
