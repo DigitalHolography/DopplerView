@@ -23,7 +23,7 @@ class RetinalVesselSegmentationStep(VesselSegmentationStep):
         d = { "VesselSegmentationMethod": params["VesselSegmentationMethod"],
                  "DiaphragmRadius": params["DiaphragmRadius"],
                  "CropChoroidRadius": params["CropChoroidRadius"],
-                 "retinal_vessel_segmentation_model": ctx.get_current_model_for_task(self.name)
+                 "retinal_vessel_segmentation_model": ctx.get_current_model_name_for_task(self.name)
         }
         return d
 

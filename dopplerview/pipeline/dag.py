@@ -197,7 +197,7 @@ class DAGEngine:
         if old_hash != new_hash:
             if self.debug_mode:
                 logger.info(
-                    f"    - Hash mismatch for step '{step.name}' (old: {old_hash}, new: {new_hash}). "
+                    f"    - Hash mismatch for step '{step.name}'. "
                     "Marking for execution."
                 )
             self._mark_invalidated(step.name)
