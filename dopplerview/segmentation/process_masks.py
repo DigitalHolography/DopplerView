@@ -3,7 +3,7 @@ Process binary masks
 """
 
 import numpy as np
-from skimage.morphology import skeletonize, disk
+from skimage.morphology import closing, skeletonize, disk
 from skimage.measure import label
 from skimage.segmentation import watershed, find_boundaries
 from scipy.ndimage import distance_transform_edt, binary_dilation, convolve
@@ -28,7 +28,7 @@ def disk_mask(numX, numY, R1, center=(0.5, 0.5), R2=None):
     if R2 is not None and R1 > R2:
         raise ValueError("R1 must be less than or equal to R2")
 
-    x_center, y_center= center
+    y_center, x_center = center
 
     # normalized grid from 0 to 1
     x = np.linspace(0, 1, numX)
@@ -123,52 +123,85 @@ def get_labeled_vesselness(mask, x_center, y_center, r1=0.1, r2=0.35, numCircles
 
     return labeled_vessels, edges
 
-# mask_diaphragm = process_masks.disk_mask(mask_vessel.shape[0], mask_vessel.shape[1], diaphragm_radius)
-# mask_circle = process_masks.disk_mask(mask_vessel.shape[0], mask_vessel.shape[1], diaphragm_radius, center = (x_center, y_center))
-
-
-# def clean_vessel_mask(mask_vessel, mask_circle=None, mask_diaphragm=None):
-#     if mask_circle is not None:
-#         mask_vessel = mask_vessel & ~mask_circle
-#     largest_connected_components = bwareafilt_largest(
-#             mask_vessel,
-#             connectivity=2  # 8-connectivity
-#         )
-#     if mask_diaphragm is not None:
-#         mask_vessel = mask_vessel & mask_diaphragm
-#     return mask_vessel & largest_connected_components
-
 def clean_vessel_mask(
     raw_mask,
     image_shape,
     optic_disc_center=None,
     diaphragm_radius=None,
-    crop_radius=None,
+    connect_radius=None,
+    tolerance=0,
 ):
+    """
+    Clean vessel mask by:
+      1. Optionally reconnecting vessels through the optic disc.
+      2. Optionally bridging small gaps (tolerance).
+      3. Keeping only the largest connected component.
+      4. Optionally restricting to the diaphragm mask.
+
+    Parameters
+    ----------
+    raw_mask : ndarray[bool]
+        Input vessel mask.
+    image_shape : tuple[int, int]
+        (height, width).
+    optic_disc_center : tuple[int, int], optional
+        Center of the optic disc.
+    diaphragm_radius : int, optional
+        Radius of the diaphragm mask.
+    connect_radius : int, optional
+        Radius added temporarily for connectivity analysis.
+        Defaults to crop_radius if not provided.
+    tolerance : int, default=0
+        Radius (pixels) used for binary closing before
+        connected-component analysis.
+    """
     height, width = image_shape
 
-    if diaphragm_radius is not None:
-        logger.info(f"    - Applying diaphragm mask with radius {diaphragm_radius}")
-        mask_diaphragm = disk_mask(
-            height, width, R1=diaphragm_radius
+    if optic_disc_center is None:
+        optic_disc_center = (width // 2, height // 2)
+
+    connect_mask = None
+
+    connect_mask = disk_mask(
+        height,
+        width,
+        R1=connect_radius,
+        center=optic_disc_center,
+    )
+
+    mask_for_cc = raw_mask.copy()
+
+    if connect_mask is not None:
+        mask_for_cc |= connect_mask
+
+    if tolerance > 0:
+        mask_for_cc = closing(
+            mask_for_cc,
+            footprint=disk(tolerance),
         )
 
-    if crop_radius is not None:
-        optic_disc_center = optic_disc_center if optic_disc_center is not None else (width // 2, height // 2)
-        mask_center = disk_mask(
-            height, width,
-            R1=crop_radius,
-            center=optic_disc_center
-        )
-
-    mask = raw_mask & ~mask_center if crop_radius is not None else raw_mask
+    # Largest connected component
     largest_component = bwareafilt_largest(
-        mask,
+        mask_for_cc,
         connectivity=2,
     )
 
-    clean = raw_mask & largest_component & mask_diaphragm if diaphragm_radius is not None else raw_mask & largest_component
+    # Keep only original vessel pixels
+    clean = raw_mask & largest_component
 
+    # Apply diaphragm mask
+    if diaphragm_radius is not None:
+        diaphragm_mask = disk_mask(
+            height,
+            width,
+            R1=diaphragm_radius,
+        )
+
+        clean &= diaphragm_mask
+
+    # Reconnect vessels through optic disc
+    if connect_mask is not None:
+        clean = clean & ~connect_mask | (raw_mask & connect_mask)
     return clean
 
 def mask_to_bbox(mask):

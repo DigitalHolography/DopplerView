@@ -257,7 +257,7 @@ class OutputManager:
         self.save_h5(key, ctx)
         self.output_cache(step_name, key, ctx)
 
-    def save_overlay(self, step_name, filename, image, artery_mask, vein_mask):
+    def save_overlay(self, step_name, filename, image, artery_mask, vein_mask=None):
         step_dir = self.ensure_step_dir(step_name)
         path = step_dir / f"{filename}.png"
 

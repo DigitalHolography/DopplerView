@@ -5,6 +5,7 @@
 * Add visualization of to-be-processed inputs while highlighting the currently processed input, with a dedicated progress bar 
 * Add parameters for pre-mask method and branch signal correction
 * Take config into account to validate/invalidate cache in debug mode
+* Improve retinal masks cleaning
 
 ## 1.5.0
 * Pre-classify branch signals by clustering of their first harmonic feature in the complex domain

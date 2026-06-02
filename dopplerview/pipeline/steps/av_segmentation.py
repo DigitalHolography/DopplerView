@@ -11,8 +11,8 @@ class AVSegmentationStep(BaseStep):
         params = ctx.dopplerview_config["Mask"]
         return { "AVSegmentationMethod": params.get("AVSegmentationMethod", "AI"),
                     "av_segmentation_model": ctx.get_current_model_for_task(self.name),
-                    "DiaphragmRadius": params["DiaphragmRadius"],
-                    "CropChoroidRadius": params["CropChoroidRadius"]
+                    "DiaphragmRadius": params.get("DiaphragmRadius", 0.45),
+                    "CenterRadius": params.get("CenterRadius", 0.1)
         }
 
     def deep_segmentation(self, ctx):
@@ -34,6 +34,8 @@ class AVSegmentationStep(BaseStep):
     
     def clean_mask(self, raw_mask, ctx):
         optic_disc_center = ctx.require("optic_disc_center")
+        width, height = raw_mask.shape
+        optic_disc_center = (optic_disc_center[0] / width, optic_disc_center[1] / height)
 
         params = ctx.dopplerview_config["Mask"]
 
@@ -41,8 +43,9 @@ class AVSegmentationStep(BaseStep):
             raw_mask,
             image_shape=raw_mask.shape,
             optic_disc_center=optic_disc_center,
-            diaphragm_radius=params["DiaphragmRadius"],
-            crop_radius=params["CropChoroidRadius"],
+            diaphragm_radius=params.get("DiaphragmRadius", 0.45),
+            connect_radius=params.get("CenterRadius", 0.1),
+            tolerance=5
         )
 
         return clean_mask
