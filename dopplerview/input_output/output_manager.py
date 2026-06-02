@@ -95,6 +95,7 @@ class OutputManager:
             if ctx is None:
                 break
             try:
+                # We use the step fingerprint to determine if we need to overwrite the existing cache values for this step or not. If the fingerprint is the same as the one already saved in the h5 file, it means that the configuration and the input for this step haven't changed since the last run, so we can keep the existing cache values. If the fingerprint is different, it means that something has changed since the last run, so we need to overwrite the existing cache values with the new ones.
                 overwrite = False
                 # Save the fingerprint of the step, to re-run the step if the configuration and/or the input change in the future
                 with h5py.File(self.cache_path, "a") as h5:
@@ -109,8 +110,12 @@ class OutputManager:
                     if step_name in h5["metadata"]["step_hashes"]:
                         if h5["metadata"]["step_hashes"][step_name][()] != step_fingerprint:
                             del h5["metadata"]["step_hashes"][step_name]
-                            h5["metadata"]["step_hashes"].create_dataset(step_name, data=step_fingerprint, dtype=h5py.string_dtype())
                             overwrite = True
+                    else:
+                        overwrite = True
+
+                    if overwrite:    
+                        h5["metadata"]["step_hashes"].create_dataset(step_name, data=step_fingerprint, dtype=h5py.string_dtype())
                 # Get the produced values from the context and save them to the h5 file.
                 produced_cache = ctx.get_produced_values()
                 h5_file.write_dict_to_h5(produced_cache, self.cache_path, overwrite=overwrite)

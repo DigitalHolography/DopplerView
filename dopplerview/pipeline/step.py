@@ -78,7 +78,7 @@ class BaseStep(ABC):
                 ctx.output_manager.save_async(self.name, key, ctx)
 
         if debug_mode:
-            ctx.output_manager.cache_async(ctx, self.fingerprint(ctx), self.name)
+            ctx.output_manager.cache_async(ctx, self.config_fingerprint(ctx), self.name)
 
 class NestedStep(BaseStep):
     substeps: List[BaseStep] = []

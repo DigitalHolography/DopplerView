@@ -192,7 +192,7 @@ class DAGEngine:
             self._mark_invalidated(step.name)
             return True
         
-        new_hash = step.fingerprint(ctx)
+        new_hash = step.config_fingerprint(ctx) 
         old_hash = ctx.metadata["step_hashes"].get(step.name)
         if old_hash != new_hash:
             if self.debug_mode:
@@ -289,7 +289,7 @@ class DAGEngine:
             callback("step_done", step.name, elapsed)
 
         step.export(ctx, debug_mode=self.debug_mode)
-        ctx.metadata["step_hashes"][step.name] = step.fingerprint(ctx)
+        ctx.metadata["step_hashes"][step.name] = step.config_fingerprint(ctx)
 
     # ------------------------------------------------------------------
     # Public run interface
