@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.6.0
+* Move configuration in a specific window
+* Add visualization of to-be-processed inputs while highlighting the currently processed input, with a dedicated progress bar 
+
 ## 1.5.0
 * Pre-classify branch signals by clustering of their first harmonic feature in the complex domain
 * Fix choroid mask diaphragm removal, by using image center instead of optic disc center
