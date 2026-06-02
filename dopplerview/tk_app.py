@@ -235,6 +235,7 @@ class MainWindow:
             fg=self._text_fg,
             selectbackground=self._accent_color,
             activestyle="none",
+            exportselection=False,
         )
 
         self.minimal_input_listbox.grid(
@@ -242,6 +243,9 @@ class MainWindow:
             column=0,
             sticky="ew",
         )
+        self.minimal_input_listbox.bind("<Button-1>", lambda e: "break")
+        self.minimal_input_listbox.bind("<B1-Motion>", lambda e: "break")
+        self.minimal_input_listbox.bind("<Key>", lambda e: "break")
 
         minimal_scrollbar = ttk.Scrollbar(
             list_container,
@@ -335,9 +339,12 @@ class MainWindow:
             fg=self._text_fg,
             selectbackground=self._accent_color,
             activestyle="none",
+            exportselection=False,
         )
-
         self.input_listbox.grid(row=0, column=0, sticky="nsew")
+        self.input_listbox.bind("<Button-1>", lambda e: "break")
+        self.input_listbox.bind("<B1-Motion>", lambda e: "break")
+        self.input_listbox.bind("<Key>", lambda e: "break")
 
         scrollbar = ttk.Scrollbar(
             list_container,
