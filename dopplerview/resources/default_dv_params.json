@@ -1,4 +1,4 @@
- {
+{
   "Preprocess": {
     "ReshapeToSquare": true,
     "InterpolationFactor": 1
@@ -6,7 +6,7 @@
   "FlatFieldCorrection": {
     "GWRatio": 0.07,
     "Border": 0.15
-    },
+  },
   "NumberOfWorkers": 0.5,
   "Mask": {
     "ForcedMasks": -1,
@@ -14,11 +14,13 @@
     "DiaphragmRadius": 0.45,
     "CropChoroidRadius": 0.1,
     "ForceVesselWidth": false,
-    "OpticDiskDetectorMethod": "deep"
+    "OpticDiskDetectorMethod": "deep",
+    "PreMaskMethod": "clustering",
+    "CorrectBranchSignals": true
   },
   "VelocityEstimation": {
     "DifferenceMethods": "signed_quadratic",
-    "BackgroundInterpolationMethod" : "scipy_inpainting",
+    "BackgroundInterpolationMethod": "scipy_inpainting",
     "LocalBackgroundDist": 2,
     "LocalBackgroundNeighborhoodWidth": 5,
     "LocalBackgroundInterpolationKernel": 5,
@@ -38,5 +40,5 @@
     "InterpolationPoints": 50
   },
   "DebugMode": false,
-  "Version":1.0
+  "Version": 1.1
 }

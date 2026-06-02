@@ -249,11 +249,59 @@ def _select_minmax(signals_n, gradient_n, idx0):
 
     return s_idx, locs_n
 
+# def compute_idx0(signals_n, sampling_frequency,
+#                  fmin=0.5, fmax=2.0):
+#     """
+#     Robust estimation of cardiac period (idx0)
+#     """
+
+#     num_frames = signals_n.shape[1]
+
+#     # --- Robust average ---
+#     avg_signal = np.median(signals_n, axis=0)
+
+#     # --- Detrend ---
+#     avg_signal = detrend(avg_signal, type='linear')
+
+#     # --- Windowing ---
+#     window = np.hanning(num_frames)
+#     avg_signal = avg_signal * window
+
+#     # --- FFT ---
+#     Y = np.fft.rfft(avg_signal)
+#     P = np.abs(Y)**2
+
+#     # --- Frequency vector ---
+#     f = np.fft.rfftfreq(num_frames, d=1/sampling_frequency)
+
+#     # --- Physiological band ---
+#     mask = (f > fmin) & (f < fmax)
+#     f_sel = f[mask]
+#     P_sel = P[mask]
+
+#     if len(P_sel) == 0 or np.sum(P_sel) == 0:
+#         return None
+
+#     # --- Smooth spectrum ---
+#     P_sel = gaussian_filter1d(P_sel, sigma=2)
+
+#     # --- Weighted frequency (robust) ---
+#     f0 = np.sum(f_sel * P_sel) / np.sum(P_sel)
+
+#     # --- Convert to index ---
+#     t0 = 1 / f0
+#     idx0 = int(round(t0 * sampling_frequency))
+
+#     return idx0
+
 def compute_period(signal, sampling_frequency,
                  fmin=0.5, fmax=2.0):
     """
     Robust estimation of cardiac period (idx0)
     """
+    signal = np.squeeze(signal)
+    if len(signal.shape) == 2:
+        signal = np.median(signal, axis=0)
 
     num_frames = len(signal)
 
@@ -430,8 +478,36 @@ def get_nb_of_positive_peaks(signal, beat_period):
     # count positive peaks
     return np.sum(peaks_v > 0)
 
+def compute_pre_masks_by_systolic_gradient(signals, labeled_vessels, sampling_frequency):
+    """
+    Compute a preliminary artery mask based on pulse analysis of the video frames within the vessel mask
+    """
 
-def compute_pre_masks(signals, labeled_vessels, sampling_frequency):
+    idx0 = compute_period(signals, sampling_frequency)
+    s_idx, _ = select_regular_peaks(signals, "minmax", idx0)
+
+    is_pure = np.array([check_validity(sig, sampling_frequency) for sig in signals])
+    if not is_pure.any():
+        is_pure[:] = True
+
+    # Step 4: Combine into artery / vein masks
+    pre_mask_artery = np.zeros_like(labeled_vessels, bool)
+    pre_mask_vein = np.zeros_like(labeled_vessels, bool)
+
+    num_branches = labeled_vessels.max()
+
+    for i in range(1, num_branches+1):
+        if not is_pure[i-1]:
+            continue
+        if s_idx[i-1] == 1:
+            pre_mask_artery |= labeled_vessels == i
+        else:
+            pre_mask_vein |= labeled_vessels == i
+
+    return pre_mask_artery, pre_mask_vein
+
+
+def compute_pre_masks_by_clustering(signals, labeled_vessels, sampling_frequency):
     """
     Compute a preliminary artery mask based on pulse analysis of the video frames within the vessel mask
     """
