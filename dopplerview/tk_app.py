@@ -49,19 +49,27 @@ class MainWindow:
 
         self._minimal_title_font: tkfont.Font | None = None
 
+        self._config_mtimes = {}
+        self._config = {}
+        self.root.bind("<FocusIn>", self.on_focus)
+
         # --- pipeline init ---
 
         h5_schema_path = user_config.ensure_config_file("h5_schema.json")
+        self.register_config_file(h5_schema_path, "h5_schema")
         output_config_path = user_config.ensure_config_file("output_config.json")
+        self.register_config_file(output_config_path, "output_config")
         self.output_manager = OutputManager(h5_schema_path, output_config_path)
         self.pipeline = Pipeline(output_manager=self.output_manager)
 
         models_config = user_config.ensure_config_file("models.yaml")
         self.pipeline.load_model_registry(models_config)
-        
+        self.register_config_file(models_config, "models_config")
+
         config_path = user_config.ensure_config_file("default_DV_params.json")
         # self.pipeline.load_dopplerview_config(config_path)
         self.config_path = tk.StringVar(value=str(config_path))
+        self.register_config_file(config_path, "dopplerview_config")
 
         self.image_tk = None  # keep reference (IMPORTANT)
 
@@ -292,7 +300,7 @@ class MainWindow:
         self.btn_select_config = ttk.Button(
             self.buttons_frame,
             text="Select config",
-            command=self.load_config
+            command=self.load_dopplerview_config
         )
         self.btn_select_config.grid(row=0, column=1, padx=5, sticky="ew")
 
@@ -580,6 +588,9 @@ class MainWindow:
     # Actions
     # -------------------
 
+    def on_focus(self, event=None):
+        self.check_config_updates()
+
     def on_step_toggle(self, step):
         pipeline = self.pipeline
 
@@ -699,12 +710,47 @@ class MainWindow:
         if file_path:
             self.load_input(list(file_path))
 
-    def load_config(self):
+    # -------------------
+    # Configuration
+    # -------------------
+
+    def load_dopplerview_config(self):
         file_path = filedialog.askopenfilename(filetypes=[("JSON files", "*.json")], defaultextension=".json")
         if file_path:
             self.pipeline.load_dopplerview_config(file_path)
             self.config_path.set(file_path)
-    
+
+    def reload_config(self, path):
+        config_type = self._config.get(path)
+
+        if config_type == "dopplerview_config":
+            self.pipeline.load_dopplerview_config(path)
+
+        elif config_type == "models_config":
+            self.pipeline.load_model_registry(path)
+            self._build_advanced_ui()  # rebuild to update model lists in dropdowns
+
+        elif config_type == "h5_schema":
+            self.output_manager.load_h5_schema(path)
+
+        elif config_type == "output_config":
+            self.output_manager.load_output_config(path)
+
+    def check_config_updates(self):
+        for path, old_mtime in self._config_mtimes.items():
+            try:
+                new_mtime = path.stat().st_mtime
+
+                if new_mtime > old_mtime:
+                    logger.info(f"Configuration changed: {path}")
+
+                    self.reload_config(path)
+
+                    self._config_mtimes[path] = new_mtime
+
+            except Exception:
+                logger.exception(f"Failed checking {path}")
+
     def open_with_default_app(self, path):
         if not os.path.exists(path):
             raise FileNotFoundError(path)
@@ -719,20 +765,15 @@ class MainWindow:
 
     def modify_models_registry(self):
         self.open_with_default_app(self.pipeline.ctx.model_registry_path)
-        self.pipeline.load_model_registry(self.pipeline.ctx.model_registry_path)
-        self._build_advanced_ui()  # rebuild to update model lists in dropdowns
 
     def modify_dopplerview_config(self):
         self.open_with_default_app(self.pipeline.ctx.dopplerview_config_path)
-        self.pipeline.load_dopplerview_config(self.pipeline.ctx.dopplerview_config_path)
 
     def modify_h5_schema(self):
         self.open_with_default_app(self.output_manager.schema_path)
-        self.output_manager.load_h5_schema(self.output_manager.schema_path)
 
     def modify_output_config(self):
         self.open_with_default_app(self.output_manager.output_config_path)
-        self.output_manager.load_output_config(self.output_manager.output_config_path)
 
     def update_config_mode(self):
         mode = self.config_mode_var.get()
@@ -748,6 +789,15 @@ class MainWindow:
             self.pipeline.load_dopplerview_config(config_path)
 
         self.config_path.set(config_path)
+    
+    def register_config_file(self, path, config_type):
+        path = Path(path)
+        self._config_mtimes[path] = path.stat().st_mtime
+        self._config[path] = config_type
+
+    # -------------------
+    # Pipeline execution
+    # -------------------
 
     def get_selected_steps(self):
         return [step for step, var in self.step_vars.items() if var.get()]
