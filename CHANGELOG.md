@@ -1,6 +1,8 @@
 # Changelog
 
 ## 1.6.0
+* Move configuration in a specific window
+* Add visualization of to-be-processed inputs while highlighting the currently processed input, with a dedicated progress bar 
 * Add parameters for pre-mask method and and branch signal correction
 
 ## 1.5.0

@@ -362,12 +362,18 @@ class Pipeline:
         return self.ctx
 
     def run_batch(self, targets=None, callback=None):
-        for input in self.ctx.input_list:
+        if callback:
+            callback("batch_start")
+        for i, input in enumerate(self.ctx.input_list):
             try:
                 logger.info(f"[Run Batch] Processing file: {input}")
                 self.ctx.load_input_folder(input)
                 if callback:
-                    callback("input_loaded")
+                    callback("pipeline_start", i, len(self.ctx.input_list))
                 self.run(targets=targets, callback=callback)
+                if callback:
+                    callback("pipeline_done", i, len(self.ctx.input_list))
             except Exception as e:
                 logger.exception(f"[Run Batch] Error processing file {input}: {e}")
+        if callback:
+            callback("batch_done")
