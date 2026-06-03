@@ -10,7 +10,7 @@ class AVSegmentationStep(BaseStep):
     def _relevant_config(self, ctx):
         params = ctx.dopplerview_config["Mask"]
         return { "AVSegmentationMethod": params.get("AVSegmentationMethod", "AI"),
-                    "av_segmentation_model": ctx.get_current_model_for_task(self.name),
+                    "av_segmentation_model_name": ctx.get_current_model_name_for_task(self.name),
                     "DiaphragmRadius": params.get("DiaphragmRadius", 0.45),
                     "CenterRadius": params.get("CenterRadius", 0.1)
         }
