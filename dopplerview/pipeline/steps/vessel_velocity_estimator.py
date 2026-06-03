@@ -15,8 +15,8 @@ class VesselVelocityEstimatorStep(BaseStep):
 
     def _relevant_config(self, ctx):
         return {
-            "LocalBackgroundDist": ctx.dopplerview_config["VelocityEstimation"]["LocalBackgroundDist"],
-            "NumberOfWorkers": ctx.dopplerview_config["NumberOfWorkers"]
+            "LocalBackgroundDist": ctx.dopplerview_config.get("VelocityEstimation", {}).get("LocalBackgroundDist", 2),
+            "NumberOfWorkers": ctx.dopplerview_config.get("NumberOfWorkers", 0.5)
         }
 
     def run(self, ctx):
@@ -34,10 +34,10 @@ class VesselVelocityEstimatorStep(BaseStep):
         fRMS = np.sqrt(moment2 / mean_m0)
 
         # Inpaint fRMS to estimate background
-        local_background_dist = ctx.dopplerview_config["VelocityEstimation"]["LocalBackgroundDist"]
+        local_background_dist = ctx.dopplerview_config.get("VelocityEstimation", {}).get("LocalBackgroundDist", 2)
         mask = dilation(vessel_mask, disk(local_background_dist)) #TODO add parameter
 
-        n_jobs = ctx.dopplerview_config["NumberOfWorkers"]
+        n_jobs = ctx.dopplerview_config.get("NumberOfWorkers", 0.5)
 
         def _inpaint_frame(frame, mask):
             return inpaint.inpaint_biharmonic(frame, mask)

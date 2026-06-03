@@ -181,11 +181,17 @@ def correct_branch_signal_with_heartbeat(signal, beat_period, k=2, distance_tole
     corrected_signal = correct_signal(signal, pseudo_signal, k=k)
     return corrected_signal
 
-def remove_bad_beats(signal, video, beat_period, threshold=0.5, distance_tolerance=0.8):
+def remove_bad_beats(signal, video, beat_period, threshold=0.5, distance_tolerance=0.8, use_peaks=True):
     """Remove frames on the video corresponding to bad beats from the signal based on correlation with the average beat."""
-    peaks = get_peaks(signal, beat_period, distance_tolerance=distance_tolerance)
-    beats = get_beats(signal, peaks)
-    median_beat = np.nanmedian(beats, axis=0)
+    if use_peaks:
+        signal_length = len(signal)
+        peaks = get_peaks(signal, beat_period, distance_tolerance=distance_tolerance)
+        beats = get_beats(signal, peaks, target_len=signal_length)
+        median_beat = np.nanmedian(beats, axis=0)
+    else:
+        peaks = list(range(0, len(signal), beat_period))
+        beats = get_cycle_templates(signal, beat_period)
+        median_beat = np.nanmedian(beats, axis=0)
 
     # Compute correlation of each beat with the average beat
     correlations = np.array([np.corrcoef(beat, median_beat)[0, 1] for beat in beats])
@@ -440,14 +446,18 @@ def get_filtered_branch_signals(video, labeled_vessels, sampling_frequency):
 
     return signals
 
-def get_cycle_template(signal, sampling_freq, return_period=False):
-    beat_period = compute_period(signal, sampling_freq)
+def get_cycle_templates(signal, beat_period):
     n_cycles = len(signal)//beat_period
 
     cycles = signal[:n_cycles*beat_period].reshape(
         n_cycles,
         beat_period
     )
+    return cycles
+
+def get_cycle_template(signal, sampling_freq, return_period=False):
+    beat_period = compute_period(signal, sampling_freq)
+    cycles = get_cycle_templates(signal, beat_period)
     result = np.average(cycles, axis=0)
     if return_period:
         return result, beat_period

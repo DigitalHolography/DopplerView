@@ -16,7 +16,6 @@ class AVSegmentationStep(BaseStep):
         }
 
     def deep_segmentation(self, ctx):
-        # model_name = ctx.dopplerview_config["models"]["av"]
         model = ctx.get_current_model_for_task(self.name)
 
         input = model.prepare_input(ctx)
