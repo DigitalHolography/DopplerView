@@ -148,7 +148,7 @@ def get_peaks(signal, beat_period, height_percentile=80, distance_tolerance=0.8)
 
     return peaks
 
-def correct_branch_signal_with_heartbeat(signal, beat_period, k=2, distance_tolerance=0.8, use_peaks=True):
+def correct_signal_with_heartbeat(signal, beat_period, k=2, distance_tolerance=0.8, use_peaks=True):
     """Correct the signal using heartbeat-based correction.
     Parameters
     ----------
@@ -803,11 +803,11 @@ def compute_diasys(video, pulse_artery, sampling_frequency, pulse_vein=None):
     # --- Mean images ---
     M0_Systole_img, M0_Diastole_img = np.nanmean(video[sysindexes], axis=0), np.nanmean(video[diasindexes], axis=0), 
 
-    return M0_Systole_img, M0_Diastole_img, sysindexes, diasindexes
+    return M0_Systole_img, M0_Diastole_img, sysindexes, diasindexes, sys_index_list
 
 def compute_diasys_image(video, pulse_artery, sampling_frequency, pulse_vein=None):
-    M0_Systole_img, M0_Diastole_img, sysindexes, diasindexes = compute_diasys(video, pulse_artery, sampling_frequency=sampling_frequency, pulse_vein=pulse_vein)
+    M0_Systole_img, M0_Diastole_img, sysindexes, diasindexes, sys_index_list = compute_diasys(video, pulse_artery, sampling_frequency=sampling_frequency, pulse_vein=pulse_vein)
 
     diasys_image = M0_Systole_img - M0_Diastole_img
-    return diasys_image, sysindexes, diasindexes, M0_Systole_img, M0_Diastole_img
+    return diasys_image, sysindexes, diasindexes, M0_Systole_img, M0_Diastole_img, sys_index_list
  

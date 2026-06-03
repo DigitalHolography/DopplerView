@@ -62,10 +62,8 @@ class PreArteryMaskStep(BaseStep):
 
             self.logger.info(f"    - Median heartbeat period: {beat_period_time:.2f} seconds ({beat_period_frames} frames) -> {bpm:.2f} bpm.")
             corrected_signals = np.zeros_like(signals_n)
-            func = partial(pulse_analysis.correct_branch_signal_with_heartbeat, beat_period=beat_period_frames, k=5)
+            func = partial(pulse_analysis.correct_signal_with_heartbeat, beat_period=beat_period_frames, k=5)
             corrected_signals = run_in_parallel(func, signals_n, n_jobs=ctx.dopplerview_config.get("NumberOfWorkers", 0.5), chunking=False, task_name="branch signal correction")
-            # for i, signal in enumerate(signals_n):
-            #     corrected_signals[i, :] = pulse_analysis.correct_branch_signal_with_heartbeat(signal, beat_period, k=10)
             ctx.set("corrected_signals", corrected_signals)
 
             for i in range(1, labeled_vessels.max() + 1):
@@ -91,7 +89,7 @@ class PreArteryMaskStep(BaseStep):
 
 class ComputeTemporalCuesStep(BaseStep):
     requires = {"M0_ff_video", "pre_artery_mask", "choroidal_vessel_mask"}
-    produces = {"correlation", "diasys_image", "pre_arterial_pulse", "choroidal_pulse", "pre_arterial_pulse_filtered", "choroidal_pulse_filtered", "pre_arterial_pulse_cleaned", "pre_venous_pulse", "pre_venous_pulse_filtered", "M0_ff_image_cleaned", "beat_period", "systole_image", "diastole_image"}
+    produces = {"correlation", "diasys_image", "pre_arterial_pulse", "choroidal_pulse", "pre_arterial_pulse_filtered", "choroidal_pulse_filtered", "pre_arterial_pulse_cleaned", "pre_venous_pulse", "pre_venous_pulse_filtered", "M0_ff_image_cleaned", "beat_period", "systole_image", "diastole_image", "systole_index_list"}
     name = "temporal_cues"
 
     def _relevant_config(self, ctx):
@@ -156,15 +154,14 @@ class ComputeTemporalCuesStep(BaseStep):
         correlation_artery = signal_processing.compute_correlation(video_cleaned, arterial_pulse_cleaned)
         ctx.set("correlation", correlation_artery)
         ctx.output_manager.output("pulse_analysis", f"correlation map RGB", correlation_artery, "image", options={"blue_gray_red": True, "M0_ff_image": M0_ff_image_cleaned})
-        # correlation_vein = pulse_analysis.compute_correlation(video, venous_pulse_filtered)
-        # ctx.set("correlation_vein", correlation_vein)
 
         # --- Accumulate frames at the systolic and diastolic peaks of the filtered pulses ---
 
-        diasys, sysindexes, diasindexes, systole, diastole = pulse_analysis.compute_diasys_image(video_cleaned, arterial_pulse_cleaned, sampling_frequency)
+        diasys, sysindexes, diasindexes, systole, diastole, sys_index_list = pulse_analysis.compute_diasys_image(video_cleaned, arterial_pulse_cleaned, sampling_frequency)
         ctx.output_manager.output("pulse_analysis", f"diasys image RGB", diasys, "image", options={"blue_gray_red": True, "M0_ff_image": M0_ff_image_cleaned})
         ctx.output_manager.output("pulse_analysis", f"diasys plot", (arterial_pulse_cleaned, sysindexes), "signal", options={"scatter": True})
 
+        ctx.set("systole_index_list", sys_index_list)
         ctx.set("diasys_image", diasys)
         ctx.set("systole_image", systole)
         ctx.set("diastole_image", diastole)
