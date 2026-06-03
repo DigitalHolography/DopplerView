@@ -1,10 +1,13 @@
 # Changelog
 
 ## 1.6.0
-* Move configuration in a specific window, and allow dynamic modification of config files
-* Add visualization of to-be-processed inputs while highlighting the currently processed input, with a dedicated progress bar 
+* GUI
+    * Move configuration in a specific window, and allow dynamic modification of config files
+    * Add visualization of to-be-processed inputs while highlighting the currently processed input, with a dedicated progress bar 
+* CLI
+    * Take config into account to validate/invalidate cache in debug mode
+* Add version.txt at DV_folder root
 * Add parameters for pre-mask method and branch signal correction
-* Take config into account to validate/invalidate cache in debug mode
 * Improve retinal masks cleaning
 
 ## 1.5.0
