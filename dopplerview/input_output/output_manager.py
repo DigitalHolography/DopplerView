@@ -5,6 +5,7 @@ from pathlib import Path
 import cv2
 import h5py
 from dopplerview.input_output import h5_file
+from dopplerview._version import __version__
 import dopplerview.utils.json_utils as json_utils
 import dopplerview.input_output.output_renderer as output_renderer
 import matplotlib.pyplot as plt
@@ -159,6 +160,14 @@ class OutputManager:
         with open(config_path, "w") as f:
             json.dump(self.dopplerview_config, f)
 
+    def write_version_file(self):
+        self.dopplerview_folder.version_file.write_text(__version__)
+        if self.output_dir is None:
+            raise ValueError("Output directory is not set. Cannot write version file.")
+        
+        output_version_path = self.output_dir / "version.txt"
+        output_version_path.write_text(__version__)
+
     def set_dopplerview_config(self, config):
         self.dopplerview_config = config
 
@@ -183,6 +192,7 @@ class OutputManager:
         if self.output_dir is None:
             self.output_dir = self.dopplerview_folder.create_output_folder()
             self.write_dopplerview_config()
+            self.write_version_file()
             logger.info(f"[OutputManager] Created output folder: {self.output_dir}")
 
 
