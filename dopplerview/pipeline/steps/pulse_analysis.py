@@ -37,11 +37,10 @@ class PreArteryMaskStep(BaseStep):
 
         fs = ctx.holodoppler_config.get("sampling_freq", 37.037)
         stride = ctx.holodoppler_config.get("batch_stride", 256)
-        self.logger.info(f"    - Camera sampling frequency: {fs} Hz, batch stride: {stride}")
 
         sampling_frequency = pulse_analysis.get_effective_sampling_frequency(fs, stride)
-
-        self.logger.info(f"    - Effective sampling frequency after accounting for batch stride: {sampling_frequency:.2f} Hz")
+        
+        self.logger.info(f"    - Camera sampling frequency: {fs} Hz, batch stride: {stride}. Effective sampling frequency after accounting for batch stride: {sampling_frequency:.2f} Hz                                            ")
 
         # --- Step 1: Separate mask into branches ---
         labeled_vessels, _ = process_masks.get_labeled_vesselness(vessel_mask, *optic_disc_center)
@@ -57,11 +56,13 @@ class PreArteryMaskStep(BaseStep):
         # --- Step 3: Correct signals by aligning with median heartbeat ---
         correct_branch_signals = ctx.dopplerview_config.get("Mask").get("CorrectBranchSignals", True)
         if correct_branch_signals:
-            beat_period = pulse_analysis.compute_period(signals_n, sampling_frequency)
+            beat_period_frames = pulse_analysis.compute_period(signals_n, sampling_frequency)
+            beat_period_time = beat_period_frames / sampling_frequency
+            bpm = 60 / beat_period_time
 
-            self.logger.info("    - Sampling frequency: {:.2f} Hz, Beat period: {:.2f} seconds".format(sampling_frequency, beat_period))
+            self.logger.info(f"    - Median heartbeat period: {beat_period_time:.2f} seconds ({beat_period_frames} frames) -> {bpm:.2f} bpm.")
             corrected_signals = np.zeros_like(signals_n)
-            func = partial(pulse_analysis.correct_branch_signal_with_heartbeat, beat_period=beat_period, k=5)
+            func = partial(pulse_analysis.correct_branch_signal_with_heartbeat, beat_period=beat_period_frames, k=5)
             corrected_signals = run_in_parallel(func, signals_n, n_jobs=ctx.dopplerview_config["NumberOfWorkers"], chunking=False, task_name="branch signal correction")
             # for i, signal in enumerate(signals_n):
             #     corrected_signals[i, :] = pulse_analysis.correct_branch_signal_with_heartbeat(signal, beat_period, k=10)
@@ -128,10 +129,13 @@ class ComputeTemporalCuesStep(BaseStep):
 
         # --- Remove bad beats from arterial pulse by comparing to median beat pattern ---
 
-        beat_period = pulse_analysis.compute_period(arterial_pulse_filtered, sampling_frequency)
-        ctx.set("beat_period", beat_period)
+        beat_period_frames = pulse_analysis.compute_period(arterial_pulse_filtered, sampling_frequency)
+        ctx.set("beat_period", beat_period_frames)
+        beat_period_time = beat_period_frames / sampling_frequency
+        bpm = 60 / beat_period_time
+        self.logger.info(f"    - Arterial heartbeat period: {beat_period_time:.2f} seconds ({beat_period_frames} frames) -> {bpm:.2f} bpm.")
 
-        arterial_pulse_cleaned, video_cleaned, beat_signal, median_beat, peaks = pulse_analysis.remove_bad_beats(arterial_pulse_filtered, video, beat_period, threshold=0.8)
+        arterial_pulse_cleaned, video_cleaned, beat_signal, median_beat, peaks = pulse_analysis.remove_bad_beats(arterial_pulse_filtered, video, beat_period_frames, threshold=0.8)
         ctx.set("pre_arterial_pulse_cleaned", arterial_pulse_cleaned)
 
         M0_ff_image_cleaned = image_utils.normalize_to_uint8(np.mean(video_cleaned, axis=0))

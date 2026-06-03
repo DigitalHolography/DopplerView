@@ -190,6 +190,10 @@ def lab_duo_image(image_1, image_2, h=45):
         ry = np.sign(sin_h)
         rx = np.sign(cos_h) * (1 / (sin_h**2) - 1)
 
+    v = np.array([rx, ry], dtype=float)
+    v /= np.linalg.norm(v)
+    rx, ry = v
+
     image_1 = image_1.astype(np.float32)
     image_2 = image_2.astype(np.float32)
 
@@ -205,8 +209,8 @@ def lab_duo_image(image_1, image_2, h=45):
     L = 100.0 * image_1
     chroma = image_2 / (np.max(image_2) + 1e-8)
 
-    a = 100 * chroma * rx
-    b = 100 * chroma * ry
+    a = 80 * chroma * rx
+    b = 80 * chroma * ry
 
     lab = np.stack([L, a, b], axis=-1)
 

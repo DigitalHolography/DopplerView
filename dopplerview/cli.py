@@ -84,7 +84,7 @@ def main():
     else:
         config_mode = args.config_mode if args.config_mode else "default"
         pipeline.set_config_mode(config_mode)
-        logger.info(f"No configuration file provided. Using {config_mode} configuration.")
+        logger.info(f"[CLI] No configuration file provided. Using {config_mode} configuration.")
         if config_mode == "default":
             config_path = user_config.ensure_config_file("default_DV_params.json")
             pipeline.load_dopplerview_config(config_path)

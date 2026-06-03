@@ -297,7 +297,7 @@ def _select_minmax(signals_n, gradient_n, idx0):
 def compute_period(signal, sampling_frequency,
                  fmin=0.5, fmax=2.0):
     """
-    Robust estimation of cardiac period (idx0)
+    Robust estimation of cardiac period in number of frames
     """
     signal = np.squeeze(signal)
     if len(signal.shape) == 2:
@@ -335,9 +335,9 @@ def compute_period(signal, sampling_frequency,
 
     # --- Convert to index ---
     t0 = 1 / f0
-    idx0 = int(round(t0 * sampling_frequency))
+    period_frames = int(round(t0 * sampling_frequency))
 
-    return idx0
+    return period_frames
 
 
 def check_validity(signal, sampling_frequency, beat_period=None):
