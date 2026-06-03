@@ -11,7 +11,7 @@
     "CenterRadius": 0.1,
     "OpticDiskDetectorMethod": "deep",
     "PreMaskMethod": "clustering",
-    "CorrectBranchSignals": true
+    "CorrectBranchSignals": false
   },
   "VelocityEstimation": {
     "LocalBackgroundDist": 2

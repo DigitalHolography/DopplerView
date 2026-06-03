@@ -12,13 +12,9 @@ class PreprocessStep(BaseStep):
 
     def _relevant_config(self, ctx):
         return {
-            # "Preprocess": {
-            #     "Register": ctx.dopplerview_config["Preprocess"]["Register"],
-            #     "Crop": ctx.dopplerview_config["Preprocess"]["Crop"]
-            # },
-            "NumberOfWorkers": ctx.dopplerview_config["NumberOfWorkers"],
+            "NumberOfWorkers": ctx.dopplerview_config.get("NumberOfWorkers", 0.5),
             "FlatFieldCorrection": {
-                "GWRatio": ctx.dopplerview_config["FlatFieldCorrection"]["GWRatio"]
+                "GWRatio": ctx.dopplerview_config.get("FlatFieldCorrection", {}).get("GWRatio", 0.07),
             }
         }
 
@@ -55,8 +51,8 @@ class PreprocessStep(BaseStep):
 
         # Step 1: Normalize 
         self.logger.info("    - Applying flat field correction to the moments")
-        gaussian_std = ctx.dopplerview_config['FlatFieldCorrection']['GWRatio']
-        n_jobs = ctx.dopplerview_config["NumberOfWorkers"]
+        gaussian_std = ctx.dopplerview_config.get("FlatFieldCorrection", {}).get("GWRatio", 0.07)
+        n_jobs = ctx.dopplerview_config.get("NumberOfWorkers", 0.5)
         M0_ff_video, M1_ff_video, M2_ff_video = self.normalize(gaussian_std, moment0, moment1, moment2, n_jobs=n_jobs)
 
         # # Step 2: Resize

@@ -375,15 +375,16 @@ class Pipeline:
         if callback:
             callback("batch_start")
         for i, input in enumerate(self.ctx.input_list):
+            logger.info(f"[Run Batch] Processing file: {input}")
             try:
-                logger.info(f"[Run Batch] Processing file: {input}")
                 self.ctx.load_input_folder(input)
-                if callback:
-                    callback("pipeline_start", i, len(self.ctx.input_list))
-                self.run(targets=targets, callback=callback)
-                if callback:
-                    callback("pipeline_done", i, len(self.ctx.input_list))
             except Exception as e:
-                logger.exception(f"[Run Batch] Error processing file {input}: {e}")
+                logger.exception(f"[Run Batch] Error loading input folder {input}: {e}")
+                continue
+            if callback:
+                callback("pipeline_start", i, len(self.ctx.input_list))
+            self.run(targets=targets, callback=callback)
+            if callback:
+                callback("pipeline_done", i, len(self.ctx.input_list))
         if callback:
             callback("batch_done")
