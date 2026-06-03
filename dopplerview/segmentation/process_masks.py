@@ -85,7 +85,7 @@ def get_labeled_vesselness(mask, x_center, y_center, r1=0.1, r2=0.35, numCircles
 
     # Skeletonize and remove central circle
     skel = skeletonize(mask)
-    circle_mask = disk_mask(numX, numY, R1=r1, center=(y_center / numY, x_center/ numX))
+    circle_mask = disk_mask(numX, numY, R1=r1, center=(x_center / numY, y_center/ numX))
     skel = skel & ~circle_mask
 
     # Remove branch points
