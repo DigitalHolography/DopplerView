@@ -110,8 +110,9 @@ class Context:
         
         logger.info(f"[Pipeline] Reading cache from {h5_cache_path}")
 
-        cache = h5_file.read_h5_to_dict(h5_cache_path)
+        cache, metadata = h5_file.read_h5_to_dict(h5_cache_path)
         self._init_cache(cache)
+        self.metadata.update(metadata)
 
     def ensure_directory(self, path):
         path = Path(path)
@@ -234,14 +235,23 @@ class Context:
         with self.lock:
             self.__cache[key] = (self.__cache[key][0], 'cached')
     
-    def export_cache(self, filepath):
-        cache = {}
-        with self.cache_lock:
-            for key, (value, status) in self.__cache.items():
-                if status == 'produced':  # Only export values that were produced and not yet cached
-                    cache[key] = value
-                    self.cache_value(key)  # Mark as cached after exporting
-        h5_file.write_dict_to_h5(cache, filepath, overwrite=False)
+    def cache_values(self, keys):
+        for key in keys:
+            if key in self.__cache and self.__cache[key][1] != 'cached':
+                self.cache_value(key)
+
+    def get_produced_values(self):
+        with self.lock:
+            return dict([(key, value) for key, (value, status) in self.__cache.items() if status == 'produced'])
+    
+    # def export_cache(self, filepath):
+    #     cache = {}
+    #     with self.cache_lock:
+    #         for key, (value, status) in self.__cache.items():
+    #             if status == 'produced':  # Only export values that were produced and not yet cached
+    #                 cache[key] = value
+    #                 self.cache_value(key)  # Mark as cached after exporting
+    #     h5_file.write_dict_to_h5(cache, filepath, overwrite=False)
 
 class Pipeline:
     def __init__(self, output_manager, debug_mode=False):
@@ -362,12 +372,19 @@ class Pipeline:
         return self.ctx
 
     def run_batch(self, targets=None, callback=None):
-        for input in self.ctx.input_list:
+        if callback:
+            callback("batch_start")
+        for i, input in enumerate(self.ctx.input_list):
+            logger.info(f"[Run Batch] Processing file: {input}")
             try:
-                logger.info(f"[Run Batch] Processing file: {input}")
                 self.ctx.load_input_folder(input)
-                if callback:
-                    callback("input_loaded")
-                self.run(targets=targets, callback=callback)
             except Exception as e:
-                logger.exception(f"[Run Batch] Error processing file {input}: {e}")
+                logger.exception(f"[Run Batch] Error loading input folder {input}: {e}")
+                continue
+            if callback:
+                callback("pipeline_start", i, len(self.ctx.input_list))
+            self.run(targets=targets, callback=callback)
+            if callback:
+                callback("pipeline_done", i, len(self.ctx.input_list))
+        if callback:
+            callback("batch_done")

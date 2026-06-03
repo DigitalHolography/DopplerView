@@ -1,42 +1,20 @@
- {
-  "Preprocess": {
-    "ReshapeToSquare": true,
-    "InterpolationFactor": 1
-  },
+{
   "FlatFieldCorrection": {
     "GWRatio": 0.07,
     "Border": 0.15
-    },
+  },
   "NumberOfWorkers": 0.5,
   "Mask": {
     "ForcedMasks": -1,
     "VesselSegmentationMethod": "AI",
     "DiaphragmRadius": 0.45,
-    "CropChoroidRadius": 0.1,
-    "ForceVesselWidth": false,
-    "OpticDiskDetectorMethod": "deep"
+    "CenterRadius": 0.1,
+    "OpticDiskDetectorMethod": "deep",
+    "PreMaskMethod": "clustering",
+    "CorrectBranchSignals": false
   },
   "VelocityEstimation": {
-    "DifferenceMethods": "signed_quadratic",
-    "BackgroundInterpolationMethod" : "scipy_inpainting",
-    "LocalBackgroundDist": 2,
-    "LocalBackgroundNeighborhoodWidth": 5,
-    "LocalBackgroundInterpolationKernel": 5,
-    "Lambda": 8.52E-7,
-    "Phi": 0.25
+    "LocalBackgroundDist": 2
   },
-  "PeripapillaryVascularZone": {
-    "InnerRadius": 0.10,
-    "OuterRadius": 0.35
-  },
-  "PeripapillaryRingAnalysis": {
-    "RingsNumber": 10,
-    "RingsWidth": -1
-  },
-  "VesselSizeEstimation": {
-    "ProfileFitTresholdRatio": 0.1,
-    "InterpolationPoints": 50
-  },
-  "DebugMode": false,
-  "Version":1.0
+  "Version": 1.1
 }

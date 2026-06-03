@@ -8,7 +8,7 @@ class EyeLateralityClassificationStep(BaseStep):
     name = "eye_laterality_classification"
 
     def _relevant_config(self, ctx):
-        return {}
+        return {"eye_laterality_classification_model": ctx.get_current_model_name_for_task(self.name)}
     
     def classify(self, ctx):
         model = ctx.get_current_model_for_task(self.name)

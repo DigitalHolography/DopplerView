@@ -4,10 +4,10 @@
             "vessel_mask": "retinal_vessel_mask",
             "labeled_vessels": "labeled_vessels",
             "vessel_segmentation_logits": "vessel_segmentation_logits",
-            "artery_mask": "retinal_artery_mask",
-            "vein_mask": "retinal_vein_mask",
-            "artery_mask_clean": "retinal_artery_mask_clean",
-            "vein_mask_clean": "retinal_vein_mask_clean"
+            "artery_mask": "retinal_artery_mask_clean",
+            "vein_mask": "retinal_vein_mask_clean",
+            "raw_artery_mask": "retinal_artery_mask",
+            "raw_vein_mask": "retinal_vein_mask"
         },
         "Choroid": {
             "vessel_mask": "choroidal_vessel_mask",
@@ -26,7 +26,9 @@
             "M0_vessel_branch": "branch_signals",
             "pre_arterial_pulse": "pre_arterial_pulse",
             "pre_arterial_pulse_filtered": "pre_arterial_pulse_filtered",
-            "pre_arterial_pulse_cleaned": "pre_arterial_pulse_cleaned"
+            "pre_arterial_pulse_cleaned": "pre_arterial_pulse_cleaned",
+            "pre_arterial_beat_period": "beat_period",
+            "systole_index_list": "systole_index_list"
         },
         "Choroid": {}
     },

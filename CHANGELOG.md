@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.6.0
+* GUI
+    * Move configuration in a specific window, and allow dynamic modification of config files
+    * Add visualization of to-be-processed inputs while highlighting the currently processed input, with a dedicated progress bar 
+* CLI
+    * Take config into account to validate/invalidate cache in debug mode
+* Add version.txt at DV_folder root
+* Add parameters for pre-mask method and branch signal correction
+* Improve retinal masks cleaning
+
 ## 1.5.0
 * Pre-classify branch signals by clustering of their first harmonic feature in the complex domain
 * Fix choroid mask diaphragm removal, by using image center instead of optic disc center

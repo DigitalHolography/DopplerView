@@ -21,9 +21,9 @@ class RetinalVesselSegmentationStep(VesselSegmentationStep):
     def _relevant_config(self, ctx):
         params = ctx.dopplerview_config["Mask"]
         d = { "VesselSegmentationMethod": params["VesselSegmentationMethod"],
-                 "DiaphragmRadius": params["DiaphragmRadius"],
-                 "CropChoroidRadius": params["CropChoroidRadius"],
-                 "retinal_vessel_segmentation_model": ctx.get_current_model_for_task(self.name)
+                 "DiaphragmRadius": params.get("DiaphragmRadius", 0.45),
+                 "CenterRadius": params.get("CenterRadius", 0.1),
+                 "retinal_vessel_segmentation_model": ctx.get_current_model_name_for_task(self.name)
         }
         return d
 
@@ -48,17 +48,19 @@ class RetinalVesselSegmentationStep(VesselSegmentationStep):
         return mask
     
     def clean_vessel_mask(self, raw_mask, ctx):
-        image = ctx.require("M0_ff_image")
         optic_disc_center = ctx.require("optic_disc_center")
+        width, height = raw_mask.shape
+        optic_disc_center = (optic_disc_center[0] / width, optic_disc_center[1] / height)
 
         params = ctx.dopplerview_config["Mask"]
 
         clean_mask = clean_vessel_mask(
             raw_mask,
-            image_shape=image.shape,
+            image_shape=raw_mask.shape,
             optic_disc_center=optic_disc_center,
-            diaphragm_radius=params["DiaphragmRadius"],
-            crop_radius=params["CropChoroidRadius"],
+            diaphragm_radius=params.get("DiaphragmRadius", 0.45),
+            connect_radius=params.get("CenterRadius", 0.1),
+            tolerance=0
         )
 
         return clean_mask
@@ -91,7 +93,7 @@ class ChoroidalVesselSegmentationStep(VesselSegmentationStep):
 
     def _relevant_config(self, ctx):
         params = ctx.dopplerview_config["Mask"]
-        d = {"DiaphragmRadius": params["DiaphragmRadius"],}
+        d = {"DiaphragmRadius": params.get("DiaphragmRadius", 0.45), "CenterRadius": params.get("CenterRadius", 0.1)}
         return d
 
     def frangi_segmentation(self, ctx):
@@ -106,7 +108,7 @@ class ChoroidalVesselSegmentationStep(VesselSegmentationStep):
     def clean_vessel_mask(self, raw_mask, ctx):
         params = ctx.dopplerview_config["Mask"]
 
-        diaphragm_radius = params["DiaphragmRadius"]
+        diaphragm_radius = params.get("DiaphragmRadius", 0.45)
         h, w = raw_mask.shape
         mask_diaphragm = disk_mask(h, w, diaphragm_radius)
 

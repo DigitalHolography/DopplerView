@@ -85,6 +85,10 @@ class DopplerViewFolder():
 
         self.dopplerview_config = self.get_dopplerview_config()
 
+        self.version_file = self.directory / "version.txt"
+        if not self.version_file.exists():
+            self.version_file.touch()
+
     def get_cache_folder(self):
         return self.cache_folder
 

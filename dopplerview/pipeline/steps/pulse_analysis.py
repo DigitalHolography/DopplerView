@@ -1,7 +1,8 @@
 from dopplerview.pipeline.step import BaseStep, NestedStep
 from dopplerview.segmentation import process_masks, pulse_analysis, signal_processing
 import dopplerview.utils.image_utils as image_utils
-
+from dopplerview.utils.parallelization_utils import run_in_parallel
+from functools import partial
 
 import numpy as np
 
@@ -16,15 +17,17 @@ class PulseAnalysisStep(NestedStep):
         super().__init__()
             
 class PreArteryMaskStep(BaseStep):
-    requires = {"M0_ff_video", "retinal_vessel_mask", "optic_disc_center"}
+    requires = {"M0_ff_video", "retinal_vessel_mask", "optic_disc_center", }
     produces = {"labeled_vessels", "pre_artery_mask", "branch_signals", "pre_vein_mask"}
     name = "pre_artery_mask"
 
     def _relevant_config(self, ctx):
         return {
-            "sampling_freq": ctx.holodoppler_config["sampling_freq"],
-            "batch_stride": ctx.holodoppler_config["batch_stride"],
-            "NumberOfWorkers": ctx.dopplerview_config["NumberOfWorkers"]
+            "sampling_freq": ctx.holodoppler_config.get("sampling_freq", 37037),
+            "batch_stride": ctx.holodoppler_config.get("batch_stride", 256),
+            "NumberOfWorkers": ctx.dopplerview_config.get("NumberOfWorkers", 0.5),
+            "PreMaskMethod": ctx.dopplerview_config.get("Mask").get("PreMaskMethod", "clustering"),
+            "CorrectBranchSignals": ctx.dopplerview_config.get("Mask").get("CorrectBranchSignals", True),
             }
 
     def run(self, ctx):
@@ -32,13 +35,12 @@ class PreArteryMaskStep(BaseStep):
         vessel_mask = ctx.get("retinal_vessel_mask")
         optic_disc_center = ctx.get("optic_disc_center")
 
-        fs = ctx.holodoppler_config["sampling_freq"]
-        stride = ctx.holodoppler_config["batch_stride"]
-        self.logger.info(f"    - Camera sampling frequency: {fs} Hz, batch stride: {stride}")
+        fs = ctx.holodoppler_config.get("sampling_freq", 37037)
+        stride = ctx.holodoppler_config.get("batch_stride", 256)
 
         sampling_frequency = pulse_analysis.get_effective_sampling_frequency(fs, stride)
-
-        self.logger.info(f"    - Effective sampling frequency after accounting for batch stride: {sampling_frequency:.2f} Hz")
+        
+        self.logger.info(f"    - Camera sampling frequency: {fs} Hz, batch stride: {stride}. Effective sampling frequency after accounting for batch stride: {sampling_frequency:.2f} Hz                                            ")
 
         # --- Step 1: Separate mask into branches ---
         labeled_vessels, _ = process_masks.get_labeled_vesselness(vessel_mask, *optic_disc_center)
@@ -51,33 +53,48 @@ class PreArteryMaskStep(BaseStep):
         signals_n = (signals - signals.mean(axis=1, keepdims=True)) / signals.std(axis=1, keepdims=True)
         ctx.set("branch_signals", signals_n)
 
-        # # --- Step 3: Correct signals by aligning with median heartbeat ---
-        # self.logger.info("    - Sampling frequency: {:.2f} Hz, Beat period: {:.2f} seconds".format(sampling_frequency, beat_period))
-        # corrected_signals = np.zeros_like(signals_n)
-        # func = partial(pulse_analysis.correct_branch_signal_with_heartbeat, beat_period=beat_period, k=5)
-        # corrected_signals = run_in_parallel(func, signals_n, n_jobs=ctx.dopplerview_config["NumberOfWorkers"], chunking=False, task_name="branch signal correction")
-        # # for i, signal in enumerate(signals_n):
-        # #     corrected_signals[i, :] = pulse_analysis.correct_branch_signal_with_heartbeat(signal, beat_period, k=10)
-        # ctx.set("corrected_signals", corrected_signals)
+        # --- Step 3: Correct signals by aligning with median heartbeat ---
+        correct_branch_signals = ctx.dopplerview_config.get("Mask").get("CorrectBranchSignals", True)
+        if correct_branch_signals:
+            beat_period_frames = pulse_analysis.compute_period(signals_n, sampling_frequency)
+            beat_period_time = beat_period_frames / sampling_frequency
+            bpm = 60 / beat_period_time
 
-        # for i in range(1, labeled_vessels.max() + 1):
-        #     ctx.output_manager.output("pulse_analysis", f"branch_{i}_corrected", (signals_n[i - 1, :], corrected_signals[i - 1, :]), "signal", options={"multiple_signals": True, "legend": ["Original Signal", "Corrected Signal"]})
+            self.logger.info(f"    - Median heartbeat period: {beat_period_time:.2f} seconds ({beat_period_frames} frames) -> {bpm:.2f} bpm.")
+            corrected_signals = np.zeros_like(signals_n)
+            func = partial(pulse_analysis.correct_signal_with_heartbeat, beat_period=beat_period_frames, k=5)
+            corrected_signals = run_in_parallel(func, signals_n, n_jobs=ctx.dopplerview_config.get("NumberOfWorkers", 0.5), chunking=False, task_name="branch signal correction")
+            ctx.set("corrected_signals", corrected_signals)
+
+            for i in range(1, labeled_vessels.max() + 1):
+                ctx.output_manager.output("pulse_analysis", f"branch_{i}_corrected", (signals_n[i - 1, :], corrected_signals[i - 1, :]), "signal", options={"multiple_signals": True, "legend": ["Original Signal", "Corrected Signal"]})
+
+            signals_n = corrected_signals
 
         # --- Step 4: Pre-classify arteries and veins using systolic gradient ---
-        pre_artery_mask, pre_vein_mask, labels, z = pulse_analysis.compute_pre_masks(signals_n, labeled_vessels, sampling_frequency)
-        ctx.output_manager.save_clusterization("pulse_analysis", "pre_mask_clusterization", labels, z)
+        pre_mask_method = ctx.dopplerview_config.get("Mask").get("PreMaskMethod", "clustering")
+        if pre_mask_method not in ["clustering", "gradient"]:
+            self.logger.info(f"Warning: Invalid PreMaskMethod {pre_mask_method}, defaulting to clustering.")
+            pre_mask_method = "clustering"
+        if pre_mask_method == "clustering":
+            self.logger.info("    - Pre-classifying arteries and veins using clustering on the first harmonic of branch signals in the complex domain")
+            pre_artery_mask, pre_vein_mask, labels, z = pulse_analysis.compute_pre_masks_by_clustering(signals_n, labeled_vessels, sampling_frequency)
+            ctx.output_manager.save_clusterization("pulse_analysis", "pre_mask_clusterization", labels, z)
+        elif pre_mask_method == "gradient":
+            self.logger.info("    - Pre-classifying arteries and veins using systolic gradient")
+            pre_artery_mask, pre_vein_mask = pulse_analysis.compute_pre_masks_by_systolic_gradient(signals_n, labeled_vessels, sampling_frequency)
         ctx.output_manager.save_overlay("pulse_analysis", "av_overlay_pre_masks", ctx.require("M0_ff_image"), pre_artery_mask, pre_vein_mask)
         ctx.set("pre_artery_mask", pre_artery_mask)
         ctx.set("pre_vein_mask", pre_vein_mask)
 
 class ComputeTemporalCuesStep(BaseStep):
     requires = {"M0_ff_video", "pre_artery_mask", "choroidal_vessel_mask"}
-    produces = {"correlation", "diasys_image", "pre_arterial_pulse", "choroidal_pulse", "pre_arterial_pulse_filtered", "choroidal_pulse_filtered", "pre_arterial_pulse_cleaned", "pre_venous_pulse", "pre_venous_pulse_filtered", "M0_ff_image_cleaned", "beat_period", "systole_image", "diastole_image"}
+    produces = {"correlation", "diasys_image", "pre_arterial_pulse", "choroidal_pulse", "pre_arterial_pulse_filtered", "choroidal_pulse_filtered", "pre_arterial_pulse_cleaned", "pre_venous_pulse", "pre_venous_pulse_filtered", "M0_ff_image_cleaned", "beat_period", "systole_image", "diastole_image", "systole_index_list"}
     name = "temporal_cues"
 
     def _relevant_config(self, ctx):
-        return {"sampling_freq": ctx.holodoppler_config["sampling_freq"],
-                "batch_stride": ctx.holodoppler_config["batch_stride"]}
+        return {"sampling_freq": ctx.holodoppler_config.get("sampling_freq", 37037),
+                "batch_stride": ctx.holodoppler_config.get("batch_stride", 256)}
 
     def run(self, ctx):
         video = ctx.require("M0_ff_video")
@@ -96,8 +113,8 @@ class ComputeTemporalCuesStep(BaseStep):
 
         # --- Filter pulses to remove high frequency noise ---
 
-        fs = ctx.holodoppler_config["sampling_freq"]
-        stride = ctx.holodoppler_config["batch_stride"]
+        fs = ctx.holodoppler_config.get("sampling_freq", 37037)
+        stride = ctx.holodoppler_config.get("batch_stride", 256)
 
         sampling_frequency = pulse_analysis.get_effective_sampling_frequency(fs, stride)
 
@@ -110,34 +127,41 @@ class ComputeTemporalCuesStep(BaseStep):
 
         # --- Remove bad beats from arterial pulse by comparing to median beat pattern ---
 
-        beat_period = pulse_analysis.compute_period(arterial_pulse_filtered, sampling_frequency)
-        ctx.set("beat_period", beat_period)
+        beat_period_frames = pulse_analysis.compute_period(arterial_pulse_filtered, sampling_frequency)
+        ctx.set("beat_period", beat_period_frames)
+        beat_period_time = beat_period_frames / sampling_frequency
+        bpm = 60 / beat_period_time
+        self.logger.info(f"    - Arterial heartbeat period: {beat_period_time:.2f} seconds ({beat_period_frames} frames) -> {bpm:.2f} bpm.")
 
-        arterial_pulse_cleaned, video_cleaned, beat_signal, median_beat, peaks = pulse_analysis.remove_bad_beats(arterial_pulse_filtered, video, beat_period, threshold=0.8)
-        ctx.set("pre_arterial_pulse_cleaned", arterial_pulse_cleaned)
+        if len(arterial_pulse_filtered) // beat_period_frames < 3 :
+            self.logger.warning(f"    - Not enough beats detected in arterial pulse for reliable outlier removal (only {len(arterial_pulse_filtered) // beat_period_frames} beat(s) detected). Skipping beat cleaning.")
+            arterial_pulse_cleaned = arterial_pulse_filtered
+            video_cleaned = video
+        else:
+            arterial_pulse_cleaned, video_cleaned, beat_signal, median_beat, peaks = pulse_analysis.remove_bad_beats(arterial_pulse_filtered, video, beat_period_frames, threshold=0.8)
+            ctx.set("pre_arterial_pulse_cleaned", arterial_pulse_cleaned)
+            ctx.output_manager.output("pulse_analysis", f"outlier removal", (arterial_pulse_filtered, beat_signal), "signal", options={"multiple_signals": True, "legend": ["Original Signal", "beat signal"]})
+            ctx.output_manager.output("pulse_analysis", f"median beat", median_beat, "signal")
+            ctx.output_manager.output("pulse_analysis", f"peaks", (arterial_pulse_filtered, peaks), "signal", options={"scatter": True})
 
         M0_ff_image_cleaned = image_utils.normalize_to_uint8(np.mean(video_cleaned, axis=0))
         ctx.set("M0_ff_image_cleaned", M0_ff_image_cleaned)
 
         self.logger.info(f"    - Removed {len(arterial_pulse_filtered) - len(arterial_pulse_cleaned)} frames due to low correlation with median arterial pulse beat pattern")
-        ctx.output_manager.output("pulse_analysis", f"outlier removal", (arterial_pulse_filtered, beat_signal), "signal", options={"multiple_signals": True, "legend": ["Original Signal", "beat signal"]})
-        ctx.output_manager.output("pulse_analysis", f"median beat", median_beat, "signal")
-        ctx.output_manager.output("pulse_analysis", f"peaks", (arterial_pulse_filtered, peaks), "signal", options={"scatter": True})
 
         # --- Compute correlation map with filtered pulses ---
 
         correlation_artery = signal_processing.compute_correlation(video_cleaned, arterial_pulse_cleaned)
         ctx.set("correlation", correlation_artery)
         ctx.output_manager.output("pulse_analysis", f"correlation map RGB", correlation_artery, "image", options={"blue_gray_red": True, "M0_ff_image": M0_ff_image_cleaned})
-        # correlation_vein = pulse_analysis.compute_correlation(video, venous_pulse_filtered)
-        # ctx.set("correlation_vein", correlation_vein)
 
         # --- Accumulate frames at the systolic and diastolic peaks of the filtered pulses ---
 
-        diasys, sysindexes, diasindexes, systole, diastole = pulse_analysis.compute_diasys_image(video_cleaned, arterial_pulse_cleaned, sampling_frequency)
+        diasys, sysindexes, diasindexes, systole, diastole, sys_index_list = pulse_analysis.compute_diasys_image(video_cleaned, arterial_pulse_cleaned, sampling_frequency)
         ctx.output_manager.output("pulse_analysis", f"diasys image RGB", diasys, "image", options={"blue_gray_red": True, "M0_ff_image": M0_ff_image_cleaned})
         ctx.output_manager.output("pulse_analysis", f"diasys plot", (arterial_pulse_cleaned, sysindexes), "signal", options={"scatter": True})
 
+        ctx.set("systole_index_list", sys_index_list)
         ctx.set("diasys_image", diasys)
         ctx.set("systole_image", systole)
         ctx.set("diastole_image", diastole)

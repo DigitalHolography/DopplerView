@@ -4,6 +4,8 @@ from pathlib import Path
 
 import cv2
 import h5py
+from dopplerview.input_output import h5_file
+from dopplerview._version import __version__
 import dopplerview.utils.json_utils as json_utils
 import dopplerview.input_output.output_renderer as output_renderer
 import matplotlib.pyplot as plt
@@ -21,9 +23,11 @@ class OutputManager:
         schema_path,
         output_config_path
     ):
+        self.schema_path = schema_path
         self.schema = self.load_h5_schema(schema_path)
 
         self.output_dir = None # It will be created when needed
+        self.output_config_path = output_config_path
         self.output_config = self.load_output_config(output_config_path)
 
         self.renderers = {
@@ -63,7 +67,7 @@ class OutputManager:
             return
 
         self.output_queue.put((None, None, None))
-        self.cache_queue.put(None)
+        self.cache_queue.put((None, None, None))
 
         if self.output_worker is not None:
             self.output_worker.join()
@@ -88,11 +92,36 @@ class OutputManager:
         """Worker thread that saves the cache to disk asynchronously. It listens on the cache_queue for contexts to save, and calls save_cache on them.
         """
         while self.running:
-            ctx = self.cache_queue.get()
+            ctx, step_fingerprint, step_name = self.cache_queue.get()
             if ctx is None:
                 break
             try:
-                ctx.export_cache(self.cache_path)
+                # We use the step fingerprint to determine if we need to overwrite the existing cache values for this step or not. If the fingerprint is the same as the one already saved in the h5 file, it means that the configuration and the input for this step haven't changed since the last run, so we can keep the existing cache values. If the fingerprint is different, it means that something has changed since the last run, so we need to overwrite the existing cache values with the new ones.
+                overwrite = False
+                # Save the fingerprint of the step, to re-run the step if the configuration and/or the input change in the future
+                with h5py.File(self.cache_path, "a") as h5:
+                    if "metadata" not in h5:
+                        h5.create_group("metadata")
+                        overwrite = True
+                    if "step_hashes" not in h5["metadata"]:
+                        h5["metadata"].create_group("step_hashes")
+                        overwrite = True
+
+                    # If the step already has a saved hash, only update it if it's different from the new hash. This way we can keep track of which steps have changed since the last run, and which haven't.
+                    if step_name in h5["metadata"]["step_hashes"]:
+                        if h5["metadata"]["step_hashes"][step_name][()] != step_fingerprint:
+                            del h5["metadata"]["step_hashes"][step_name]
+                            overwrite = True
+                    else:
+                        overwrite = True
+
+                    if overwrite:    
+                        h5["metadata"]["step_hashes"].create_dataset(step_name, data=step_fingerprint, dtype=h5py.string_dtype())
+                # Get the produced values from the context and save them to the h5 file.
+                produced_cache = ctx.get_produced_values()
+                h5_file.write_dict_to_h5(produced_cache, self.cache_path, overwrite=overwrite)
+                ctx.cache_values(produced_cache.keys())
+
             except Exception as e:
                 logger.exception(f"Error saving cache: {e}")
             self.cache_queue.task_done()
@@ -131,6 +160,14 @@ class OutputManager:
         with open(config_path, "w") as f:
             json.dump(self.dopplerview_config, f)
 
+    def write_version_file(self):
+        self.dopplerview_folder.version_file.write_text(__version__)
+        if self.output_dir is None:
+            raise ValueError("Output directory is not set. Cannot write version file.")
+        
+        output_version_path = self.output_dir / "version.txt"
+        output_version_path.write_text(__version__)
+
     def set_dopplerview_config(self, config):
         self.dopplerview_config = config
 
@@ -155,6 +192,7 @@ class OutputManager:
         if self.output_dir is None:
             self.output_dir = self.dopplerview_folder.create_output_folder()
             self.write_dopplerview_config()
+            self.write_version_file()
             logger.info(f"[OutputManager] Created output folder: {self.output_dir}")
 
 
@@ -213,7 +251,7 @@ class OutputManager:
     def save_async(self, step_name, key, ctx):
         self.output_queue.put((step_name, key, ctx)) 
 
-    def cache_async(self, ctx):
+    def cache_async(self, ctx, step_fingerprint, step_name):
         """Save the 'produced' cache values to disk, using a worker thread. The h5 file is lazily created when the first value is saved."""
         if self.cache_worker is None:
             self.cache_worker = threading.Thread(
@@ -223,13 +261,13 @@ class OutputManager:
             self.cache_worker.start()
             os.makedirs(self.cache_path.parent, exist_ok=True)
             logger.info(f"[OutputManager] Saving cache to {self.cache_path}")
-        self.cache_queue.put(ctx)
+        self.cache_queue.put((ctx, step_fingerprint, step_name))
 
     def save(self, step_name, key, ctx):
         self.save_h5(key, ctx)
         self.output_cache(step_name, key, ctx)
 
-    def save_overlay(self, step_name, filename, image, artery_mask, vein_mask):
+    def save_overlay(self, step_name, filename, image, artery_mask, vein_mask=None):
         step_dir = self.ensure_step_dir(step_name)
         path = step_dir / f"{filename}.png"
 

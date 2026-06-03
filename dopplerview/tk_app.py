@@ -48,21 +48,28 @@ class MainWindow:
         self.root.title("DopplerView")
 
         self._minimal_title_font: tkfont.Font | None = None
-        self.input_folder = tk.StringVar(value="No input selected")
+
+        self._config_mtimes = {}
+        self._config = {}
+        self.root.bind("<FocusIn>", self.on_focus)
 
         # --- pipeline init ---
 
         h5_schema_path = user_config.ensure_config_file("h5_schema.json")
+        self.register_config_file(h5_schema_path, "h5_schema")
         output_config_path = user_config.ensure_config_file("output_config.json")
-        output_manager = OutputManager(h5_schema_path, output_config_path)
-        self.pipeline = Pipeline(output_manager=output_manager)
+        self.register_config_file(output_config_path, "output_config")
+        self.output_manager = OutputManager(h5_schema_path, output_config_path)
+        self.pipeline = Pipeline(output_manager=self.output_manager)
 
         models_config = user_config.ensure_config_file("models.yaml")
         self.pipeline.load_model_registry(models_config)
-        
+        self.register_config_file(models_config, "models_config")
+
         config_path = user_config.ensure_config_file("default_DV_params.json")
         # self.pipeline.load_dopplerview_config(config_path)
         self.config_path = tk.StringVar(value=str(config_path))
+        self.register_config_file(config_path, "dopplerview_config")
 
         self.image_tk = None  # keep reference (IMPORTANT)
 
@@ -75,7 +82,12 @@ class MainWindow:
         self._build_ui()
         self._install_drop_targets()
         self.update_mode()  # set initial mode
+
+        self.config_mode_var = tk.StringVar(value="default")
         self.update_config_mode() # set initial config mode
+
+        self.step_index = 0
+        self.measure_index = 0
 
 
     def _apply_theme(self) -> None:
@@ -137,30 +149,45 @@ class MainWindow:
         container = ttk.Frame(self.root, padding=10)
         container.pack(fill="both", expand=True)
 
-        self.minimal_view = ttk.Frame(container, padding=10)
-        self.advanced_view = ttk.Frame(container, padding=10)
+        self.minimal_frame = ttk.Frame(container, padding=10)
+        self.advanced_frame = ttk.Frame(container, padding=10)
 
         self._build_minimal_ui()
         self._build_advanced_ui()
 
     def _build_menu(self) -> None:
         self.ui_mode_var = tk.StringVar(value="minimal")
+
         menu_bar = tk.Menu(self.root, bg=self._bg_color)
+
         view_menu = tk.Menu(menu_bar, tearoff=False, bg=self._bg_color)
         view_menu.add_radiobutton(
             label="Minimal UI",
             value="minimal",
             variable=self.ui_mode_var,
-            command=lambda: self.update_mode(),
+            command=self.update_mode,
         )
         view_menu.add_radiobutton(
             label="Advanced UI",
             value="advanced",
             variable=self.ui_mode_var,
-            command=lambda: self.update_mode(),
+            command=self.update_mode,
         )
+
         menu_bar.add_cascade(label="View", menu=view_menu)
+
+        config_menu = tk.Menu(menu_bar, tearoff=False, bg=self._bg_color)
+        config_menu.add_command(label="Open Configuration", command=self.show_config)
+        config_menu.add_separator()
+        config_menu.add_command(label="Modify dopplerview config", command=self.modify_dopplerview_config)
+        config_menu.add_command(label="Modify models registry", command=self.modify_models_registry)
+        config_menu.add_command(label="Modify h5 schema", command=self.modify_h5_schema)
+        config_menu.add_command(label="Modify output config", command=self.modify_output_config)
+
+        menu_bar.add_cascade(label="Config", menu=config_menu)
+
         menu_bar.add_command(label="Help", command=self.show_help)
+
         self.root.configure(menu=menu_bar)
 
     def _get_minimal_title_font(self) -> tkfont.Font:
@@ -172,7 +199,7 @@ class MainWindow:
         return self._minimal_title_font
 
     def _build_minimal_ui(self):
-        frame = self.minimal_view
+        frame = self.minimal_frame
 
         container = tk.Frame(frame)
         container.place(relx=0.5, rely=0.5, anchor="center")
@@ -193,16 +220,54 @@ class MainWindow:
         self.btn_load = ttk.Button(container, text="Select .holo file(s)", command=self.load_holo)
         self.btn_load.grid(row=2, column=0, pady=(0, 10))
 
-        self.input_path_label = tk.Label(
-            container,
-            textvariable=self.input_folder,
-            bg=self._bg_color,
-            fg=self._muted_fg,
-            justify="center",
-            wraplength=420,
-        ).grid(row=3, column=0, pady=(0, 10))
+        # -------------------------------------------------
+        # Input measures list
+        # -------------------------------------------------
 
-        state = "disabled" if self.input_folder.get() == "No input selected" else "enabled"
+        list_container = ttk.Frame(container)
+        list_container.grid(
+            row=3,
+            column=0,
+            sticky="ew",
+            pady=(0, 10),
+        )
+
+        list_container.grid_columnconfigure(0, weight=1)
+        list_container.grid_rowconfigure(0, weight=1)
+
+        self.minimal_input_listbox = tk.Listbox(
+            list_container,
+            height=3,
+            width=50,
+            bg=self._surface_color,
+            fg=self._text_fg,
+            selectbackground=self._accent_color,
+            activestyle="none",
+            exportselection=False,
+        )
+
+        self.minimal_input_listbox.grid(
+            row=0,
+            column=0,
+            sticky="ew",
+        )
+        self.minimal_input_listbox.bind("<Button-1>", lambda e: "break")
+        self.minimal_input_listbox.bind("<B1-Motion>", lambda e: "break")
+        self.minimal_input_listbox.bind("<Key>", lambda e: "break")
+
+        minimal_scrollbar = ttk.Scrollbar(
+            list_container,
+            orient="vertical",
+            command=self.minimal_input_listbox.yview,
+        )
+
+        minimal_scrollbar.grid(row=0, column=1, sticky="ns")
+
+        self.minimal_input_listbox.config(
+            yscrollcommand=minimal_scrollbar.set
+        )
+
+        state = "disabled"
         self.btn_run_minimal = ttk.Button(container, text="Run Full Pipeline", command=self.run_full_pipelines, state=state)
         self.btn_run_minimal.grid(row=4, column=0, pady=10)
 
@@ -210,7 +275,7 @@ class MainWindow:
         self.progress_minimal.grid(row=5, column=0, sticky="ew", padx=10, pady=(0, 10))
 
     def _build_advanced_ui(self):
-        frame = self.advanced_view
+        frame = self.advanced_frame
 
         # Make frame expandable
         # Main frame stays 1 column
@@ -235,22 +300,11 @@ class MainWindow:
         self.btn_select_config = ttk.Button(
             self.buttons_frame,
             text="Select config",
-            command=self.load_config
+            command=self.load_dopplerview_config
         )
         self.btn_select_config.grid(row=0, column=1, padx=5, sticky="ew")
 
         row += 1
-
-        # --- Labels (back to full-width single column) ---
-        self.input_path_label = tk.Label(
-            self.buttons_frame,
-            textvariable=self.input_folder,
-            bg=self._bg_color,
-            fg=self._muted_fg,
-            justify="center",
-            wraplength=600,  # increase since now full width
-        )
-        self.input_path_label.grid(row=row, column=0, pady=5, sticky="ew")
 
         self.config_path_label = tk.Label(
             self.buttons_frame,
@@ -263,132 +317,69 @@ class MainWindow:
         self.config_path_label.grid(row=row, column=1, pady=5, sticky="ew")
         row += 1
 
+        # -------------------------------------------------
+        # Input measures panel
+        # -------------------------------------------------
+
+        self.input_panel = tk.LabelFrame(frame, text="Input Measures")
+        self.input_panel.grid(
+            row=row,
+            column=0,
+            padx=5,
+            pady=5,
+            sticky="nsew"
+        )
+
+        self.input_panel.grid_columnconfigure(0, weight=1)
+        self.input_panel.grid_rowconfigure(0, weight=1)
+
+        # Listbox + scrollbar container
+        list_container = ttk.Frame(self.input_panel)
+        list_container.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+
+        list_container.grid_columnconfigure(0, weight=1)
+        list_container.grid_rowconfigure(0, weight=1)
+
+        self.input_listbox = tk.Listbox(
+            list_container,
+            height=6,
+            bg=self._surface_color,
+            fg=self._text_fg,
+            selectbackground=self._accent_color,
+            activestyle="none",
+            exportselection=False,
+        )
+        self.input_listbox.grid(row=0, column=0, sticky="nsew")
+        self.input_listbox.bind("<Button-1>", lambda e: "break")
+        self.input_listbox.bind("<B1-Motion>", lambda e: "break")
+        self.input_listbox.bind("<Key>", lambda e: "break")
+
+        scrollbar = ttk.Scrollbar(
+            list_container,
+            orient="vertical",
+            command=self.input_listbox.yview
+        )
+
+        scrollbar.grid(row=0, column=1, sticky="ns")
+
+        self.input_listbox.config(yscrollcommand=scrollbar.set)
+
+        self.progress_batch = ttk.Progressbar(
+            self.input_panel,
+            maximum=100
+        )
+
+        self.progress_batch.grid(
+            row=1,
+            column=0,
+            sticky="ew",
+            padx=5,
+            pady=(0, 5)
+        )
+
         row += 1
-        # --- Models + Config panel container ---
-        self.middle_frame = tk.Frame(frame, bg=self._bg_color)
-        self.middle_frame.grid(row=row, column=0, padx=5, pady=5, sticky="nsew")
 
-        # Make both columns expand
-        self.middle_frame.grid_columnconfigure(0, weight=1)
-        self.middle_frame.grid_columnconfigure(1, weight=1)
-
-        # -----------------------
-        # LEFT: Models frame
-        # -----------------------
-        self.models_frame = tk.LabelFrame(self.middle_frame, text="Models")
-        self.models_frame.grid(row=0, column=0, padx=5, sticky="nsew")
-        self.models_frame.grid_columnconfigure(0, weight=1)
-
-        # -----------------------
-        # RIGHT: Config panel
-        # -----------------------
-        self.config_panel = tk.LabelFrame(self.middle_frame, text="Configuration")
-        self.config_panel.grid(row=0, column=1, padx=5, sticky="nsew")
-        self.config_panel.grid_columnconfigure(0, weight=1)
-
-        # --- Radio buttons container (2 columns) ---
-        self.radio_frame = tk.Frame(self.config_panel, bg=self._bg_color)
-        self.radio_frame.grid(row=0, column=0, sticky="ew", pady=(0, 5))
-
-        self.radio_frame.grid_columnconfigure(0, weight=1)
-        self.radio_frame.grid_columnconfigure(1, weight=1)
-
-        self.config_mode_var = tk.StringVar(value="default")
-
-        rb_default = tk.Radiobutton(
-            self.radio_frame,
-            text="Use default config",
-            variable=self.config_mode_var,
-            value="default",
-            anchor="w",
-            command=self.update_config_mode,
-        )
-        rb_default.grid(row=0, column=0, sticky="w")
-
-        rb_local = tk.Radiobutton(
-            self.radio_frame,
-            text="Use local config",
-            variable=self.config_mode_var,
-            value="local",
-            anchor="w",
-            command=self.update_config_mode,
-        )
-        rb_local.grid(row=0, column=1, sticky="w")
-
-        # --- Buttons ---
-        self.btn_models_registry = ttk.Button(
-            self.config_panel,
-            text="Modify models registry",
-            command=self.modify_models_registry
-        )
-        self.btn_models_registry.grid(row=2, column=0, sticky="ew", pady=5)
-
-        self.btn_h5_schema = ttk.Button(
-            self.config_panel,
-            text="Modify h5 schema",
-            command=self.modify_h5_schema
-        )
-        self.btn_h5_schema.grid(row=3, column=0, sticky="ew", pady=5)
-
-        self.btn_output_config = ttk.Button(
-            self.config_panel,
-            text="Modify output config",
-            command=self.modify_output_config
-        )
-        self.btn_output_config.grid(row=4, column=0, sticky="ew", pady=5)
-
-        row += 1  # continue main layout after this block
-
-        ctx = self.pipeline.ctx
-        mm = ctx.model_manager
-
-        def create_model_selector(parent, label_text, task_name, r):
-            tk.Label(parent, text=label_text).grid(row=r, column=0, sticky="w")
-
-            values = mm.get_model_name_list_for_task(task_name)
-            var = tk.StringVar(value=values[0] if values else "")
-
-            combo = ttk.Combobox(parent, textvariable=var, values=values, state="readonly")
-            combo.grid(row=r+1, column=0, sticky="ew", pady=2)
-
-            def on_change(event=None):
-                ctx.change_model_for_task(task_name, var.get())
-
-            combo.bind("<<ComboboxSelected>>", on_change)
-
-            if values:
-                ctx.change_model_for_task(task_name, var.get())
-
-            return var, combo, r + 2
-
-        r = 0
-        self.binary_model_var, self.binary_model_combo, r = create_model_selector(
-            self.models_frame,
-            "Binary vessel segmentation model",
-            "retinal_vessel_segmentation",
-            r
-        )
-
-        self.av_model_var, self.av_model_combo, r = create_model_selector(
-            self.models_frame,
-            "Artery/Vein segmentation model",
-            "retinal_artery_vein_segmentation",
-            r
-        )
-
-        self.optic_disc_model_var, self.optic_disc_model_combo, r = create_model_selector(
-            self.models_frame,
-            "Optic disc segmentation model",
-            "optic_disc_segmentation",
-            r
-        )
-
-        self.eye_laterality_model_var, self.eye_laterality_model_combo, r = create_model_selector(
-            self.models_frame,
-            "Eye laterality classification model",
-            "eye_laterality_classification",
-            r
-        )
+        row += 1
 
         # --- Steps frame ---
         self.steps_frame = tk.LabelFrame(frame, text="Pipeline Steps")
@@ -417,11 +408,12 @@ class MainWindow:
 
                 self.step_vars[step] = var
                 self.step_checkboxes[step] = cb
+        self.update_step_display()
 
         # --- Run button ---
-        state = "disabled" if self.input_folder.get() == "No input selected" else "enabled"
+        state = "disabled"
         self.btn_run = ttk.Button(frame, text="Run Pipeline", command=self.run_pipelines_with_steps, state=state)
-        self.btn_run.grid(row=row, column=0, pady=5, sticky="ew")
+        self.btn_run.grid(row=row, column=0, pady=5, padx=3, sticky="ew")
         row += 1
 
         # --- Progress bar ---
@@ -450,9 +442,155 @@ class MainWindow:
         for child in widget.winfo_children():
             self._register_drop_target_tree(child)
 
+    def _populate_configuration_frame(self, parent):
+        parent.grid_columnconfigure(0, weight=1)
+        parent.grid_columnconfigure(1, weight=1)
+
+        # -----------------------
+        # LEFT: Models frame
+        # -----------------------
+        models_frame = tk.LabelFrame(parent, text="Models")
+        models_frame.grid(row=0, column=0, padx=5, pady=5, sticky="nsew")
+        models_frame.grid_columnconfigure(0, weight=1)
+
+        # -----------------------
+        # RIGHT: Config panel
+        # -----------------------
+        config_panel = tk.LabelFrame(parent, text="Configuration")
+        config_panel.grid(row=0, column=1, padx=5, pady=5, sticky="nsew")
+        config_panel.grid_columnconfigure(0, weight=1)
+
+        # --- Radio buttons ---
+        radio_frame = tk.Frame(config_panel, bg=self._bg_color)
+        radio_frame.grid(row=0, column=0, sticky="ew", pady=(0, 5))
+
+        radio_frame.grid_columnconfigure(0, weight=1)
+        radio_frame.grid_columnconfigure(1, weight=1)
+
+        rb_default = tk.Radiobutton(
+            radio_frame,
+            text="Use default config",
+            variable=self.config_mode_var,
+            value="default",
+            anchor="w",
+            command=self.update_config_mode,
+        )
+        rb_default.grid(row=0, column=0, sticky="w")
+
+        rb_local = tk.Radiobutton(
+            radio_frame,
+            text="Use local config",
+            variable=self.config_mode_var,
+            value="local",
+            anchor="w",
+            command=self.update_config_mode,
+        )
+        rb_local.grid(row=0, column=1, sticky="w")
+
+        # --- Buttons ---
+        ttk.Button(
+            config_panel,
+            text="Modify dopplerview config",
+            command=self.modify_dopplerview_config
+        ).grid(row=1, column=0, sticky="ew", pady=5)
+
+        ttk.Button(
+            config_panel,
+            text="Modify models registry",
+            command=self.modify_models_registry
+        ).grid(row=2, column=0, sticky="ew", pady=5)
+
+        ttk.Button(
+            config_panel,
+            text="Modify h5 schema",
+            command=self.modify_h5_schema
+        ).grid(row=3, column=0, sticky="ew", pady=5)
+
+        ttk.Button(
+            config_panel,
+            text="Modify output config",
+            command=self.modify_output_config
+        ).grid(row=4, column=0, sticky="ew", pady=5)
+
+        ctx = self.pipeline.ctx
+        mm = ctx.model_manager
+
+        def create_model_selector(parent_widget, label_text, task_name, r):
+            tk.Label(parent_widget, text=label_text).grid(row=r, column=0, sticky="w")
+
+            values = mm.get_model_name_list_for_task(task_name)
+            var = tk.StringVar(value=values[0] if values else "")
+
+            combo = ttk.Combobox(
+                parent_widget,
+                textvariable=var,
+                values=values,
+                state="readonly"
+            )
+            combo.grid(row=r + 1, column=0, sticky="ew", pady=2)
+
+            def on_change(event=None):
+                ctx.change_model_for_task(task_name, var.get())
+
+            combo.bind("<<ComboboxSelected>>", on_change)
+
+            if values:
+                ctx.change_model_for_task(task_name, var.get())
+
+            return r + 2
+
+        r = 0
+
+        r = create_model_selector(
+            models_frame,
+            "Binary vessel segmentation model",
+            "retinal_vessel_segmentation",
+            r,
+        )
+
+        r = create_model_selector(
+            models_frame,
+            "Artery/Vein segmentation model",
+            "retinal_artery_vein_segmentation",
+            r,
+        )
+
+        r = create_model_selector(
+            models_frame,
+            "Optic disc segmentation model",
+            "optic_disc_segmentation",
+            r,
+        )
+
+        r = create_model_selector(
+            models_frame,
+            "Eye laterality classification model",
+            "eye_laterality_classification",
+            r,
+        )
+
+    def show_config(self):
+        if hasattr(self, "config_window") and self.config_window.winfo_exists():
+            self.config_window.lift()
+            self.config_window.focus_force()
+            return
+
+        self.config_window = tk.Toplevel(self.root)
+        self.config_window.title("DopplerView Configuration")
+        self.config_window.geometry("600x240")
+        self.config_window.configure(bg=self._bg_color)
+
+        container = ttk.Frame(self.config_window, padding=10)
+        container.pack(fill="both", expand=True)
+
+        self._populate_configuration_frame(container)
+
     # -------------------
     # Actions
     # -------------------
+
+    def on_focus(self, event=None):
+        self.check_config_updates()
 
     def on_step_toggle(self, step):
         pipeline = self.pipeline
@@ -479,20 +617,21 @@ class MainWindow:
     def update_mode(self):
         mode = self.ui_mode_var.get()
 
-        self.minimal_view.pack_forget()
-        self.advanced_view.pack_forget()
+        self.minimal_frame.pack_forget()
+        self.advanced_frame.pack_forget()
 
         if mode == "minimal":
-            self.minimal_view.pack(fill="both", expand=True)
+            self.minimal_frame.pack(fill="both", expand=True)
             self.root.geometry("600x400")
-        else:
-            self.advanced_view.pack(fill="both", expand=True)
-            self.root.geometry("900x650")
+
+        elif mode == "advanced":
+            self.advanced_frame.pack(fill="both", expand=True)
+            self.root.geometry("850x580")
             self.resize_window()
 
     def resize_window(self):
         image_height = self.image_tk.height() if self.image_tk else 0
-        window_height = 650 + image_height  # base height + image height
+        window_height = 580 + image_height  # base height + image height
         self.root.geometry(f"{self.root.winfo_width()}x{window_height}")
 
     def update_step_color(self, step, state):
@@ -532,6 +671,7 @@ class MainWindow:
         self.cleanup_image()
         self.progress["value"] = 0
         self.progress_minimal["value"] = 0
+        self.progress_batch["value"] = 0
         self.pipeline.ctx.clear_input_list()
 
         if isinstance(folders, str):
@@ -544,23 +684,74 @@ class MainWindow:
         # if folder_list[0].suffix == ".holo":
         #     self.pipeline.ctx.load_input_folder(folder_list[0])  # load first by default, pipeline will handle the rest in batch mode
         # self.config_path.set(self.pipeline.ctx.dopplerview_config_path)
-        self.input_folder.set(self.pipeline.ctx.input_list)
         self.update_step_display()
 
         self.btn_run.config(state="enabled")
         self.btn_run_minimal.config(state="enabled")
-        
+
+        self.refresh_input_listbox()
+
+    def refresh_input_listbox(self):
+        # Advanced UI list
+        if hasattr(self, "input_listbox"):
+            self.input_listbox.delete(0, tk.END)
+
+            for path in self.pipeline.ctx.input_list:
+                self.input_listbox.insert(tk.END, str(path))
+
+        # Minimal UI list
+        if hasattr(self, "minimal_input_listbox"):
+            self.minimal_input_listbox.delete(0, tk.END)
+
+            for path in self.pipeline.ctx.input_list:
+                self.minimal_input_listbox.insert(tk.END, str(path))
+
     def load_holo(self):
         file_path = filedialog.askopenfilenames(filetypes=[("Holo files", "*.holo")], defaultextension=".holo")
         if file_path:
             self.load_input(list(file_path))
 
-    def load_config(self):
+    # -------------------
+    # Configuration
+    # -------------------
+
+    def load_dopplerview_config(self):
         file_path = filedialog.askopenfilename(filetypes=[("JSON files", "*.json")], defaultextension=".json")
         if file_path:
             self.pipeline.load_dopplerview_config(file_path)
             self.config_path.set(file_path)
-    
+
+    def reload_config(self, path):
+        config_type = self._config.get(path)
+
+        if config_type == "dopplerview_config":
+            self.pipeline.load_dopplerview_config(path)
+
+        elif config_type == "models_config":
+            self.pipeline.load_model_registry(path)
+            self._build_advanced_ui()  # rebuild to update model lists in dropdowns
+
+        elif config_type == "h5_schema":
+            self.output_manager.load_h5_schema(path)
+
+        elif config_type == "output_config":
+            self.output_manager.load_output_config(path)
+
+    def check_config_updates(self):
+        for path, old_mtime in self._config_mtimes.items():
+            try:
+                new_mtime = path.stat().st_mtime
+
+                if new_mtime > old_mtime:
+                    logger.info(f"Configuration changed: {path}")
+
+                    self.reload_config(path)
+
+                    self._config_mtimes[path] = new_mtime
+
+            except Exception:
+                logger.exception(f"Failed checking {path}")
+
     def open_with_default_app(self, path):
         if not os.path.exists(path):
             raise FileNotFoundError(path)
@@ -575,16 +766,15 @@ class MainWindow:
 
     def modify_models_registry(self):
         self.open_with_default_app(self.pipeline.ctx.model_registry_path)
-        self.pipeline.load_model_registry(self.pipeline.ctx.model_registry_path)
-        self._build_advanced_ui()  # rebuild to update model lists in dropdowns
+
+    def modify_dopplerview_config(self):
+        self.open_with_default_app(self.pipeline.ctx.dopplerview_config_path)
 
     def modify_h5_schema(self):
-        self.open_with_default_app(self.pipeline.ctx.h5_schema_path)
-        self.pipeline.load_h5_schema(self.pipeline.ctx.h5_schema_path)
+        self.open_with_default_app(self.output_manager.schema_path)
 
     def modify_output_config(self):
-        self.open_with_default_app(self.pipeline.ctx.output_config_path)
-        self.pipeline.load_output_config(self.pipeline.ctx.output_config_path)
+        self.open_with_default_app(self.output_manager.output_config_path)
 
     def update_config_mode(self):
         mode = self.config_mode_var.get()
@@ -600,6 +790,15 @@ class MainWindow:
             self.pipeline.load_dopplerview_config(config_path)
 
         self.config_path.set(config_path)
+    
+    def register_config_file(self, path, config_type):
+        path = Path(path)
+        self._config_mtimes[path] = path.stat().st_mtime
+        self._config[path] = config_type
+
+    # -------------------
+    # Pipeline execution
+    # -------------------
 
     def get_selected_steps(self):
         return [step for step, var in self.step_vars.items() if var.get()]
@@ -661,18 +860,40 @@ class MainWindow:
         try:
             while True:
                 event, data = self.queue.get_nowait()
-                if event == "input_loaded":
-                    self.progress["value"] = 0
-                    self.progress_minimal["value"] = 0
+                if event == "pipeline_start":
 
                     self.config_path.set(self.pipeline.ctx.dopplerview_config_path) # refresh config path
 
-                elif event == "step_start":
-                    step_name, i, total = data
+                    i, total = data
+                    self.measure_index = i
+                    self.input_listbox.selection_clear(0, tk.END)
+                    self.minimal_input_listbox.selection_clear(0, tk.END)
+
+                    if i < self.input_listbox.size():
+                        self.input_listbox.selection_set(i)
+                        self.input_listbox.activate(i)
+                        self.input_listbox.see(i)
+
+                    if i < self.minimal_input_listbox.size():
+                        self.minimal_input_listbox.selection_set(i)
+                        self.minimal_input_listbox.activate(i)
+                        self.minimal_input_listbox.see(i)
+
+                    self.progress["value"] = 0
                     progress = (i / total) * 100
-                    self.progress["value"] = progress
+                    self.progress_batch["value"] = progress
                     self.progress_minimal["value"] = progress
 
+                elif event == "batch_start":
+                    self.progress_batch["value"] = 0
+
+                elif event == "step_start":
+                    step_name, i, total = data
+                    step_ratio = i / total
+                    measure_ratio = self.measure_index / len(self.pipeline.ctx.input_list)
+                    self.progress["value"] = step_ratio * 100
+
+                    self.progress_minimal["value"] = measure_ratio * 100 + step_ratio * 100 / len(self.pipeline.ctx.input_list)
                     self.update_step_color(step_name, "running")
 
                 elif event == "step_done":
@@ -684,14 +905,17 @@ class MainWindow:
                     step_name = data[0]
                     self.update_step_color(step_name, "cached")
 
-                elif event == "finished":
+                elif event == "pipeline_done":
                     self.progress["value"] = 100
                     self.btn_run.config(state="enabled")
 
-                    self.progress_minimal["value"] = 100
                     self.btn_run_minimal.config(state="enabled")
 
                     self.update_step_display()  # refresh colors to reflect final cache status
+
+                elif event == "batch_done":
+                    self.progress_batch["value"] = 100
+                    self.progress_minimal["value"] = 100
 
                 elif event == "error":
                     logger.error("Error:", data)
