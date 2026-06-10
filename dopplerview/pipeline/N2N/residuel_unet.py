@@ -110,17 +110,21 @@ torch.manual_seed(SEED)
 USE_5FRAMES = False
 RADIUS = 0
 
+# 因为每个 frame 的 pair 数量 K 可能不同，所以先用 batch_size=1
 BATCH_SIZE = 1
 
 EPOCHS = 10
 LR = 1e-4
 VAL_RATIO = 0.20
 
-OUTPUT_DIR = Path(r"C:\Users\Novovorontsovka\Downloads\resultat\N2N_training_1frame_all_pairs")
+RESIDUAL_SCALE = 0.15
+
+OUTPUT_DIR = Path(r"C:\Users\Novovorontsovka\Downloads\resultat\N2N_training_residual_1frame_all_pairs")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-BEST_MODEL_PATH = OUTPUT_DIR / "best_n2n_model_1frame_all_pairs.pth"
-DENOISED_TEST_VIDEO_PATH = OUTPUT_DIR / "denoised_test_video_1frame_all_pairs.avi"
+BEST_MODEL_PATH = OUTPUT_DIR / "best_residual_unet_1frame_all_pairs.pth"
+DENOISED_TEST_VIDEO_PATH = OUTPUT_DIR / "denoised_test_video_residual_1frame_all_pairs.avi"
+RESIDUAL_TEST_VIDEO_PATH = OUTPUT_DIR / "predicted_residual_video_1frame_all_pairs.avi"
 
 
 # ============================================================
@@ -146,17 +150,6 @@ print("=" * 80)
 print("train videos:", len(train_items))
 print("val videos:", len(val_items))
 print("test video:", test_item["video_path"])
-
-print("\nTrain videos:")
-for item in train_items:
-    print("  ", Path(item["video_path"]).name)
-
-print("\nValidation videos:")
-for item in val_items:
-    print("  ", Path(item["video_path"]).name)
-
-print("\nTest video:")
-print("  ", Path(test_item["video_path"]).name)
 
 
 # ============================================================
@@ -199,20 +192,6 @@ def load_video_gray(video_path, normalize=True):
 
 
 def load_pair_npz(pair_path, T):
-    """
-    支持两种 pair 文件格式：
-
-    格式 A:
-        pair_candidates
-        valid_train_frame
-
-    格式 B:
-        pair_indices
-        shape = (N, 2)
-        第 0 列 = t
-        第 1 列 = j
-    """
-
     pair_path = Path(pair_path)
 
     if not pair_path.exists():
@@ -224,10 +203,6 @@ def load_pair_npz(pair_path, T):
     print("\nPAIR FILE:", pair_path)
     print("keys:", files)
 
-    # ========================================================
-    # 格式 A：pair_candidates + valid_train_frame
-    # ========================================================
-
     if "pair_candidates" in files and "valid_train_frame" in files:
         pair_candidates = data["pair_candidates"]
 
@@ -237,10 +212,6 @@ def load_pair_npz(pair_path, T):
         valid_train_frame = data["valid_train_frame"].astype(bool)
 
         return pair_candidates, valid_train_frame
-
-    # ========================================================
-    # 格式 B：pair_indices
-    # ========================================================
 
     if "pair_indices" in files:
         pair_indices = data["pair_indices"].astype(np.int32)
@@ -277,17 +248,6 @@ class MultiVideoN2NDataset(Dataset):
         radius=0,
         max_samples_per_video=None,
     ):
-        """
-        每个样本：
-            input  = frame[t]
-            target = pair_candidates[t] 里面所有 frame[j]
-
-        target shape:
-            (K, 1, H, W)
-
-        因为每个 t 的 pair 数量 K 可能不同，所以 batch_size = 1。
-        """
-
         self.video_items = video_items
         self.use_5frames = use_5frames
         self.radius = radius
@@ -381,16 +341,8 @@ class MultiVideoN2NDataset(Dataset):
         pair_candidates = item["pair_candidates"]
         vessel_mask = item["vessel_mask"]
 
-        # ========================================================
-        # input = frame t only
-        # ========================================================
-
-        input_frames = frames[t:t + 1]
+        input_frame = frames[t:t + 1]
         input_center = frames[t:t + 1]
-
-        # ========================================================
-        # target = 所有 pairs
-        # ========================================================
 
         js = pair_candidates[t]
 
@@ -414,7 +366,7 @@ class MultiVideoN2NDataset(Dataset):
         vessel_mask = vessel_mask[None, :, :]
         background_mask = 1.0 - vessel_mask
 
-        input_tensor = torch.from_numpy(input_frames.astype(np.float32))
+        input_tensor = torch.from_numpy(input_frame.astype(np.float32))
         target_tensor = torch.from_numpy(target_stack.astype(np.float32))
         input_center_tensor = torch.from_numpy(input_center.astype(np.float32))
         vessel_mask_tensor = torch.from_numpy(vessel_mask.astype(np.float32))
@@ -430,7 +382,7 @@ class MultiVideoN2NDataset(Dataset):
 
 
 # ============================================================
-# 5. U-Net
+# 5. Residual U-Net
 # ============================================================
 
 class ConvBlock(nn.Module):
@@ -451,9 +403,16 @@ class ConvBlock(nn.Module):
         return self.net(x)
 
 
-class SmallUNet(nn.Module):
-    def __init__(self, in_ch=1, out_ch=1, features=(32, 64, 128)):
+class ResidualUNet(nn.Module):
+    def __init__(
+        self,
+        in_ch=1,
+        features=(32, 64, 128),
+        residual_scale=0.15,
+    ):
         super().__init__()
+
+        self.residual_scale = residual_scale
 
         self.enc1 = ConvBlock(in_ch, features[0])
         self.enc2 = ConvBlock(features[0], features[1])
@@ -487,9 +446,12 @@ class SmallUNet(nn.Module):
         )
         self.dec1 = ConvBlock(features[0] * 2, features[0])
 
-        self.out = nn.Conv2d(features[0], out_ch, kernel_size=1)
+        # 输出 raw residual，不用 sigmoid
+        self.out = nn.Conv2d(features[0], 1, kernel_size=1)
 
     def forward(self, x):
+        input_frame = x[:, 0:1, :, :]
+
         e1 = self.enc1(x)
         e2 = self.enc2(self.pool(e1))
         e3 = self.enc3(self.pool(e2))
@@ -508,7 +470,14 @@ class SmallUNet(nn.Module):
         d1 = torch.cat([d1, e1], dim=1)
         d1 = self.dec1(d1)
 
-        return torch.sigmoid(self.out(d1))
+        raw_residual = self.out(d1)
+
+        residual = self.residual_scale * torch.tanh(raw_residual)
+
+        output = input_frame - residual
+        output = torch.clamp(output, 0.0, 1.0)
+
+        return output, residual
 
 
 # ============================================================
@@ -529,8 +498,16 @@ def masked_smooth_l1(a, b, mask):
     return (loss_map * mask).sum() / (mask.sum() + eps)
 
 
-def n2n_vessel_background_loss(
+def residual_smoothness(residual):
+    gx = gradient_x(residual)
+    gy = gradient_y(residual)
+
+    return torch.mean(torch.abs(gx)) + torch.mean(torch.abs(gy))
+
+
+def n2n_vessel_background_residual_loss(
     output,
+    residual,
     target,
     input_center,
     vessel_mask,
@@ -540,23 +517,19 @@ def n2n_vessel_background_loss(
     w_vessel_brightness=0.20,
     w_vessel_edge=0.15,
     w_bg_smooth=0.05,
+    w_residual_size=0.01,
+    w_residual_smooth=0.005,
 ):
     """
     output:
         (B, 1, H, W)
 
+    residual:
+        (B, 1, H, W)
+
     target:
         (B, K, 1, H, W)
         K = 当前 frame t 的所有 pair frames
-
-    input_center:
-        (B, 1, H, W)
-
-    vessel_mask:
-        (B, 1, H, W)
-
-    background_mask:
-        (B, 1, H, W)
     """
 
     eps = 1e-8
@@ -567,10 +540,6 @@ def n2n_vessel_background_loss(
 
     vessel_mask_k = vessel_mask[:, None, :, :, :].expand(-1, K, -1, -1, -1)
     background_mask_k = background_mask[:, None, :, :, :].expand(-1, K, -1, -1, -1)
-
-    # ========================================================
-    # output vs 所有 pair target
-    # ========================================================
 
     n2n_loss_map = F.smooth_l1_loss(
         output_k,
@@ -586,10 +555,6 @@ def n2n_vessel_background_loss(
         vessel_mask_k.sum() + eps
     )
 
-    # ========================================================
-    # 血管亮度保持：output vs frame t
-    # ========================================================
-
     out_vessel_mean = (output * vessel_mask).sum(dim=(1, 2, 3)) / (
         vessel_mask.sum(dim=(1, 2, 3)) + eps
     )
@@ -602,10 +567,6 @@ def n2n_vessel_background_loss(
         out_vessel_mean,
         in_vessel_mean
     )
-
-    # ========================================================
-    # 血管边缘保持：output vs frame t
-    # ========================================================
 
     gx_out = gradient_x(output)
     gx_in = gradient_x(input_center)
@@ -620,10 +581,6 @@ def n2n_vessel_background_loss(
         + masked_smooth_l1(gy_out, gy_in, gy_mask)
     )
 
-    # ========================================================
-    # 背景平滑
-    # ========================================================
-
     gx_bg = gradient_x(output)
     gy_bg = gradient_y(output)
 
@@ -635,12 +592,17 @@ def n2n_vessel_background_loss(
         + torch.mean(torch.abs(gy_bg * bg_mask_y))
     )
 
+    residual_size_loss = torch.mean(torch.abs(residual))
+    residual_smooth_loss = residual_smoothness(residual)
+
     total = (
         w_bg * bg_loss
         + w_vessel_n2n * vessel_n2n_loss
         + w_vessel_brightness * vessel_brightness_loss
         + w_vessel_edge * vessel_edge_loss
         + w_bg_smooth * bg_smooth_loss
+        + w_residual_size * residual_size_loss
+        + w_residual_smooth * residual_smooth_loss
     )
 
     return total
@@ -656,15 +618,16 @@ def train_n2n_model(
     batch_size=1,
     epochs=40,
     lr=1e-4,
-    save_path="best_n2n_model.pth",
+    save_path="best_residual_unet.pth",
+    residual_scale=0.15,
 ):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("\nDevice:", device)
 
-    model = SmallUNet(
+    model = ResidualUNet(
         in_ch=1,
-        out_ch=1,
-        features=(32, 64, 128)
+        features=(32, 64, 128),
+        residual_scale=residual_scale,
     ).to(device)
 
     optimizer = torch.optim.AdamW(
@@ -705,10 +668,11 @@ def train_n2n_model(
             vessel_mask = vessel_mask.to(device)
             background_mask = background_mask.to(device)
 
-            output = model(input_tensor)
+            output, residual = model(input_tensor)
 
-            loss = n2n_vessel_background_loss(
+            loss = n2n_vessel_background_residual_loss(
                 output=output,
+                residual=residual,
                 target=target_tensor,
                 input_center=input_center,
                 vessel_mask=vessel_mask,
@@ -737,10 +701,11 @@ def train_n2n_model(
                 vessel_mask = vessel_mask.to(device)
                 background_mask = background_mask.to(device)
 
-                output = model(input_tensor)
+                output, residual = model(input_tensor)
 
-                loss = n2n_vessel_background_loss(
+                loss = n2n_vessel_background_residual_loss(
                     output=output,
+                    residual=residual,
                     target=target_tensor,
                     input_center=input_center,
                     vessel_mask=vessel_mask,
@@ -774,6 +739,8 @@ def denoise_video_with_model(
     model_path,
     test_item,
     output_video_path,
+    residual_video_path=None,
+    residual_scale=0.15,
 ):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("\nInference device:", device)
@@ -781,29 +748,37 @@ def denoise_video_with_model(
     frames, fps = load_video_gray(test_item["video_path"], normalize=True)
     T, H, W = frames.shape
 
-    model = SmallUNet(
+    model = ResidualUNet(
         in_ch=1,
-        out_ch=1,
-        features=(32, 64, 128)
+        features=(32, 64, 128),
+        residual_scale=residual_scale,
     ).to(device)
 
     model.load_state_dict(torch.load(model_path, map_location=device))
     model.eval()
 
     denoised_frames = []
+    residual_frames = []
 
     with torch.no_grad():
         for t in tqdm(range(T), desc="Denoising test video"):
-            input_frames = frames[t:t + 1]
+            input_frame = frames[t:t + 1]
 
-            x = torch.from_numpy(input_frames.astype(np.float32))[None, :, :, :]
+            x = torch.from_numpy(input_frame.astype(np.float32))[None, :, :, :]
             x = x.to(device)
 
-            y = model(x)
-            y = y[0, 0].detach().cpu().numpy()
+            y, residual = model(x)
 
-            y_u8 = np.clip(y * 255.0, 0, 255).astype(np.uint8)
+            y_np = y[0, 0].detach().cpu().numpy()
+            residual_np = residual[0, 0].detach().cpu().numpy()
+
+            y_u8 = np.clip(y_np * 255.0, 0, 255).astype(np.uint8)
             denoised_frames.append(y_u8)
+
+            residual_vis = residual_np / (residual_scale + 1e-8)
+            residual_vis = np.clip(residual_vis, -1, 1)
+            residual_vis = ((residual_vis + 1.0) * 127.5).astype(np.uint8)
+            residual_frames.append(residual_vis)
 
     output_video_path = Path(output_video_path)
     output_video_path.parent.mkdir(parents=True, exist_ok=True)
@@ -825,6 +800,26 @@ def denoise_video_with_model(
 
     print("\nDenoised test video saved to:")
     print(output_video_path)
+
+    if residual_video_path is not None:
+        residual_video_path = Path(residual_video_path)
+        residual_video_path.parent.mkdir(parents=True, exist_ok=True)
+
+        writer_res = cv2.VideoWriter(
+            str(residual_video_path),
+            fourcc,
+            fps,
+            (W, H),
+            isColor=False
+        )
+
+        for frame_u8 in residual_frames:
+            writer_res.write(frame_u8)
+
+        writer_res.release()
+
+        print("\nPredicted residual video saved to:")
+        print(residual_video_path)
 
 
 # ============================================================
@@ -852,10 +847,13 @@ model = train_n2n_model(
     epochs=EPOCHS,
     lr=LR,
     save_path=str(BEST_MODEL_PATH),
+    residual_scale=RESIDUAL_SCALE,
 )
 
 denoise_video_with_model(
     model_path=str(BEST_MODEL_PATH),
     test_item=test_item,
     output_video_path=str(DENOISED_TEST_VIDEO_PATH),
+    residual_video_path=str(RESIDUAL_TEST_VIDEO_PATH),
+    residual_scale=RESIDUAL_SCALE,
 )

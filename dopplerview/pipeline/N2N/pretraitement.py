@@ -1,8 +1,24 @@
 import cv2
 import numpy as np
-import matplotlib.pyplot as plt
 from pathlib import Path
 from scipy.signal import find_peaks
+
+
+# ============================================================
+# 0. 路径设置
+# ============================================================
+
+INPUT_DIR = Path(r"C:\Users\Novovorontsovka\Downloads\N2N")
+OUTPUT_ROOT = Path(r"C:\Users\Novovorontsovka\Downloads\LDH_traite")
+
+PAIR_RESULTS_DIR = OUTPUT_ROOT / "N2N_pair_results"
+VESSEL_MASKS_DIR = OUTPUT_ROOT / "N2N_vessel_masks"
+BRIGHTNESS_TABLES_DIR = OUTPUT_ROOT / "N2N_brightness_tables"
+
+OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
+PAIR_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+VESSEL_MASKS_DIR.mkdir(parents=True, exist_ok=True)
+BRIGHTNESS_TABLES_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ============================================================
@@ -168,28 +184,6 @@ def remove_small_components(binary_img, min_area=15):
     return out
 
 
-def overlay_green(gray_u8, green_mask):
-    out = cv2.cvtColor(gray_u8, cv2.COLOR_GRAY2BGR)
-    out[green_mask > 0] = [0, 255, 0]
-    return out
-
-
-def overlay_red(gray_u8, red_mask):
-    out = cv2.cvtColor(gray_u8, cv2.COLOR_GRAY2BGR)
-    out[red_mask > 0] = [0, 0, 255]
-    return out
-
-
-def overlay_vote_heatmap(gray_u8, votes_norm):
-    heat = (votes_norm * 255).astype(np.uint8)
-    heat_color = cv2.applyColorMap(heat, cv2.COLORMAP_JET)
-
-    base = cv2.cvtColor(gray_u8, cv2.COLOR_GRAY2BGR)
-
-    out = cv2.addWeighted(base, 0.55, heat_color, 0.45, 0)
-    return out
-
-
 def load_video_as_gray_float(video_path):
     cap = cv2.VideoCapture(str(video_path))
 
@@ -219,71 +213,109 @@ def load_video_as_gray_float(video_path):
     return frames_gray, fps
 
 
-def read_first_frame_u8(video_path):
-    cap = cv2.VideoCapture(str(video_path))
+# ============================================================
+# 2. pair 生成函数
+# ============================================================
 
-    if not cap.isOpened():
-        raise RuntimeError(f"打不开视频：{video_path}")
+def build_pair_from_smooth_brightness(
+    smooth_brightness_table,
+    min_pair_distance=5
+):
+    """
+    smooth_brightness_table:
+        shape = (T, 2)
+        第 0 列 = time_s
+        第 1 列 = smooth_intensity
 
-    ret, frame = cap.read()
-    cap.release()
+    pair 逻辑：
+        对每一帧 i，找一个 j：
+        1. j 和 i 不能太近，abs(j - i) >= min_pair_distance
+        2. smooth_intensity[j] 和 smooth_intensity[i] 尽量接近
 
-    if not ret:
-        raise RuntimeError(f"无法读取第一帧：{video_path}")
+    返回：
+        pair_indices:
+            shape = (N, 2)
+            第 0 列 = input_frame
+            第 1 列 = target_frame
 
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.float32)
+        pair_absdiff:
+            每一对的 smooth intensity 差值
+    """
 
-    gmin = gray.min()
-    gmax = gray.max()
+    time_s = smooth_brightness_table[:, 0]
+    smooth_intensity = smooth_brightness_table[:, 1]
 
-    gray_u8 = (
-        (gray - gmin)
-        / (gmax - gmin + 1e-8)
-        * 255
-    ).astype(np.uint8)
+    T = len(smooth_intensity)
 
-    return gray_u8
+    pair_indices = []
+    pair_absdiff = []
+    pair_time_s = []
+    pair_intensity = []
+
+    for i in range(T):
+        valid = np.ones(T, dtype=bool)
+
+        # 不和自己配，也不和太近的帧配
+        left = max(0, i - min_pair_distance + 1)
+        right = min(T, i + min_pair_distance)
+
+        valid[left:right] = False
+
+        if valid.sum() == 0:
+            continue
+
+        diff = np.abs(smooth_intensity - smooth_intensity[i])
+        diff[~valid] = np.inf
+
+        j = int(np.argmin(diff))
+
+        pair_indices.append([i, j])
+        pair_absdiff.append(diff[j])
+        pair_time_s.append([time_s[i], time_s[j]])
+        pair_intensity.append([smooth_intensity[i], smooth_intensity[j]])
+
+    pair_indices = np.array(pair_indices, dtype=np.int32)
+    pair_absdiff = np.array(pair_absdiff, dtype=np.float32)
+    pair_time_s = np.array(pair_time_s, dtype=np.float32)
+    pair_intensity = np.array(pair_intensity, dtype=np.float32)
+
+    return pair_indices, pair_absdiff, pair_time_s, pair_intensity
 
 
 # ============================================================
-# 2. 主函数：处理一个视频
+# 3. 单个视频处理函数
 # ============================================================
 
-def process_video_temporal_vote(
+def process_one_video(
     video_path,
-    output_dir=None,
-    cx=None,
-    cy=None,
-    r=None,
+    output_root,
+    pair_results_dir,
+    vessel_masks_dir,
+    brightness_tables_dir,
+    cx=255,
+    cy=255,
+    r=260,
     min_peak_distance=15,
     peak_prominence_ratio=0.10,
     vote_ratio=0.40,
     min_component_area=15,
     smooth_win_peak=5,
     smooth_win_final=5,
-    show_figures=False,
-    save_peak_images=False,
-    save_matrix_csv=False,
-    save_brightness_csv=False
+    min_pair_distance=5
 ):
     video_path = Path(video_path)
+    video_name = video_path.stem
+
+    print("\n" + "=" * 90)
+    print("处理视频:", video_name)
+    print("=" * 90)
 
     if not video_path.exists():
         raise FileNotFoundError(f"找不到视频文件：{video_path}")
 
-    if output_dir is None:
-        output_dir = video_path.parent / f"{video_path.stem}_temporal_vote_result"
-    else:
-        output_dir = Path(output_dir)
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    print("使用视频：", video_path)
-    print("输出文件夹：", output_dir)
-
-    # ========================================================
+    # ------------------------------------------------------------
     # 1. 读取视频
-    # ========================================================
+    # ------------------------------------------------------------
 
     frames_gray, fps = load_video_as_gray_float(video_path)
 
@@ -297,31 +329,18 @@ def process_video_temporal_vote(
         print("警告：fps 读取异常，设置为 30")
         fps = 30.0
 
-    time = np.arange(T, dtype=np.float32) / fps
+    time_s = np.arange(T, dtype=np.float32) / fps
 
-    # ========================================================
+    # ------------------------------------------------------------
     # 2. 圆形 mask
-    # ========================================================
-
-    if cx is None:
-        cx = W // 2
-
-    if cy is None:
-        cy = H // 2
-
-    if r is None:
-        r = min(H, W) // 2
-
-    cx = int(cx)
-    cy = int(cy)
-    r = int(r)
+    # ------------------------------------------------------------
 
     circle_mask = np.zeros((H, W), dtype=np.uint8)
-    cv2.circle(circle_mask, (cx, cy), r, 255, thickness=-1)
+    cv2.circle(circle_mask, (int(cx), int(cy)), int(r), 255, thickness=-1)
 
-    # ========================================================
+    # ------------------------------------------------------------
     # 3. 第一帧提取初始血管 mask
-    # ========================================================
+    # ------------------------------------------------------------
 
     first_perc, first_enh, first_red = get_red_mask_from_gray(
         frames_gray[0],
@@ -334,6 +353,10 @@ def process_video_temporal_vote(
         raise RuntimeError("第一帧 red mask 为空，调一下 threshold 参数")
 
     print("第一帧 red mask 像素数:", int(first_red_bool.sum()))
+
+    # ------------------------------------------------------------
+    # 4. 用第一帧 mask 计算初始亮度曲线，找 peak
+    # ------------------------------------------------------------
 
     initial_curve = np.array([
         frames_gray[i][first_red_bool].mean()
@@ -351,8 +374,6 @@ def process_video_temporal_vote(
         np.percentile(curve_d, 95) - np.percentile(curve_d, 5)
     )
 
-    print("initial peak prominence:", prominence)
-
     peak_indices, properties = find_peaks(
         curve_d,
         distance=min_peak_distance,
@@ -366,31 +387,24 @@ def process_video_temporal_vote(
 
     selected_peaks = np.sort(peak_indices)
 
-    print("找到的全部 peak 帧:", selected_peaks.tolist())
+    print("找到 peak 帧:", selected_peaks.tolist())
     print("peak 总数:", len(selected_peaks))
 
-    # ========================================================
-    # 4. 对所有 peak 帧提血管 mask
-    # ========================================================
+    # ------------------------------------------------------------
+    # 5. 对所有 peak 帧提 vessel mask
+    # ------------------------------------------------------------
 
     peak_masks = []
-    peak_red_overlays = []
-    peak_enhanced_images = []
 
     for n, idx in enumerate(selected_peaks):
         print(f"处理 peak {n + 1}/{len(selected_peaks)}: frame {idx}")
 
-        perc_u8, enhanced, red_mask = get_red_mask_from_gray(
+        _, _, red_mask = get_red_mask_from_gray(
             frames_gray[idx],
             circle_mask
         )
 
         peak_masks.append(red_mask)
-
-        if save_peak_images:
-            peak_enhanced_images.append(enhanced)
-            overlay_red_peak = overlay_red(perc_u8, red_mask)
-            peak_red_overlays.append(overlay_red_peak)
 
     peak_masks = np.stack(peak_masks, axis=0)
 
@@ -398,12 +412,11 @@ def process_video_temporal_vote(
 
     print("用于 vote 的 peak 数 K =", K)
 
-    # ========================================================
-    # 5. vote 得到稳定血管区域
-    # ========================================================
+    # ------------------------------------------------------------
+    # 6. vote 得到最终 vessel mask
+    # ------------------------------------------------------------
 
     votes = (peak_masks > 0).sum(axis=0)
-    votes_norm = votes.astype(np.float32) / K
 
     vote_threshold = int(np.ceil(vote_ratio * K))
     vote_threshold = max(1, vote_threshold)
@@ -423,43 +436,34 @@ def process_video_temporal_vote(
 
     vessel_pixels = cv2.countNonZero(vessel_vote_mask)
 
-    print(f"vote ratio = {vote_ratio}")
-    print(f"vote threshold = {vote_threshold}/{K}")
+    print("vote_ratio:", vote_ratio)
+    print(f"vote_threshold: {vote_threshold}/{K}")
     print("vessel pixels:", vessel_pixels)
 
     if vessel_pixels == 0:
         raise RuntimeError(
-            "vote 后的 vessel mask 是空的。可以降低 vote_ratio，比如 0.30"
+            "vote 后 vessel mask 为空。可以降低 vote_ratio，比如 0.30"
         )
-
-    # ========================================================
-    # 6. final_overlap_matrix
-    # 这个就是血管 0/1 图：
-    # 1 = 血管
-    # 0 = 非血管
-    # ========================================================
 
     final_overlap_matrix = (vessel_vote_mask > 0).astype(np.uint8)
 
-    final_matrix_npy = output_dir / "final_overlap_matrix.npy"
-    final_matrix_csv = output_dir / "final_overlap_matrix.csv"
+    # ------------------------------------------------------------
+    # 7. 保存 vessel mask 到单独文件夹
+    # ------------------------------------------------------------
 
-    np.save(final_matrix_npy, final_overlap_matrix)
+    vessel_mask_save_path = vessel_masks_dir / f"{video_name}_vessel_mask.npy"
 
-    if save_matrix_csv:
-        np.savetxt(
-            final_matrix_csv,
-            final_overlap_matrix,
-            delimiter=",",
-            fmt="%d"
-        )
+    np.save(
+        vessel_mask_save_path,
+        final_overlap_matrix.astype(np.uint8)
+    )
 
-    print("final_overlap_matrix 保存到：")
-    print(final_matrix_npy)
+    print("vessel mask 保存到:")
+    print(vessel_mask_save_path)
 
-    # ========================================================
-    # 7. brightness table
-    # ========================================================
+    # ------------------------------------------------------------
+    # 8. 用最终 vessel mask 计算亮度曲线
+    # ------------------------------------------------------------
 
     overlap_bool = final_overlap_matrix == 1
 
@@ -485,479 +489,236 @@ def process_video_temporal_vote(
         prominence=prominence2
     )
 
-    print("最终亮度曲线 peak 数量:", len(curve_peak_indices))
-    print("最终亮度曲线 peak 帧:", curve_peak_indices.tolist())
+    print("最终 smooth 亮度曲线 peak 数量:", len(curve_peak_indices))
+    print("最终 smooth 亮度曲线 peak 帧:", curve_peak_indices.tolist())
 
-    is_peak_array = np.zeros(T, dtype=np.int32)
-    is_peak_array[curve_peak_indices] = 1
+    # ------------------------------------------------------------
+    # 9. 保存 smooth brightness table 到单独文件夹
+    #
+    # 只保存：
+    # 第 0 列 = time_s
+    # 第 1 列 = smooth_intensity
+    # ------------------------------------------------------------
 
-    brightness_table = np.column_stack([
-        np.arange(T, dtype=np.int32),
-        time,
-        brightness_curve_raw,
-        brightness_curve_smooth,
-        is_peak_array
+    smooth_brightness_table = np.column_stack([
+        time_s,
+        brightness_curve_smooth
     ]).astype(np.float32)
 
-    brightness_table_npy = output_dir / "brightness_table.npy"
-    brightness_table_csv = output_dir / "brightness_table.csv"
+    brightness_table_save_path = brightness_tables_dir / f"{video_name}_brightness_table.npy"
 
-    np.save(brightness_table_npy, brightness_table)
-
-    if save_brightness_csv:
-        np.savetxt(
-            brightness_table_csv,
-            brightness_table,
-            delimiter=",",
-            header="frame_index,time_s,raw_intensity,smooth_intensity,is_peak",
-            comments="",
-            fmt=["%d", "%.6f", "%.6f", "%.6f", "%d"]
-        )
-
-    print("brightness_table 保存到：")
-    print(brightness_table_npy)
-
-    # ========================================================
-    # 8. 保存 two_variables
-    # ========================================================
-
-    two_variables_npz = output_dir / "two_variables.npz"
-
-    np.savez_compressed(
-        two_variables_npz,
-        brightness_table=brightness_table,
-        final_overlap_matrix=final_overlap_matrix,
-        selected_peaks=selected_peaks,
-        curve_peak_indices=curve_peak_indices,
-        brightness_curve_raw=brightness_curve_raw,
-        brightness_curve_smooth=brightness_curve_smooth,
-        fps=np.array(fps, dtype=np.float32),
-        vote_threshold=np.array(vote_threshold, dtype=np.int32),
-        vote_ratio=np.array(vote_ratio, dtype=np.float32)
+    np.save(
+        brightness_table_save_path,
+        smooth_brightness_table
     )
 
-    print("两个核心变量保存到：")
-    print(two_variables_npz)
+    print("smooth brightness table 保存到:")
+    print(brightness_table_save_path)
+    print("smooth_brightness_table.shape =", smooth_brightness_table.shape)
 
-    # ========================================================
-    # 9. 可选保存图像
-    # 这里默认不保存 PNG，因为你说你要数值
-    # ========================================================
+    # ------------------------------------------------------------
+    # 10. 生成 pair result
+    #
+    # pair 逻辑：
+    # 每一帧找一个 smooth brightness 最接近的帧
+    # 但是不能是自己附近 min_pair_distance 范围内的帧
+    # ------------------------------------------------------------
 
-    if show_figures or save_peak_images:
-        first_display = normalize_to_u8_inside_mask(
-            frames_gray[0],
-            circle_mask,
-            p_low=0.5,
-            p_high=99.7
-        )
+    pair_indices, pair_absdiff, pair_time_s, pair_intensity = build_pair_from_smooth_brightness(
+        smooth_brightness_table=smooth_brightness_table,
+        min_pair_distance=min_pair_distance
+    )
 
-        vessel_overlay = overlay_green(first_display, vessel_vote_mask)
-        vote_heatmap = overlay_vote_heatmap(first_display, votes_norm)
-        overlap_overlay_red = overlay_red(first_display, vessel_vote_mask)
+    pair_save_path = pair_results_dir / f"{video_name}_pair_result.npz"
 
-        vessel_mask_png = output_dir / "02_vessel_vote_mask.png"
-        vessel_overlay_png = output_dir / "03_vessel_vote_overlay_green.png"
-        vote_heatmap_png = output_dir / "04_vote_frequency_heatmap.png"
-        overlap_overlay_red_png = output_dir / "06_overlap_region_overlay_red.png"
+    np.savez_compressed(
+        pair_save_path,
 
-        cv2.imwrite(str(vessel_mask_png), vessel_vote_mask)
-        cv2.imwrite(str(vessel_overlay_png), vessel_overlay)
-        cv2.imwrite(str(vote_heatmap_png), vote_heatmap)
-        cv2.imwrite(str(overlap_overlay_red_png), overlap_overlay_red)
+        video_name=np.array(video_name),
+        fps=np.array(fps, dtype=np.float32),
 
-        if save_peak_images:
-            for n, idx in enumerate(selected_peaks):
-                cv2.imwrite(
-                    str(output_dir / f"peak_{n + 1}_frame_{idx}_red_overlay.png"),
-                    peak_red_overlays[n]
-                )
+        # 核心 pair
+        pair_indices=pair_indices,
+        pair_absdiff=pair_absdiff,
+        pair_time_s=pair_time_s,
+        pair_intensity=pair_intensity,
 
-                cv2.imwrite(
-                    str(output_dir / f"peak_{n + 1}_frame_{idx}_red_mask.png"),
-                    peak_masks[n]
-                )
+        # 方便后面检查
+        smooth_brightness_table=smooth_brightness_table,
+        selected_peaks=selected_peaks.astype(np.int32),
+        curve_peak_indices=curve_peak_indices.astype(np.int32),
 
-                cv2.imwrite(
-                    str(output_dir / f"peak_{n + 1}_frame_{idx}_enhanced.png"),
-                    peak_enhanced_images[n]
-                )
+        # 对应 mask 的文件名
+        vessel_mask_file=np.array(str(vessel_mask_save_path)),
+        brightness_table_file=np.array(str(brightness_table_save_path))
+    )
+
+    print("pair result 保存到:")
+    print(pair_save_path)
+    print("pair_indices.shape =", pair_indices.shape)
+
+    # ------------------------------------------------------------
+    # 11. 返回结果
+    # ------------------------------------------------------------
 
     results = {
-        "video_path": video_path,
-        "output_dir": output_dir,
+        "video_name": video_name,
 
-        "brightness_table": brightness_table,
+        "vessel_mask_path": vessel_mask_save_path,
+        "brightness_table_path": brightness_table_save_path,
+        "pair_result_path": pair_save_path,
+
         "final_overlap_matrix": final_overlap_matrix,
-
-        "selected_peaks": selected_peaks,
-        "curve_peak_indices": curve_peak_indices,
-        "brightness_curve_raw": brightness_curve_raw,
-        "brightness_curve_smooth": brightness_curve_smooth,
+        "smooth_brightness_table": smooth_brightness_table,
+        "pair_indices": pair_indices,
 
         "fps": fps,
-        "time": time,
-        "circle_mask": circle_mask,
-
-        "peak_masks": peak_masks,
-        "votes": votes,
-        "votes_norm": votes_norm,
-        "vote_threshold": vote_threshold,
-
-        "two_variables_npz": two_variables_npz,
-        "brightness_table_npy": brightness_table_npy,
-        "brightness_table_csv": brightness_table_csv if save_brightness_csv else None,
-        "final_matrix_npy": final_matrix_npy,
-        "final_matrix_csv": final_matrix_csv if save_matrix_csv else None
+        "selected_peaks": selected_peaks,
+        "curve_peak_indices": curve_peak_indices
     }
 
     return results
 
 
 # ============================================================
-# 3. 主程序：批量处理所有视频
+# 4. 主程序：批量处理所有视频
 # ============================================================
 
 if __name__ == "__main__":
 
-    input_dir = Path(r"C:\Users\Novovorontsovka\Desktop\Choroidal_LDH")
-    output_root = Path(r"C:\Users\Novovorontsovka\Downloads\LDH_traite")
+    print("输入视频文件夹:")
+    print(INPUT_DIR)
 
-    output_root.mkdir(parents=True, exist_ok=True)
+    print("\n总输出文件夹:")
+    print(OUTPUT_ROOT)
 
-    # True 会打印完整矩阵，非常长
-    # 一开始建议 False
-    PRINT_FULL_NUMBERS = False
+    print("\npair 输出文件夹:")
+    print(PAIR_RESULTS_DIR)
 
-    # ========================================================
-    # 1. 找到所有视频
-    # ========================================================
+    print("\nvessel mask 输出文件夹:")
+    print(VESSEL_MASKS_DIR)
 
-    video_paths = sorted(input_dir.glob("*.avi"))
+    print("\nsmooth brightness table 输出文件夹:")
+    print(BRIGHTNESS_TABLES_DIR)
+
+    video_paths = sorted(INPUT_DIR.glob("*.avi"))
 
     if len(video_paths) == 0:
-        raise RuntimeError(f"没有在这个文件夹找到 .avi 视频：{input_dir}")
+        raise RuntimeError(f"没有在这个文件夹找到 .avi 视频：{INPUT_DIR}")
 
-    print("找到视频数量:", len(video_paths))
+    print("\n找到视频数量:", len(video_paths))
 
     for p in video_paths:
         print(" -", p.name)
 
-    # ========================================================
-    # 2. 最终你要的两个变量
-    # ========================================================
-
-    variable_temps = {}
-    variable_position = {}
-
+    success_videos = []
     failed_videos = []
 
-    # ========================================================
-    # 3. 逐个视频处理
-    # ========================================================
+    for idx, video_path in enumerate(video_paths):
 
-    for i, video_path in enumerate(video_paths):
-
-        print("\n" + "=" * 90)
-        print(f"处理视频 {i + 1}/{len(video_paths)}")
-        print("视频:", video_path.name)
-        print("=" * 90)
-
-        video_name = video_path.stem
-        output_dir = output_root / f"{video_name}_temporal_vote_result"
+        print("\n" + "#" * 90)
+        print(f"开始处理 {idx + 1}/{len(video_paths)}")
+        print("#" * 90)
 
         try:
-            results = process_video_temporal_vote(
+            results = process_one_video(
                 video_path=video_path,
-                output_dir=output_dir,
+                output_root=OUTPUT_ROOT,
+                pair_results_dir=PAIR_RESULTS_DIR,
+                vessel_masks_dir=VESSEL_MASKS_DIR,
+                brightness_tables_dir=BRIGHTNESS_TABLES_DIR,
 
-                # 如果视频是 512 x 512，用这个
+                # 512 x 512 视频常用圆形区域
                 cx=255,
                 cy=255,
                 r=260,
 
-                # peak 参数
+                # 找 peak 参数
                 min_peak_distance=15,
                 peak_prominence_ratio=0.10,
 
-                # vote 参数
+                # vessel mask vote 参数
                 vote_ratio=0.40,
+                min_component_area=15,
 
-                # 不弹图，不保存 peak 图片
-                show_figures=False,
-                save_peak_images=False,
+                # smooth 参数
+                smooth_win_peak=5,
+                smooth_win_final=5,
 
-                # 你现在要数值，CSV 也可以关掉
-                save_matrix_csv=False,
-                save_brightness_csv=False
+                # pair 参数
+                # pair 不能和自己太近
+                min_pair_distance=5
             )
 
-            brightness_table = results["brightness_table"]
-            final_overlap_matrix = results["final_overlap_matrix"]
-
-            # ====================================================
-            # A. variable_temps[video_name]
-            #
-            # brightness_table:
-            # 0 = frame_index
-            # 1 = time_s
-            # 2 = raw_intensity
-            # 3 = smooth_intensity，也就是 approximation
-            # 4 = is_peak
-            #
-            # variable_temps[video_name].shape = (T, 2)
-            # 第 0 列 = time_s
-            # 第 1 列 = smooth_intensity
-            # ====================================================
-
-            time_s = brightness_table[:, 1]
-            smooth_intensity = brightness_table[:, 3]
-
-            variable_temps[video_name] = np.column_stack([
-                time_s,
-                smooth_intensity
-            ]).astype(np.float32)
-
-            # ====================================================
-            # B. variable_position[video_name]
-            #
-            # 这就是你要的血管 0/1 图
-            # 1 = 血管
-            # 0 = 非血管
-            # ====================================================
-
-            variable_position[video_name] = final_overlap_matrix.astype(np.uint8)
-
-            # ====================================================
-            # C. 验证：
-            # vessel_image = 第一帧 * 血管0/1图
-            # background_image = 第一帧 * 非血管0/1图
-            # ====================================================
-
-            first_frame_u8 = read_first_frame_u8(video_path)
-
-            vessel_image = first_frame_u8 * variable_position[video_name]
-            background_image = first_frame_u8 * (1 - variable_position[video_name])
-
-            # ====================================================
-            # D. 打印当前视频结果
-            # ====================================================
-
-            print("\n成功处理:", video_name)
-
-            print("\n[variable_temps]")
-            print("variable_temps[video_name].shape =", variable_temps[video_name].shape)
-            print("前 10 行:")
-            print(variable_temps[video_name][:10])
-
-            print("\n[variable_position]")
-            print("variable_position[video_name].shape =", variable_position[video_name].shape)
-            print("1 = 血管, 0 = 非血管")
-            print("血管像素数量 =", int(variable_position[video_name].sum()))
-            print("非血管像素数量 =", int((variable_position[video_name] == 0).sum()))
-
-            print("\nvariable_position 前 10x10:")
-            print(variable_position[video_name][:10, :10])
-
-            print("\n验证 vessel_image = first_frame_u8 * variable_position[video_name]")
-            print("vessel_image.shape =", vessel_image.shape)
-            print("vessel_image 前 10x10:")
-            print(vessel_image[:10, :10])
-
-            print("\n验证 background_image = first_frame_u8 * (1 - variable_position[video_name])")
-            print("background_image.shape =", background_image.shape)
-            print("background_image 前 10x10:")
-            print(background_image[:10, :10])
-
-            if PRINT_FULL_NUMBERS:
-                print("\n完整 variable_temps[video_name]:")
-                print(variable_temps[video_name])
-
-                print("\n完整 variable_position[video_name]:")
-                print(variable_position[video_name])
-
-                print("\n完整 vessel_image:")
-                print(vessel_image)
-
-                print("\n完整 background_image:")
-                print(background_image)
+            success_videos.append(results["video_name"])
 
         except Exception as e:
-            print("\n处理失败:", video_path.name)
+            video_name = video_path.stem
+            print("\n处理失败:", video_name)
             print("错误:", e)
-            failed_videos.append((video_path.name, str(e)))
+            failed_videos.append((video_name, str(e)))
             continue
 
     # ========================================================
-    # 4. 全部视频处理完成后，打印总结
+    # 5. 保存失败列表
     # ========================================================
 
-    print("\n" + "#" * 90)
-    print("全部视频处理完成")
-    print("#" * 90)
-
-    print("\n成功视频数量:", len(variable_temps))
-    print("失败视频数量:", len(failed_videos))
-
-    print("\nvariable_temps 的 key:")
-    print(list(variable_temps.keys()))
-
-    print("\nvariable_position 的 key:")
-    print(list(variable_position.keys()))
-
-    for video_name in variable_temps.keys():
-
-        temps = variable_temps[video_name]
-        position = variable_position[video_name]
-
-        print("\n" + "-" * 80)
-        print("视频:", video_name)
-
-        print("variable_temps[video_name].shape =", temps.shape)
-        print("variable_position[video_name].shape =", position.shape)
-
-        print("variable_temps 前 5 行:")
-        print(temps[:5])
-
-        print("variable_position 前 5x5:")
-        print(position[:5, :5])
-
-        print("血管像素数量 =", int(position.sum()))
-
-    # ========================================================
-    # 5. 保存两个变量
-    # ========================================================
-# ========================================================
-# 5. 保存 variable_temps 和 variable_position 到单独文件夹
-# ========================================================
-
-    variables_dir = output_root / "variables"
-    variables_dir.mkdir(parents=True, exist_ok=True)
-
-    variable_temps_path = variables_dir / "variable_temps.npy"
-    variable_position_path = variables_dir / "variable_position.npy"
-
-    np.save(
-        variable_temps_path,
-     np.array(variable_temps, dtype=object),
-        allow_pickle=True
-    )
-
-    np.save(
-        variable_position_path,
-        np.array(variable_position, dtype=object),
-        allow_pickle=True
-    )
-
-    print("\nvariable_temps 已经保存到:")
-    print(variable_temps_path)
-
-    print("\nvariable_position 已经保存到:")
-    print(variable_position_path)
-    # ========================================================
-    # 6. 保存失败视频列表
-    # ========================================================
-
-    failed_path = output_root / "failed_videos.txt"
+    failed_path = OUTPUT_ROOT / "failed_videos.txt"
 
     with open(failed_path, "w", encoding="utf-8") as f:
         for name, err in failed_videos:
             f.write(f"{name}\n")
             f.write(f"{err}\n\n")
 
-    print("\n失败列表保存到:")
+    # ========================================================
+    # 6. 总结
+    # ========================================================
+
+    print("\n" + "=" * 90)
+    print("全部处理完成")
+    print("=" * 90)
+
+    print("成功视频数量:", len(success_videos))
+    print("失败视频数量:", len(failed_videos))
+
+    print("\n成功视频:")
+    for name in success_videos:
+        print(" -", name)
+
+    print("\n失败视频:")
+    for name, err in failed_videos:
+        print(" -", name, ":", err)
+
+    print("\n三个核心输出文件夹:")
+
+    print("\n1. pair:")
+    print(PAIR_RESULTS_DIR)
+
+    print("\n2. vessel mask:")
+    print(VESSEL_MASKS_DIR)
+
+    print("\n3. smooth brightness table:")
+    print(BRIGHTNESS_TABLES_DIR)
+
+    print("\n失败列表:")
     print(failed_path)
 
-    # ========================================================
-    # 7. 最终说明
-    # ========================================================
+    print("\n每个视频对应文件名格式:")
 
-    print("\n最终变量说明:")
+    print("\nxxx_pair_result.npz")
+    print("  里面主要有:")
+    print("  pair_indices      shape = (N, 2)")
+    print("  pair_absdiff      shape = (N,)")
+    print("  pair_time_s       shape = (N, 2)")
+    print("  pair_intensity    shape = (N, 2)")
 
-    print("\nvariable_temps[video_name]:")
-    print("  shape = (T, 2)")
-    print("  [:, 0] = time_s")
-    print("  [:, 1] = smooth_intensity")
-
-    print("\nvariable_position[video_name]:")
+    print("\nxxx_vessel_mask.npy")
     print("  shape = (H, W)")
     print("  1 = 血管")
     print("  0 = 非血管")
 
-    print("\n之后你要得到血管图：")
-    print("  vessel_image = first_frame_u8 * variable_position[video_name]")
-
-    print("\n之后你要得到背景图：")
-    print("  background_image = first_frame_u8 * (1 - variable_position[video_name])")
-# ========================================================
-# 8. 用 variable_position 生成每个视频的血管图 / 背景图
-# ========================================================
-
-vessel_images_dir = output_root / "ALL_VIDEOS_vessel_images"
-background_images_dir = output_root / "ALL_VIDEOS_background_images"
-
-vessel_images_dir.mkdir(parents=True, exist_ok=True)
-background_images_dir.mkdir(parents=True, exist_ok=True)
-
-print("\n开始根据 variable_position 生成血管图和背景图...")
-
-for video_path in video_paths:
-    video_name = video_path.stem
-
-    # 如果这个视频处理失败了，就跳过
-    if video_name not in variable_position:
-        print(f"跳过 {video_name}，因为它不在 variable_position 里")
-        continue
-
-    try:
-        # ----------------------------------------------------
-        # 1. 读取第一帧
-        # ----------------------------------------------------
-        first_frame_u8 = read_first_frame_u8(video_path)
-
-        # ----------------------------------------------------
-        # 2. 读取这个视频对应的血管 0/1 图
-        # ----------------------------------------------------
-        mask = variable_position[video_name].astype(np.uint8)
-
-        # ----------------------------------------------------
-        # 3. 得到血管图和背景图
-        # ----------------------------------------------------
-        vessel_image = (first_frame_u8 * mask).astype(np.uint8)
-        background_image = (first_frame_u8 * (1 - mask)).astype(np.uint8)
-
-        # ----------------------------------------------------
-        # 4. 保存图片
-        # ----------------------------------------------------
-        vessel_save_path = vessel_images_dir / f"{video_name}_vessel.png"
-        background_save_path = background_images_dir / f"{video_name}_background.png"
-
-        cv2.imwrite(str(vessel_save_path), vessel_image)
-        cv2.imwrite(str(background_save_path), background_image)
-
-        # ----------------------------------------------------
-        # 5. 打印验证
-        # ----------------------------------------------------
-        print("\n视频:", video_name)
-        print("mask.shape =", mask.shape)
-        print("vessel_image.shape =", vessel_image.shape)
-        print("background_image.shape =", background_image.shape)
-        print("血管像素数量 =", int(mask.sum()))
-        print("血管图保存到:", vessel_save_path)
-        print("背景图保存到:", background_save_path)
-
-        print("mask 前 10x10:")
-        print(mask[:10, :10])
-
-        print("vessel_image 前 10x10:")
-        print(vessel_image[:10, :10])
-
-    except Exception as e:
-        print(f"\n生成血管图失败: {video_name}")
-        print("错误:", e)
-
-print("\n全部血管图保存到:")
-print(vessel_images_dir)
-
-print("\n全部背景图保存到:")
-print(background_images_dir)
+    print("\nxxx_brightness_table.npy")
+    print("  shape = (T, 2)")
+    print("  第 0 列 = time_s")
+    print("  第 1 列 = smooth_intensity")
+    print("  没有 raw_intensity")
