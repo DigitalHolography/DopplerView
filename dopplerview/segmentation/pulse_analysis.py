@@ -455,8 +455,11 @@ def get_cycle_templates(signal, beat_period):
     )
     return cycles
 
-def get_cycle_template(signal, sampling_freq, return_period=False):
-    beat_period = compute_period(signal, sampling_freq)
+def get_cycle_template(signal, sampling_freq=None, beat_period=None, return_period=False):
+    if beat_period is None:
+        if sampling_freq is None:
+            raise ValueError("Either sampling_freq or beat_period must be provided.")
+        beat_period = compute_period(signal, sampling_freq)
     cycles = get_cycle_templates(signal, beat_period)
     result = np.average(cycles, axis=0)
     if return_period:

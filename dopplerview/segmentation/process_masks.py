@@ -79,9 +79,8 @@ def bwareafilt_largest(binary_mask, connectivity=2):
     largest_label = counts.argmax()
     return labeled == largest_label
 
-def get_labeled_vesselness(mask, x_center, y_center, r1=0.1, r2=0.35, numCircles=10):
+def get_labeled_vessels(mask, x_center, y_center, r1=0.1, r2=0.35):
     numX, numY = mask.shape
-    dr = (r2 - r1) / numCircles
 
     # Skeletonize and remove central circle
     skel = skeletonize(mask)
