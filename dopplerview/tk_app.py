@@ -767,9 +767,11 @@ class MainWindow:
         steps = self.pipeline.get_step_names()
         waves = self.pipeline.engine.build_execution_waves(steps)
 
+        optional_steps = ["retinal_vessel_velocity_estimator", "arterial_waveform_analysis"]
+
         for i, wave in enumerate(waves):
             for j, step in enumerate(wave):
-                var = tk.BooleanVar(value=True)
+                var = tk.BooleanVar(value=step not in optional_steps)
 
                 cb = tk.Checkbutton(
                     self.steps_frame,
