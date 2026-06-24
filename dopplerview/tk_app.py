@@ -75,11 +75,15 @@ class MainWindow:
 
         self.queue = queue.Queue()
 
+        self.theme_var = tk.StringVar(value="dark")
+        self._menus: list[tk.Menu] = []
+
         self._apply_theme()
         self._set_window_icon()
 
         # --- UI layout --
         self._build_ui()
+        self._darken_tk_widget(self.root)
         self._install_drop_targets()
         self.update_mode()  # set initial mode
 
@@ -90,54 +94,347 @@ class MainWindow:
         self.measure_index = 0
 
 
-    def _apply_theme(self) -> None:
+    def _apply_theme(self, theme: str | None = None) -> None:
         """
-        Apply the Sun Valley ttk theme when available; otherwise fall back to a simple dark palette.
+        Apply the selected application theme.
+
+        This controls both ttk widgets and classic tk widgets.  ttk styling is
+        applied through ttk.Style; classic tk widgets are handled through the Tk
+        option database and by recursively re-configuring existing widgets.
         """
+        if theme is None:
+            theme = self.theme_var.get() if hasattr(self, "theme_var") else "dark"
+        theme = theme.lower()
+        if theme not in {"dark", "light"}:
+            theme = "dark"
+
+        if hasattr(self, "theme_var"):
+            self.theme_var.set(theme)
+
         style = ttk.Style(self.root)
         self._style = style
+        self._theme_name = theme
+
+        palettes = {
+            "dark": {
+                "bg": "#0f1116",
+                "surface": "#1b1f27",
+                "surface_alt": "#242a35",
+                "text": "#e8eef5",
+                "muted": "#9aa6b5",
+                "accent": "#4f9dff",
+                "select": "#2d5f9a",
+                "disabled": "#6f7a88",
+                "border": "#303746",
+            },
+            "light": {
+                "bg": "#f5f7fb",
+                "surface": "#ffffff",
+                "surface_alt": "#e9eef7",
+                "text": "#1f2937",
+                "muted": "#667085",
+                "accent": "#2563eb",
+                "select": "#cfe1ff",
+                "disabled": "#9ca3af",
+                "border": "#cfd7e6",
+            },
+        }
+        palette = palettes[theme]
+
+        self._bg_color = palette["bg"]
+        self._surface_color = palette["surface"]
+        self._surface_alt_color = palette["surface_alt"]
+        self._text_fg = palette["text"]
+        self._muted_fg = palette["muted"]
+        self._accent_color = palette["accent"]
+        self._select_color = palette["select"]
+        self._disabled_fg = palette["disabled"]
+        self._border_color = palette["border"]
+        self._text_bg = self._surface_color
+
+        # Use a theme that accepts color customization.
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+
+        # sv_ttk can improve widget metrics; colors are still forced below.
         if sv_ttk:
             try:
-                sv_ttk.set_theme("dark")
+                sv_ttk.set_theme(theme)
+                style.theme_use("clam")
             except Exception:
                 pass
 
-        # Fallback palette aligned with Sun Valley dark.
-        fallback_bg = "#0f1116"
-        fallback_surface = "#1b1f27"
-        fallback_fg = "#e8eef5"
-        fallback_muted = "#9aa6b5"
-        fallback_accent = "#4f9dff"
+        self.root.configure(bg=self._bg_color)
 
-        # Derive colors from the active theme when possible to keep consistency.
-        bg = style.lookup("TFrame", "background") or fallback_bg
-        fg = style.lookup("TLabel", "foreground") or fallback_fg
-        surface = (
-            style.lookup("TEntry", "fieldbackground")
-            or style.lookup("TEntry", "background")
-            or fallback_surface
+        # Tk option database: affects widgets created later unless explicitly overridden.
+        self.root.option_add("*Background", self._bg_color)
+        self.root.option_add("*Foreground", self._text_fg)
+        self.root.option_add("*activeBackground", self._select_color)
+        self.root.option_add("*activeForeground", self._text_fg)
+        self.root.option_add("*selectBackground", self._select_color)
+        self.root.option_add("*selectForeground", self._text_fg)
+        self.root.option_add("*insertBackground", self._text_fg)
+        self.root.option_add("*disabledForeground", self._disabled_fg)
+        self.root.option_add("*Menu.Background", self._surface_color)
+        self.root.option_add("*Menu.Foreground", self._text_fg)
+        self.root.option_add("*Menu.activeBackground", self._select_color)
+        self.root.option_add("*Menu.activeForeground", self._text_fg)
+
+        # ---------- ttk styles ----------
+        style.configure(".", background=self._bg_color, foreground=self._text_fg)
+
+        style.configure("TFrame", background=self._bg_color)
+        style.configure("Dark.TFrame", background=self._bg_color)
+        style.configure("Surface.TFrame", background=self._surface_color)
+
+        style.configure("TLabel", background=self._bg_color, foreground=self._text_fg)
+        style.configure("Muted.TLabel", background=self._bg_color, foreground=self._muted_fg)
+
+        for labelframe_style in ("TLabelframe", "TLabelFrame"):
+            style.configure(
+                labelframe_style,
+                background=self._bg_color,
+                foreground=self._text_fg,
+                bordercolor=self._border_color,
+                lightcolor=self._border_color,
+                darkcolor=self._border_color,
+            )
+        for label_style in ("TLabelframe.Label", "TLabelFrame.Label"):
+            style.configure(label_style, background=self._bg_color, foreground=self._text_fg)
+
+        style.configure(
+            "TButton",
+            background=self._surface_alt_color,
+            foreground=self._text_fg,
+            bordercolor=self._border_color,
+            focuscolor=self._accent_color,
+            padding=(10, 5),
         )
-        muted = (
-            style.lookup("TLabel", "foreground", state=("disabled",)) or fallback_muted
-        )
-        accent = (
-            style.lookup("TButton", "bordercolor")
-            or style.lookup("TNotebook", "foreground")
-            or fallback_accent
-        )
-        select = (
-            style.lookup("TButton", "foreground", state=("selected",))
+        style.map(
+            "TButton",
+            background=[
+                ("disabled", self._surface_color),
+                ("active", self._select_color),
+                ("pressed", self._select_color),
+            ],
+            foreground=[
+                ("disabled", self._disabled_fg),
+                ("active", self._text_fg),
+                ("pressed", self._text_fg),
+            ],
         )
 
-        self.root.configure(bg=bg)
-        # set texts colors when created.
-        self._text_bg = surface
-        self._text_fg = fg
-        self._muted_fg = muted
-        self._bg_color = bg
-        self._surface_color = surface
-        self._accent_color = accent
-        self._select_color = select
+        style.configure(
+            "TEntry",
+            fieldbackground=self._surface_color,
+            background=self._surface_color,
+            foreground=self._text_fg,
+            insertcolor=self._text_fg,
+            bordercolor=self._border_color,
+        )
+        style.map(
+            "TEntry",
+            fieldbackground=[("disabled", self._surface_color), ("readonly", self._surface_color)],
+            foreground=[("disabled", self._disabled_fg)],
+        )
+
+        style.configure(
+            "TCombobox",
+            fieldbackground=self._surface_color,
+            background=self._surface_alt_color,
+            foreground=self._text_fg,
+            arrowcolor=self._text_fg,
+            bordercolor=self._border_color,
+            selectbackground=self._select_color,
+            selectforeground=self._text_fg,
+        )
+        style.map(
+            "TCombobox",
+            fieldbackground=[("readonly", self._surface_color)],
+            foreground=[("readonly", self._text_fg)],
+            background=[("active", self._surface_alt_color)],
+            arrowcolor=[("active", self._text_fg)],
+        )
+
+        style.configure("TCheckbutton", background=self._bg_color, foreground=self._text_fg, focuscolor=self._accent_color)
+        style.map(
+            "TCheckbutton",
+            background=[("active", self._bg_color)],
+            foreground=[("disabled", self._disabled_fg), ("active", self._text_fg)],
+        )
+
+        style.configure("TRadiobutton", background=self._bg_color, foreground=self._text_fg, focuscolor=self._accent_color)
+        style.map(
+            "TRadiobutton",
+            background=[("active", self._bg_color)],
+            foreground=[("disabled", self._disabled_fg), ("active", self._text_fg)],
+        )
+
+        style.configure(
+            "Vertical.TScrollbar",
+            background=self._surface_alt_color,
+            troughcolor=self._bg_color,
+            bordercolor=self._border_color,
+            arrowcolor=self._text_fg,
+            gripcount=0,
+        )
+        style.map(
+            "Vertical.TScrollbar",
+            background=[("active", self._select_color)],
+            arrowcolor=[("active", self._text_fg)],
+        )
+
+        style.configure(
+            "TProgressbar",
+            background=self._accent_color,
+            troughcolor=self._surface_color,
+            bordercolor=self._border_color,
+            lightcolor=self._accent_color,
+            darkcolor=self._accent_color,
+        )
+
+    def set_theme(self, theme: str) -> None:
+        """Switch the whole application between the available themes."""
+        self._apply_theme(theme)
+        self._style_existing_widgets()
+        self.update_step_display()
+
+    def _style_existing_widgets(self) -> None:
+        """Re-apply current colors to all already-created widgets and menus."""
+        self._darken_tk_widget(self.root)
+
+        if hasattr(self, "config_window") and self.config_window.winfo_exists():
+            self._darken_tk_widget(self.config_window)
+
+        for menu in getattr(self, "_menus", []):
+            self._darken_menu(menu)
+
+    def _darken_menu(self, menu: tk.Menu) -> None:
+        """Best-effort dark styling for classic Tk menus."""
+        try:
+            menu.configure(
+                bg=self._surface_color,
+                fg=self._text_fg,
+                activebackground=self._select_color,
+                activeforeground=self._text_fg,
+                disabledforeground=self._disabled_fg,
+                selectcolor=self._accent_color,
+            )
+        except tk.TclError:
+            pass
+
+    def _darken_tk_widget(self, widget: tk.Misc) -> None:
+        """
+        Recursively apply dark colors to classic Tk widgets.
+
+        This is necessary because ttk themes do not affect tk.Frame, tk.Label,
+        tk.LabelFrame, tk.Listbox, tk.Checkbutton, tk.Radiobutton, tk.Canvas,
+        tk.Text, or tk.Menu.
+        """
+        cls = widget.winfo_class()
+
+        try:
+            if isinstance(widget, tk.Menu):
+                self._darken_menu(widget)
+
+            elif cls in {"Frame", "TFrame"}:
+                # ttk.Frame does not accept bg; tk.Frame does.
+                if not isinstance(widget, ttk.Frame):
+                    widget.configure(bg=self._bg_color)
+
+            elif cls in {"Labelframe", "LabelFrame"}:
+                widget.configure(
+                    bg=self._bg_color,
+                    fg=self._text_fg,
+                    highlightbackground=self._border_color,
+                    highlightcolor=self._accent_color,
+                )
+
+            elif cls == "Label":
+                widget.configure(
+                    bg=self._bg_color,
+                    fg=self._text_fg,
+                    activebackground=self._bg_color,
+                    activeforeground=self._text_fg,
+                )
+
+            elif cls == "Button":
+                widget.configure(
+                    bg=self._surface_alt_color,
+                    fg=self._text_fg,
+                    activebackground=self._select_color,
+                    activeforeground=self._text_fg,
+                    disabledforeground=self._disabled_fg,
+                    highlightbackground=self._bg_color,
+                    highlightcolor=self._accent_color,
+                )
+
+            elif cls in {"Checkbutton", "Radiobutton"}:
+                widget.configure(
+                    bg=self._bg_color,
+                    fg=self._text_fg,
+                    activebackground=self._bg_color,
+                    activeforeground=self._text_fg,
+                    disabledforeground=self._disabled_fg,
+                    selectcolor=self._surface_color,
+                    highlightbackground=self._bg_color,
+                    highlightcolor=self._accent_color,
+                )
+
+            elif cls == "Listbox":
+                widget.configure(
+                    bg=self._surface_color,
+                    fg=self._text_fg,
+                    selectbackground=self._select_color,
+                    selectforeground=self._text_fg,
+                    activestyle="none",
+                    highlightbackground=self._border_color,
+                    highlightcolor=self._accent_color,
+                    relief="flat",
+                )
+
+            elif cls == "Text":
+                widget.configure(
+                    bg=self._surface_color,
+                    fg=self._text_fg,
+                    insertbackground=self._text_fg,
+                    selectbackground=self._select_color,
+                    selectforeground=self._text_fg,
+                    highlightbackground=self._border_color,
+                    highlightcolor=self._accent_color,
+                    relief="flat",
+                )
+
+            elif cls == "Entry":
+                widget.configure(
+                    bg=self._surface_color,
+                    fg=self._text_fg,
+                    insertbackground=self._text_fg,
+                    selectbackground=self._select_color,
+                    selectforeground=self._text_fg,
+                    highlightbackground=self._border_color,
+                    highlightcolor=self._accent_color,
+                    relief="flat",
+                )
+
+            elif cls == "Canvas":
+                widget.configure(
+                    bg=self._bg_color,
+                    highlightbackground=self._bg_color,
+                    highlightcolor=self._accent_color,
+                )
+
+            elif cls == "Toplevel":
+                widget.configure(bg=self._bg_color)
+
+        except tk.TclError:
+            # Some widgets/classes do not support all options above.
+            pass
+
+        for child in widget.winfo_children():
+            self._darken_tk_widget(child)
 
     # -------------------
     # UI
@@ -146,21 +443,40 @@ class MainWindow:
     def _build_ui(self) -> None:
         self._build_menu()
 
-        container = ttk.Frame(self.root, padding=10)
+        container = ttk.Frame(self.root, padding=10, style="Dark.TFrame")
         container.pack(fill="both", expand=True)
 
-        self.minimal_frame = ttk.Frame(container, padding=10)
-        self.advanced_frame = ttk.Frame(container, padding=10)
+        self.minimal_frame = ttk.Frame(container, padding=10, style="Dark.TFrame")
+        self.advanced_frame = ttk.Frame(container, padding=10, style="Dark.TFrame")
 
         self._build_minimal_ui()
         self._build_advanced_ui()
 
     def _build_menu(self) -> None:
         self.ui_mode_var = tk.StringVar(value="minimal")
+        self._menus = []
 
-        menu_bar = tk.Menu(self.root, bg=self._bg_color)
+        menu_bar = tk.Menu(
+            self.root,
+            bg=self._surface_color,
+            fg=self._text_fg,
+            activebackground=self._select_color,
+            activeforeground=self._text_fg,
+            disabledforeground=self._disabled_fg,
+        )
+        self._menus.append(menu_bar)
 
-        view_menu = tk.Menu(menu_bar, tearoff=False, bg=self._bg_color)
+        view_menu = tk.Menu(
+            menu_bar,
+            tearoff=False,
+            bg=self._surface_color,
+            fg=self._text_fg,
+            activebackground=self._select_color,
+            activeforeground=self._text_fg,
+            disabledforeground=self._disabled_fg,
+            selectcolor=self._accent_color,
+        )
+        self._menus.append(view_menu)
         view_menu.add_radiobutton(
             label="Minimal UI",
             value="minimal",
@@ -173,18 +489,50 @@ class MainWindow:
             variable=self.ui_mode_var,
             command=self.update_mode,
         )
-
         menu_bar.add_cascade(label="View", menu=view_menu)
 
-        config_menu = tk.Menu(menu_bar, tearoff=False, bg=self._bg_color)
+        config_menu = tk.Menu(
+            menu_bar,
+            tearoff=False,
+            bg=self._surface_color,
+            fg=self._text_fg,
+            activebackground=self._select_color,
+            activeforeground=self._text_fg,
+            disabledforeground=self._disabled_fg,
+        )
+        self._menus.append(config_menu)
         config_menu.add_command(label="Open Configuration", command=self.show_config)
         config_menu.add_separator()
         config_menu.add_command(label="Modify dopplerview config", command=self.modify_dopplerview_config)
         config_menu.add_command(label="Modify models registry", command=self.modify_models_registry)
         config_menu.add_command(label="Modify h5 schema", command=self.modify_h5_schema)
         config_menu.add_command(label="Modify output config", command=self.modify_output_config)
-
         menu_bar.add_cascade(label="Config", menu=config_menu)
+
+        theme_menu = tk.Menu(
+            menu_bar,
+            tearoff=False,
+            bg=self._surface_color,
+            fg=self._text_fg,
+            activebackground=self._select_color,
+            activeforeground=self._text_fg,
+            disabledforeground=self._disabled_fg,
+            selectcolor=self._accent_color,
+        )
+        self._menus.append(theme_menu)
+        theme_menu.add_radiobutton(
+            label="Light",
+            value="light",
+            variable=self.theme_var,
+            command=lambda: self.set_theme("light"),
+        )
+        theme_menu.add_radiobutton(
+            label="Dark",
+            value="dark",
+            variable=self.theme_var,
+            command=lambda: self.set_theme("dark"),
+        )
+        menu_bar.add_cascade(label="Theme", menu=theme_menu)
 
         menu_bar.add_command(label="Help", command=self.show_help)
 
@@ -201,13 +549,15 @@ class MainWindow:
     def _build_minimal_ui(self):
         frame = self.minimal_frame
 
-        container = tk.Frame(frame)
+        container = tk.Frame(frame, bg=self._bg_color)
         container.place(relx=0.5, rely=0.5, anchor="center")
 
         self.minimal_title_label = tk.Label(
-            container, 
-            text="DopplerView", 
+            container,
+            text="DopplerView",
             font=self._get_minimal_title_font(),
+            bg=self._bg_color,
+            fg=self._text_fg,
         )
         self.minimal_title_label.grid(row=0, column=0, pady=(0, 10))
 
@@ -224,7 +574,7 @@ class MainWindow:
         # Input measures list
         # -------------------------------------------------
 
-        list_container = ttk.Frame(container)
+        list_container = ttk.Frame(container, style="Dark.TFrame")
         list_container.grid(
             row=3,
             column=0,
@@ -241,7 +591,11 @@ class MainWindow:
             width=50,
             bg=self._surface_color,
             fg=self._text_fg,
-            selectbackground=self._accent_color,
+            selectbackground=self._select_color,
+            selectforeground=self._text_fg,
+            highlightbackground=self._border_color,
+            highlightcolor=self._accent_color,
+            relief="flat",
             activestyle="none",
             exportselection=False,
         )
@@ -321,7 +675,14 @@ class MainWindow:
         # Input measures panel
         # -------------------------------------------------
 
-        self.input_panel = tk.LabelFrame(frame, text="Input Measures")
+        self.input_panel = tk.LabelFrame(
+            frame,
+            text="Input Measures",
+            bg=self._bg_color,
+            fg=self._text_fg,
+            highlightbackground=self._border_color,
+            highlightcolor=self._accent_color,
+        )
         self.input_panel.grid(
             row=row,
             column=0,
@@ -334,7 +695,7 @@ class MainWindow:
         self.input_panel.grid_rowconfigure(0, weight=1)
 
         # Listbox + scrollbar container
-        list_container = ttk.Frame(self.input_panel)
+        list_container = ttk.Frame(self.input_panel, style="Dark.TFrame")
         list_container.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
 
         list_container.grid_columnconfigure(0, weight=1)
@@ -345,7 +706,11 @@ class MainWindow:
             height=6,
             bg=self._surface_color,
             fg=self._text_fg,
-            selectbackground=self._accent_color,
+            selectbackground=self._select_color,
+            selectforeground=self._text_fg,
+            highlightbackground=self._border_color,
+            highlightcolor=self._accent_color,
+            relief="flat",
             activestyle="none",
             exportselection=False,
         )
@@ -382,7 +747,14 @@ class MainWindow:
         row += 1
 
         # --- Steps frame ---
-        self.steps_frame = tk.LabelFrame(frame, text="Pipeline Steps")
+        self.steps_frame = tk.LabelFrame(
+            frame,
+            text="Pipeline Steps",
+            bg=self._bg_color,
+            fg=self._text_fg,
+            highlightbackground=self._border_color,
+            highlightcolor=self._accent_color,
+        )
         self.steps_frame.grid(row=row, column=0, padx=5, pady=5, sticky="nsew")
         self.steps_frame.grid_columnconfigure(0, weight=1)
         row += 1
@@ -402,7 +774,13 @@ class MainWindow:
                     text=step,
                     variable=var,
                     command=lambda s=step: self.on_step_toggle(s),
+                    bg=self._bg_color,
                     fg=self._text_fg,
+                    activebackground=self._bg_color,
+                    activeforeground=self._text_fg,
+                    selectcolor=self._surface_color,
+                    highlightbackground=self._bg_color,
+                    highlightcolor=self._accent_color,
                 )
                 cb.grid(row=i, column=j, sticky="w")
 
@@ -422,7 +800,7 @@ class MainWindow:
         row += 1
 
         # --- Image display ---
-        self.image_label = tk.Label(frame)
+        self.image_label = tk.Label(frame, bg=self._bg_color, fg=self._text_fg)
         self.image_label.grid(row=row, column=0, pady=10, sticky="nsew")
 
     def _install_drop_targets(self) -> None:
@@ -449,14 +827,28 @@ class MainWindow:
         # -----------------------
         # LEFT: Models frame
         # -----------------------
-        models_frame = tk.LabelFrame(parent, text="Models")
+        models_frame = tk.LabelFrame(
+            parent,
+            text="Models",
+            bg=self._bg_color,
+            fg=self._text_fg,
+            highlightbackground=self._border_color,
+            highlightcolor=self._accent_color,
+        )
         models_frame.grid(row=0, column=0, padx=5, pady=5, sticky="nsew")
         models_frame.grid_columnconfigure(0, weight=1)
 
         # -----------------------
         # RIGHT: Config panel
         # -----------------------
-        config_panel = tk.LabelFrame(parent, text="Configuration")
+        config_panel = tk.LabelFrame(
+            parent,
+            text="Configuration",
+            bg=self._bg_color,
+            fg=self._text_fg,
+            highlightbackground=self._border_color,
+            highlightcolor=self._accent_color,
+        )
         config_panel.grid(row=0, column=1, padx=5, pady=5, sticky="nsew")
         config_panel.grid_columnconfigure(0, weight=1)
 
@@ -474,6 +866,11 @@ class MainWindow:
             value="default",
             anchor="w",
             command=self.update_config_mode,
+            bg=self._bg_color,
+            fg=self._text_fg,
+            activebackground=self._bg_color,
+            activeforeground=self._text_fg,
+            selectcolor=self._surface_color,
         )
         rb_default.grid(row=0, column=0, sticky="w")
 
@@ -484,6 +881,11 @@ class MainWindow:
             value="local",
             anchor="w",
             command=self.update_config_mode,
+            bg=self._bg_color,
+            fg=self._text_fg,
+            activebackground=self._bg_color,
+            activeforeground=self._text_fg,
+            selectcolor=self._surface_color,
         )
         rb_local.grid(row=0, column=1, sticky="w")
 
@@ -516,7 +918,12 @@ class MainWindow:
         mm = ctx.model_manager
 
         def create_model_selector(parent_widget, label_text, task_name, r):
-            tk.Label(parent_widget, text=label_text).grid(row=r, column=0, sticky="w")
+            tk.Label(
+                parent_widget,
+                text=label_text,
+                bg=self._bg_color,
+                fg=self._text_fg,
+            ).grid(row=r, column=0, sticky="w")
 
             values = mm.get_model_name_list_for_task(task_name)
             var = tk.StringVar(value=values[0] if values else "")
@@ -580,10 +987,11 @@ class MainWindow:
         self.config_window.geometry("600x240")
         self.config_window.configure(bg=self._bg_color)
 
-        container = ttk.Frame(self.config_window, padding=10)
+        container = ttk.Frame(self.config_window, padding=10, style="Dark.TFrame")
         container.pack(fill="both", expand=True)
 
         self._populate_configuration_frame(container)
+        self._darken_tk_widget(self.config_window)
 
     # -------------------
     # Actions
@@ -637,11 +1045,13 @@ class MainWindow:
     def update_step_color(self, step, state):
         cb = self.step_checkboxes[step]
         if state == "done" or state == "cached":
-            color =  "#26ac5c"
+            color = "#26ac5c"
         elif state == "running":
             color = "#d7a61e"
+        else:
+            color = self._surface_color
 
-        cb.config(selectcolor=color)
+        cb.config(selectcolor=color, bg=self._bg_color, fg=self._text_fg)
 
     def update_step_display(self):
         pipeline = self.pipeline
@@ -662,7 +1072,7 @@ class MainWindow:
                 else:
                     color = "#d7a61e"
             else:
-                color = "#ffffff"
+                color = self._surface_color
 
             cb.config(selectcolor=color)
 
@@ -730,6 +1140,7 @@ class MainWindow:
         elif config_type == "models_config":
             self.pipeline.load_model_registry(path)
             self._build_advanced_ui()  # rebuild to update model lists in dropdowns
+            self._darken_tk_widget(self.advanced_frame)
 
         elif config_type == "h5_schema":
             self.output_manager.load_h5_schema(path)
