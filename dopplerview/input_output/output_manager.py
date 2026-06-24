@@ -22,7 +22,7 @@ class OutputManager:
         self,
         schema_path,
         output_config_path,
-        enable_output=True,
+        output_enabled=True,
     ):
         self.schema_path = schema_path
         self.schema = self.load_h5_schema(schema_path)
@@ -48,7 +48,7 @@ class OutputManager:
         self.cache_queue = queue.Queue()
         self.cache_worker = None
 
-        self.enable_output = enable_output
+        self.output_enabled = output_enabled
 
     def __del__(self):
         self.close_workers()
@@ -190,7 +190,7 @@ class OutputManager:
         self.cache_path = None
 
     def ensure_output_folder(self):
-        if not self.enable_output:
+        if not self.output_enabled:
             return
         if self.dopplerview_folder is None:
             raise ValueError("DopplerView folder is not set. Cannot ensure output folder.")
@@ -238,7 +238,7 @@ class OutputManager:
 
     def output(self, step_name, filename, value, type=None, options=None):
         """Outputs a value manually for debugging purposes based on the provided output configuration."""
-        if not self.enable_output:
+        if not self.output_enabled:
             return
         if type is None:
             logger.warning(f"No output type specified for key '{step_name}', skipping debug output.")
@@ -272,17 +272,17 @@ class OutputManager:
 
     def save(self, step_name, key, ctx):
         self.save_h5(key, ctx)
-        if self.enable_output:
+        if self.output_enabled:
             self.output_cache(step_name, key, ctx)
 
     def enable_output(self):
-        self.enable_output = True
+        self.output_enabled = True
     
     def disable_output(self):
-        self.enable_output = False
+        self.output_enabled = False
 
     def save_overlay(self, step_name, filename, image, artery_mask, vein_mask=None):
-        if not self.enable_output:
+        if not self.output_enabled:
             return
         step_dir = self.ensure_step_dir(step_name)
         path = step_dir / f"{filename}.png"
@@ -304,7 +304,7 @@ class OutputManager:
         cv2.imwrite(str(path), img)
 
     def save_clusterization(self, step_name, filename, labels, z):
-        if not self.enable_output:
+        if not self.output_enabled:
             return
         plt.figure(figsize=(6,6))
         theta = np.linspace(0, 2*np.pi, 500)
