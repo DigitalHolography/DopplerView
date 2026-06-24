@@ -3,6 +3,8 @@
 ## 1.7.0
 * GUI
     * Enable light/dark theme switching
+    * Enable / disable steps outputs in output folder (disabled by default)
+    * Stop at retinal artery/vein segmentation and optic disc detection by default
 
 ## 1.6.0
 * GUI

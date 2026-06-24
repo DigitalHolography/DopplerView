@@ -59,7 +59,7 @@ class MainWindow:
         self.register_config_file(h5_schema_path, "h5_schema")
         output_config_path = user_config.ensure_config_file("output_config.json")
         self.register_config_file(output_config_path, "output_config")
-        self.output_manager = OutputManager(h5_schema_path, output_config_path)
+        self.output_manager = OutputManager(h5_schema_path, output_config_path, output_enabled=False)
         self.pipeline = Pipeline(output_manager=self.output_manager)
 
         models_config = user_config.ensure_config_file("models.yaml")
@@ -92,6 +92,8 @@ class MainWindow:
 
         self.step_index = 0
         self.measure_index = 0
+
+        self.enable_debug_output = False
 
 
     def _apply_theme(self, theme: str | None = None) -> None:
@@ -765,9 +767,11 @@ class MainWindow:
         steps = self.pipeline.get_step_names()
         waves = self.pipeline.engine.build_execution_waves(steps)
 
+        optional_steps = ["retinal_vessel_velocity_estimator", "arterial_waveform_analysis"]
+
         for i, wave in enumerate(waves):
             for j, step in enumerate(wave):
-                var = tk.BooleanVar(value=True)
+                var = tk.BooleanVar(value=step not in optional_steps)
 
                 cb = tk.Checkbutton(
                     self.steps_frame,
@@ -837,6 +841,24 @@ class MainWindow:
         )
         models_frame.grid(row=0, column=0, padx=5, pady=5, sticky="nsew")
         models_frame.grid_columnconfigure(0, weight=1)
+
+        steps_frame = tk.LabelFrame(
+            parent,
+            text="Steps",
+            bg=self._bg_color,
+            fg=self._text_fg,
+            highlightbackground=self._border_color,
+            highlightcolor=self._accent_color,
+        )
+        steps_frame.grid(row=1, column=0, padx=5, pady=5, sticky="nsew")
+        steps_frame.grid_columnconfigure(0, weight=1)
+
+        debug_output_button = ttk.Checkbutton(
+            steps_frame,
+            text="Enable Debug Output",
+            command=self.toggle_debug_output
+        )
+        debug_output_button.grid(row=0, column=0, sticky="ew", pady=5)
 
         # -----------------------
         # RIGHT: Config panel
@@ -984,7 +1006,7 @@ class MainWindow:
 
         self.config_window = tk.Toplevel(self.root)
         self.config_window.title("DopplerView Configuration")
-        self.config_window.geometry("600x240")
+        self.config_window.geometry("600x300")
         self.config_window.configure(bg=self._bg_color)
 
         container = ttk.Frame(self.config_window, padding=10, style="Dark.TFrame")
@@ -996,6 +1018,13 @@ class MainWindow:
     # -------------------
     # Actions
     # -------------------
+
+    def toggle_debug_output(self):
+        self.enable_debug_output = not self.enable_debug_output
+        if self.enable_debug_output:
+            self.output_manager.enable_output()
+        else:
+            self.output_manager.disable_output()
 
     def on_focus(self, event=None):
         self.check_config_updates()
