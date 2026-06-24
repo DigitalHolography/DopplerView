@@ -8,6 +8,8 @@ from skimage.measure import regionprops
 import matplotlib.pyplot as plt
 import cv2
 from skimage.color import lab2rgb
+from skimage.restoration import inpaint
+from dopplerview.utils.parallelization_utils import run_in_parallel
 
 import logging
 logger = logging.getLogger(__name__)
@@ -217,3 +219,63 @@ def lab_duo_image(image_1, image_2, h=45):
     rgb = lab2rgb(lab)
 
     return rgb
+
+def inpaint_frame(frame, mask):
+    """
+    Inpaint a single frame using biharmonic inpainting.
+
+    Parameters
+    ----------
+    frame : ndarray
+        2D array representing the image to be inpainted.
+    mask : ndarray
+        2D boolean array where True indicates the pixels to be inpainted.
+
+    Returns
+    -------
+    inpainted_frame : ndarray
+        The inpainted image.
+    """
+
+    # Ensure the frame is in float format for inpainting
+    frame_float = frame.astype(np.float32)
+
+    # Inpaint the frame using the provided mask
+    inpainted_frame = inpaint.inpaint_biharmonic(frame_float, mask)
+
+    return inpainted_frame
+
+def inpaint_stack(stack, mask, n_jobs=-1, dilation_radius=0):
+    """
+    Inpaint a stack of frames using biharmonic inpainting.
+
+    Parameters
+    ----------
+    stack : ndarray
+        3D array representing the stack of images to be inpainted (T, H, W).
+    mask : ndarray
+        2D boolean array where True indicates the pixels to be inpainted.
+    n_jobs : int
+        Number of parallel jobs to run.
+    dilation_radius : int
+        Radius for dilating the mask before inpainting.
+
+    Returns
+    -------
+    inpainted_stack : ndarray
+        The inpainted stack of images.
+    """
+
+    if dilation_radius > 0:
+        from skimage.morphology import dilation, disk
+        mask = dilation(mask, disk(dilation_radius))
+        
+    def _inpaint_frame(frame):
+        return inpaint_frame(frame, mask)
+
+    if n_jobs == 1:
+        inpainted_stack = np.array([_inpaint_frame(frame) for frame in stack])
+    else:
+        inpainted_stack = np.array(run_in_parallel(_inpaint_frame, stack, n_jobs=n_jobs))
+
+    return inpainted_stack

@@ -437,7 +437,7 @@ def get_filtered_branch_signals(video, labeled_vessels, sampling_frequency):
     for i in range(1, num_branches + 1):
         branch_mask = (labeled_vessels == i)
         branch_pixels = video[:, branch_mask]
-        branch_mean = np.mean(branch_pixels, axis=1)
+        branch_mean = np.nanmean(branch_pixels, axis=1)
 
         signals[i - 1, :] = filtfilt(b, a, branch_mean)
 
