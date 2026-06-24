@@ -59,7 +59,7 @@ class MainWindow:
         self.register_config_file(h5_schema_path, "h5_schema")
         output_config_path = user_config.ensure_config_file("output_config.json")
         self.register_config_file(output_config_path, "output_config")
-        self.output_manager = OutputManager(h5_schema_path, output_config_path)
+        self.output_manager = OutputManager(h5_schema_path, output_config_path, enable_output=False)
         self.pipeline = Pipeline(output_manager=self.output_manager)
 
         models_config = user_config.ensure_config_file("models.yaml")

@@ -21,7 +21,8 @@ class OutputManager:
     def __init__(
         self,
         schema_path,
-        output_config_path
+        output_config_path,
+        enable_output=True,
     ):
         self.schema_path = schema_path
         self.schema = self.load_h5_schema(schema_path)
@@ -46,6 +47,8 @@ class OutputManager:
 
         self.cache_queue = queue.Queue()
         self.cache_worker = None
+
+        self.enable_output = enable_output
 
     def __del__(self):
         self.close_workers()
@@ -187,6 +190,8 @@ class OutputManager:
         self.cache_path = None
 
     def ensure_output_folder(self):
+        if not self.enable_output:
+            return
         if self.dopplerview_folder is None:
             raise ValueError("DopplerView folder is not set. Cannot ensure output folder.")
         if self.output_dir is None:
@@ -233,6 +238,8 @@ class OutputManager:
 
     def output(self, step_name, filename, value, type=None, options=None):
         """Outputs a value manually for debugging purposes based on the provided output configuration."""
+        if not self.enable_output:
+            return
         if type is None:
             logger.warning(f"No output type specified for key '{step_name}', skipping debug output.")
             return
@@ -265,9 +272,18 @@ class OutputManager:
 
     def save(self, step_name, key, ctx):
         self.save_h5(key, ctx)
-        self.output_cache(step_name, key, ctx)
+        if self.enable_output:
+            self.output_cache(step_name, key, ctx)
+
+    def enable_output(self):
+        self.enable_output = True
+    
+    def disable_output(self):
+        self.enable_output = False
 
     def save_overlay(self, step_name, filename, image, artery_mask, vein_mask=None):
+        if not self.enable_output:
+            return
         step_dir = self.ensure_step_dir(step_name)
         path = step_dir / f"{filename}.png"
 
@@ -288,6 +304,8 @@ class OutputManager:
         cv2.imwrite(str(path), img)
 
     def save_clusterization(self, step_name, filename, labels, z):
+        if not self.enable_output:
+            return
         plt.figure(figsize=(6,6))
         theta = np.linspace(0, 2*np.pi, 500)
 
