@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.0
+* GUI
+    * Enable light/dark theme switching
+
 ## 1.6.0
 * GUI
     * Move configuration in a specific window, and allow dynamic modification of config files
