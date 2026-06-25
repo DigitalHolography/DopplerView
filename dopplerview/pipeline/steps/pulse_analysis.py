@@ -43,7 +43,7 @@ class PreArteryMaskStep(BaseStep):
         self.logger.info(f"    - Camera sampling frequency: {fs} Hz, batch stride: {stride}. Effective sampling frequency after accounting for batch stride: {sampling_frequency:.2f} Hz                                            ")
 
         # --- Step 1: Separate mask into branches ---
-        labeled_vessels, _ = process_masks.get_labeled_vesselness(vessel_mask, *optic_disc_center)
+        labeled_vessels, _ = process_masks.get_labeled_vessels(vessel_mask, *optic_disc_center)
         ctx.set("labeled_vessels", labeled_vessels)
 
         # --- Step 2: Compute mean temporal signal for each branch ---
@@ -89,7 +89,7 @@ class PreArteryMaskStep(BaseStep):
 
 class ComputeTemporalCuesStep(BaseStep):
     requires = {"M0_ff_video", "pre_artery_mask", "choroidal_vessel_mask"}
-    produces = {"correlation", "diasys_image", "pre_arterial_pulse", "choroidal_pulse", "pre_arterial_pulse_filtered", "choroidal_pulse_filtered", "pre_arterial_pulse_cleaned", "pre_venous_pulse", "pre_venous_pulse_filtered", "M0_ff_image_cleaned", "beat_period", "systole_image", "diastole_image", "systole_index_list"}
+    produces = {"correlation", "diasys_image", "pre_arterial_pulse", "choroidal_pulse", "pre_arterial_pulse_filtered", "choroidal_pulse_filtered", "pre_arterial_pulse_cleaned", "pre_venous_pulse", "pre_venous_pulse_filtered", "M0_ff_image_cleaned", "beat_period", "systole_image", "diastole_image", "systole_index_list", "correlation_LF_M0", "correlation_HF_M0", "correlation_band_ratio"}
     name = "temporal_cues"
 
     def _relevant_config(self, ctx):
@@ -154,6 +154,18 @@ class ComputeTemporalCuesStep(BaseStep):
         correlation_artery = signal_processing.compute_correlation(video_cleaned, arterial_pulse_cleaned)
         ctx.set("correlation", correlation_artery)
         ctx.output_manager.output("pulse_analysis", f"correlation map RGB", correlation_artery, "image", options={"blue_gray_red": True, "M0_ff_image": M0_ff_image_cleaned})
+        if ctx.has("LF_M0"):
+            LF_M0 = ctx.require("LF_M0")
+            correlation_LF_M0 = signal_processing.compute_correlation(LF_M0, arterial_pulse_filtered)
+            ctx.set("correlation_LF_M0", correlation_LF_M0)
+        if ctx.has("HF_M0"):
+            HF_M0 = ctx.require("HF_M0")
+            correlation_HF_M0 = signal_processing.compute_correlation(HF_M0, arterial_pulse_filtered)
+            ctx.set("correlation_HF_M0", correlation_HF_M0)
+        if ctx.has("band_ratio"):
+            band_ratio = ctx.require("band_ratio")
+            correlation_band_ratio = signal_processing.compute_correlation(band_ratio, arterial_pulse_filtered)
+            ctx.set("correlation_band_ratio", correlation_band_ratio)
 
         # --- Accumulate frames at the systolic and diastolic peaks of the filtered pulses ---
 

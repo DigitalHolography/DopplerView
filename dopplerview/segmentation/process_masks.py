@@ -79,14 +79,20 @@ def bwareafilt_largest(binary_mask, connectivity=2):
     largest_label = counts.argmax()
     return labeled == largest_label
 
-def get_labeled_vesselness(mask, x_center, y_center, r1=0.1, r2=0.35, numCircles=10):
+def get_labeled_vessels(mask, mask_optic_disc=True, x_center=None, y_center=None, r1=0.1, r2=0.35):
     numX, numY = mask.shape
-    dr = (r2 - r1) / numCircles
+
+    if mask_optic_disc:
+        if x_center is None:
+            x_center = numY / 2
+        if y_center is None:
+            y_center = numX / 2
 
     # Skeletonize and remove central circle
     skel = skeletonize(mask)
-    circle_mask = disk_mask(numX, numY, R1=r1, center=(x_center / numY, y_center/ numX))
-    skel = skel & ~circle_mask
+    if mask_optic_disc:
+        circle_mask = disk_mask(numX, numY, R1=r1, center=(x_center / numY, y_center/ numX))
+        skel = skel & ~circle_mask
 
     # Remove branch points
     neigh = np.array([[1,1,1],[1,10,1],[1,1,1]])
@@ -119,7 +125,8 @@ def get_labeled_vesselness(mask, x_center, y_center, r1=0.1, r2=0.35, numCircles
         branch_pixels = (L == i)
         labeled_vessels[branch_pixels] = i
     
-    labeled_vessels *= ~circle_mask
+    if mask_optic_disc:
+        labeled_vessels *= ~circle_mask
 
     return labeled_vessels, edges
 
