@@ -2,7 +2,7 @@ from dopplerview.pipeline.step import BaseStep
 from dopplerview.segmentation.process_masks import clean_vessel_mask
 import numpy as np
 
-class AVSegmentationStep(BaseStep):
+class RetinalAVSegmentationStep(BaseStep):
     requires = {"M0_ff_video", "M0_ff_image_cleaned", "correlation", "diasys_image", "optic_disc_center"}
     produces = {"retinal_artery_mask", "retinal_vein_mask", "retinal_artery_mask_clean", "retinal_vein_mask_clean"}
     name = "retinal_artery_vein_segmentation"
@@ -69,4 +69,20 @@ class AVSegmentationStep(BaseStep):
         ctx.set("retinal_artery_mask_clean", artery_mask_clean)
         ctx.set("retinal_vein_mask_clean", vein_mask_clean)
         ctx.output_manager.save_overlay(self.name, "av_overlay_cleaned", ctx.require("M0_ff_image_cleaned"), artery_mask_clean, vein_mask_clean)
-        
+
+class ChoroidalAVSegmentationStep(BaseStep):
+    requires = {"M0_ff_video", "M0_ff_image_cleaned", "HF_M0_FF", "retinal_artery_mask", "retinal_vein_mask"}
+    produces = {"choroidal_artery_mask", "choroidal_vein_mask"}
+    name = "choroidal_artery_vein_segmentation"
+
+    def _relevant_config(self, ctx):
+        return {}
+    
+    def run(self, ctx):
+        # Implement choroidal artery vein segmentation logic based on ctx and self.dopplerview_config
+        # For now, we will just set empty masks as placeholders
+        choroidal_artery_mask = np.zeros_like(ctx.require("M0_ff_image_cleaned"), dtype=np.uint8)
+        choroidal_vein_mask = np.zeros_like(ctx.require("M0_ff_image_cleaned"), dtype=np.uint8)
+
+        ctx.set("choroidal_artery_mask", choroidal_artery_mask)
+        ctx.set("choroidal_vein_mask", choroidal_vein_mask)

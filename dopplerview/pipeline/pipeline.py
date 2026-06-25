@@ -18,7 +18,7 @@ from dopplerview.pipeline.steps.optic_disc import OpticDiscSegmentationStep
 from dopplerview.pipeline.steps.eye_laterality_classification import EyeLateralityClassificationStep
 from dopplerview.pipeline.steps.vessel_segmentation import RetinalVesselSegmentationStep, ChoroidalVesselSegmentationStep
 from dopplerview.pipeline.steps.pulse_analysis import PulseAnalysisStep
-from dopplerview.pipeline.steps.av_segmentation import AVSegmentationStep
+from dopplerview.pipeline.steps.av_segmentation import ChoroidalAVSegmentationStep, RetinalAVSegmentationStep
 from dopplerview.input_output.read_folder import DopplerViewFolder, HolodopplerFolder
 from dopplerview.pipeline.steps.vessel_velocity_estimator import VesselVelocityEstimatorStep
 from dopplerview.pipeline.steps.arterial_waveform_analysis import ArterialWaveformAnalysisStep
@@ -277,7 +277,8 @@ class Pipeline:
             RetinalVesselSegmentationStep(),
             ChoroidalVesselSegmentationStep(),
             PulseAnalysisStep(),
-            AVSegmentationStep(),
+            RetinalAVSegmentationStep(),
+            ChoroidalAVSegmentationStep(),
             VesselVelocityEstimatorStep(),
             ArterialWaveformAnalysisStep(),
         }
