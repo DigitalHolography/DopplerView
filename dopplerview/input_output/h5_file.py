@@ -1,6 +1,9 @@
 import h5py
 from pathlib import Path
 
+import logging
+logger = logging.getLogger(__name__)
+
 def h5_group_to_dict(group, string_dtype=True):
     result = {}
     for key, item in group.items():

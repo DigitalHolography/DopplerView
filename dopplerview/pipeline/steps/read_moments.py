@@ -5,7 +5,7 @@ from dopplerview.pipeline.step import BaseStep
 
 class ReadMomentsStep(BaseStep):
     requires = {"input_file"}
-    produces = {"moment0", "moment1", "moment2", "band_ratio", "LF_M0", "HF_M0"}
+    produces = {"moment0", "moment1", "moment2", "LF_M0", "HF_M0"}
     name = "read_moments"
 
     def _relevant_config(self, ctx):
@@ -81,6 +81,5 @@ class ReadMomentsStep(BaseStep):
         ctx.set("moment0", M0)
         ctx.set("moment1", M1)
         ctx.set("moment2", M2)
-        ctx.set("band_ratio", band_ratio)
         ctx.set("LF_M0", LF_M0)
         ctx.set("HF_M0", HF_M0)
