@@ -43,21 +43,31 @@ class ReadMomentsStep(BaseStep):
 
                 if "LF_M0" in dataset_names:
                     self.logger.info("    - Reading the LF_M0 data")
-                    LF_M0 = np.transpose(np.squeeze(np.array(f["LF_M0"][()])), (0, 2, 1))
+                    try:
+                        lf_m0_data = f["LF_M0"][()]
+                    except:
+                        try:
+                            lf_m0_data = f["band_3000_9000"][:]
+                        except:
+                            self.logger.info("Warning: LF_M0 dataset not found")
+                            lf_m0_data = None
+                    if lf_m0_data is not None:
+                        LF_M0 = np.transpose(np.squeeze(np.array(f["LF_M0"][()])), (0, 2, 1))
                 else:
                     self.logger.info("Warning: LF_M0 dataset not found")
                 
                 if "HF_M0" in dataset_names:
                     self.logger.info("    - Reading the HF_M0 data")
-                    HF_M0 = np.transpose(np.squeeze(np.array(f["HF_M0"][()])), (0, 2, 1))
-                else:
-                    self.logger.info("Warning: HF_M0 dataset not found")
-
-                if "band_ratio" in dataset_names:
-                    self.logger.info("    - Reading the band_ratio data")
-                    band_ratio = np.transpose(np.squeeze(np.array(f["band_ratio"][()])), (0, 2, 1))
-                else:
-                    self.logger.info("Warning: band_ratio dataset not found")
+                    try:
+                        hf_m0_data = f["HF_M0"][()]
+                    except:
+                        try:
+                            hf_m0_data = f["band_9000_18000"][:]
+                        except:
+                            self.logger.info("Warning: HF_M0 dataset not found")
+                            hf_m0_data = None
+                    if hf_m0_data is not None:
+                        HF_M0 = np.transpose(np.squeeze(np.array(f["HF_M0"][()])), (0, 2, 1))
 
         except Exception as e:
             self.logger.info(f"ID: {type(e).__name__}")

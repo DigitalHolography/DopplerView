@@ -132,16 +132,17 @@ class Context:
         self.clear()  # Clear cache before loading new input
         self.measure_folder = measure_folder
 
-        self.HD_folder = HolodopplerFolder(self.measure_folder)
-        self.set("input_file", self.HD_folder.input_file)
-        self.load_holodoppler_config(self.HD_folder.holodoppler_config)
-
         self.output_manager.unset_DV_folder()  # Unset previous DV folder to avoid accidentally writing outputs to the wrong place if the new input doesn't have a DV folder
         self.load_DV_folder()
         self.output_manager.set_DV_folder(self.DV_folder)
 
         if self.debug_mode:
             self._read_h5_into_cache()
+
+        self.HD_folder = HolodopplerFolder(self.measure_folder)
+        logger.info(f"[Pipeline] Loading Holodoppler folder: {self.HD_folder.directory}")
+        self.set("input_file", self.HD_folder.input_file)
+        self.load_holodoppler_config(self.HD_folder.holodoppler_config)
 
     def load_DV_folder(self):
         if not self.measure_folder:
