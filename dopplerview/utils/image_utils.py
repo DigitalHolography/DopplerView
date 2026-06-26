@@ -37,12 +37,14 @@ def save_array_as_image(array, filename, foldername):
     image = Image.fromarray((array * 255).astype(np.uint8))  # Convert back to uint8 format
     image.save(f"{foldername}/{filename}")
 
-def normalize_image(image_array):
+def normalize_image(image_array, min_val=0, max_val=1):
     """
-    Normalize a numpy array image to the range [0, 1]
-    
+    Normalize a numpy array image to the range [min_val, max_val]
+
     Args:
         image_array: numpy array representation of the image (height, width, channels)
+        min_val: Minimum value for the normalized range
+        max_val: Maximum value for the normalized range
     
     Returns:
         Normalized image array with values in the range [0, 1]
