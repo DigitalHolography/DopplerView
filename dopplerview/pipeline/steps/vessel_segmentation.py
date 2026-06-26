@@ -70,7 +70,10 @@ class RetinalVesselSegmentationStep(VesselSegmentationStep):
 
         if method == "AI":
             self.logger.info("    - Use deep learning model for vessel segmentation.")
-            return self.deep_segmentation(ctx)
+            mask = self.deep_segmentation(ctx)
+            if mask.sum() == 0:
+                self.logger.warning("    - No vessels detected in the retinal vessel mask using deep model. Fallback to Frangi filter.")
+                method = "frangi"
 
         if method == "frangi":
             self.logger.info("    - Use Frangi filter for vessel segmentation.")
@@ -84,6 +87,8 @@ class RetinalVesselSegmentationStep(VesselSegmentationStep):
         clean_mask = self.clean_vessel_mask(raw_mask, ctx)
 
         ctx.set("retinal_vessel_mask", clean_mask)
+
+        ctx.output_manager.output(self.name, "retinal_vessel_mask", clean_mask, "mask")
 
 
 class ChoroidalVesselSegmentationStep(VesselSegmentationStep):
