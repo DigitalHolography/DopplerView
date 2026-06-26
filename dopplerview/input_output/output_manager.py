@@ -271,6 +271,8 @@ class OutputManager:
         self.cache_queue.put((ctx, step_fingerprint, step_name))
 
     def save(self, step_name, key, ctx):
+        if ctx.get(key) is None:
+            return
         self.save_h5(key, ctx)
         if self.output_enabled:
             self.output_cache(step_name, key, ctx)
@@ -324,3 +326,69 @@ class OutputManager:
         plt.legend()
         plt.savefig(self.ensure_step_dir(step_name) / f"{filename}.png")
         plt.close()
+
+
+    def save_optic_disc_detections(self, step_name, filename, boxes, scale_x, scale_y, ctx):
+        if not self.output_enabled:
+            return
+        # Image on which to draw
+        img = ctx.get("M0_ff_image")
+
+        # Convert grayscale to RGB for visualization
+        if img.ndim == 2:
+            vis = cv2.cvtColor(
+                img,
+                cv2.COLOR_GRAY2BGR,
+            )
+        else:
+            vis = img.copy()
+
+        candidates = boxes[0, :4, :].T.tolist()
+        scores = boxes[0, 4, :].tolist()
+        nb_boxes = min(len(candidates), 10)  # Limit to first 20 boxes for visualization
+        sorted_scores = sorted(scores, reverse=True)
+        score_treshold = sorted_scores[nb_boxes]
+        indices = cv2.dnn.NMSBoxes(
+            bboxes=candidates,
+            scores=scores,
+            score_threshold=score_treshold,
+            nms_threshold=0.4,
+        )
+
+        for j in indices:
+            x, y, w_box, h_box = candidates[j]
+            score = scores[j]
+
+            x1 = int(round(x * scale_x))
+            y1 = int(round(y * scale_y))
+            x2 = int(round((x + w_box) * scale_x))
+            y2 = int(round((y + h_box) * scale_y))
+
+            cv2.rectangle(vis, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2.putText(
+                vis,
+                f"{score:.3f}",
+                (x1, max(y1 - 5, 15)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 255, 0),
+                1,
+                cv2.LINE_AA,
+            )
+
+        # Highlight the selected box
+        best = boxes[:, :, np.argmax(boxes[:, 4, :])].flatten()
+        xc = best[0] * scale_x
+        yc = best[1] * scale_y
+        bw = best[2] * scale_x
+        bh = best[3] * scale_y
+
+        cv2.rectangle(
+            vis,
+            (int(xc), int(yc)),
+            (int(xc + bw), int(yc + bh)),
+            (255, 255, 0),   # cyan
+            3,
+        )
+
+        cv2.imwrite(self.ensure_step_dir(step_name) / f"{filename}.png", vis)

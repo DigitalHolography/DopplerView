@@ -526,9 +526,7 @@ def compute_pre_masks_by_clustering(signals, labeled_vessels, sampling_frequency
     """
 
     # --- Compute median heartbeat template for each branch ---
-    print(f"{signals.shape=}, {labeled_vessels.shape=}, {sampling_frequency=}")
     cycle_templates = [get_cycle_template(branch, sampling_frequency, return_period=True) for branch in signals]
-    # print(cycle_templates)
     templates, periods = zip(*cycle_templates)
     z = np.array([compute_z(template) for template in templates])
     X = np.column_stack([

@@ -24,19 +24,19 @@ class ReadMomentsStep(BaseStep):
 
                 try:
                     self.logger.info("    - Reading the M0 data")
-                    M0 = np.transpose(np.squeeze(np.array(f["moment0"][()])), (0, 2, 1))
+                    M0 = np.squeeze(np.array(f["moment0"][()]))
                 except:
                     self.logger.info("Warning: moment0 dataset not found")
 
                 try:
                     self.logger.info("    - Reading the M1 data")
-                    M1 = np.transpose(np.squeeze(np.array(f["moment1"][()])), (0, 2, 1))
+                    M1 = np.squeeze(np.array(f["moment1"][()]))
                 except:
                     self.logger.info("Warning: moment1 dataset not found")
 
                 try :
                     self.logger.info("    - Reading the M2 data")
-                    M2 = np.transpose(np.squeeze(np.array(f["moment2"][()])), (0, 2, 1))
+                    M2 = np.squeeze(np.array(f["moment2"][()]))
                 except:
                     self.logger.info("Warning: moment2 dataset not found")
 
@@ -50,7 +50,7 @@ class ReadMomentsStep(BaseStep):
                         self.logger.info("Warning: LF_M0 dataset not found")
                         lf_m0_data = None
                 if lf_m0_data is not None:
-                    LF_M0 = np.transpose(np.squeeze(np.array(lf_m0_data)), (0, 2, 1))
+                    LF_M0 = np.squeeze(np.array(lf_m0_data))
                 
                 self.logger.info("    - Reading the HF_M0 data")
                 try:
@@ -62,7 +62,7 @@ class ReadMomentsStep(BaseStep):
                         self.logger.info("Warning: HF_M0 dataset not found")
                         hf_m0_data = None
                 if hf_m0_data is not None:
-                    HF_M0 = np.transpose(np.squeeze(np.array(hf_m0_data)), (0, 2, 1))
+                    HF_M0 = np.squeeze(np.array(hf_m0_data))
 
         except Exception as e:
             self.logger.info(f"ID: {type(e).__name__}")

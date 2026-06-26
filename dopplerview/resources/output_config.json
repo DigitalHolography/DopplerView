@@ -5,6 +5,8 @@
     "LF_M0_ff_image": "image",
     "band_ratio_ff_image": "image",
     
+    "M1_ff_image": "image",
+
     "retinal_vessel_mask": "mask",
     "vessel_segmentation_logits": "image",
     

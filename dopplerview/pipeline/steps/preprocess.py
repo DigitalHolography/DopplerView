@@ -32,9 +32,13 @@ class PreprocessStep(BaseStep):
 
         M2_ff_video = normalization.flat_field_correction_3d(M2, gaussian_std * numx, parallel=True, n_jobs=n_jobs) # TODO: add parameter for parallelization 
 
-        HF_M0_ff = normalization.flat_field_correction_3d(HF_M0, gaussian_std * numx, parallel=True, n_jobs=n_jobs) # TODO: add parameter for parallelization 
-
-        LF_M0_ff = normalization.flat_field_correction_3d(LF_M0, gaussian_std * numx, parallel=True, n_jobs=n_jobs) # TODO: add parameter for parallelization 
+        if HF_M0 is None or LF_M0 is None:
+            self.logger.warning("    - HF_M0 or LF_M0 is None. Skipping flat field correction for HF_M0 and LF_M0.")
+            HF_M0_ff = None
+            LF_M0_ff = None
+        else:
+            HF_M0_ff = normalization.flat_field_correction_3d(HF_M0, gaussian_std * numx, parallel=True, n_jobs=n_jobs) # TODO: add parameter for parallelization 
+            LF_M0_ff = normalization.flat_field_correction_3d(LF_M0, gaussian_std * numx, parallel=True, n_jobs=n_jobs) # TODO: add parameter for parallelization 
 
         return M0_ff_video, M1_ff_video, M2_ff_video, HF_M0_ff, LF_M0_ff
     
@@ -64,7 +68,7 @@ class PreprocessStep(BaseStep):
         self.logger.info(f"    - Applying flat field correction to the moments with gaussian_std: {gaussian_std}, numx: {moment0.shape[2]}, n_jobs: {parallelization_utils.compute_n_jobs(n_jobs)}")
         M0_ff_video, M1_ff_video, M2_ff_video, HF_M0_ff, LF_M0_ff = self.normalize(gaussian_std, moment0, moment1, moment2, HF_M0, LF_M0, n_jobs=n_jobs)
 
-        band_ratio_ff = np.divide(HF_M0_ff, LF_M0_ff, out=np.zeros_like(HF_M0_ff), where=LF_M0_ff!=0)
+        band_ratio_ff = np.divide(HF_M0_ff, LF_M0_ff, out=np.zeros_like(HF_M0_ff), where=LF_M0_ff!=0) if HF_M0_ff is not None and LF_M0_ff is not None else None
         # # Step 2: Resize
         # self.resize()
 
