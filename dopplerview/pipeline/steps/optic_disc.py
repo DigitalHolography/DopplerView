@@ -144,8 +144,8 @@ class OpticDiscSegmentationStep(BaseStep):
                     center, width, height = self.deep_detection(ctx)
                     optic_disc_mask = process_masks.bbox_to_mask(center, width, height, M0_shape)
                 except Exception as e:
-                    self.logger.error(f"    - Error occurred during deep optic disc detection: {e}. Falling back to non-deep approach.")
-                    optic_disc_detection_method = "moment1"  # Fallback to moment1 detection if deep segmentation fails
+                    self.logger.error(f"    - Error occurred during deep optic disc detection: {e}.")
+                    center, width, height, optic_disc_mask = None, None, None, np.zeros(M0_shape, dtype=bool)
 
         if optic_disc_detection_method == "moment1":
             center, width, height = self.moment1_detection(ctx)
@@ -154,6 +154,8 @@ class OpticDiscSegmentationStep(BaseStep):
         if optic_disc_detection_method not in ["deep", "moment1"]:
             center, width, height = self.return_image_center(ctx)  # Fallback to image center if no model is used
             optic_disc_mask = process_masks.bbox_to_mask(center, width, height, M0_shape)
+
+        ctx.output_manager.output(self.name, "optic_disc_mask", optic_disc_mask, "mask")
 
         ctx.set("optic_disc_mask", optic_disc_mask)
         ctx.set("optic_disc_center", center)

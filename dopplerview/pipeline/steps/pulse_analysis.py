@@ -43,10 +43,7 @@ class PreArteryMaskStep(BaseStep):
         self.logger.info(f"    - Camera sampling frequency: {fs} Hz, batch stride: {stride}. Effective sampling frequency after accounting for batch stride: {sampling_frequency:.2f} Hz                                            ")
 
         # --- Step 1: Separate mask into branches ---
-        labeled_vessels, _ = process_masks.get_labeled_vessels(vessel_mask, *optic_disc_center)
-        if labeled_vessels.max() == 0:
-            self.logger.warning("    - No vessels detected in the retinal vessel mask, due to wrong optic disc center. Labeling vessels again without optic disc center.")
-            labeled_vessels, _ = process_masks.get_labeled_vessels(vessel_mask, mask_optic_disc=False)
+        labeled_vessels, _ = process_masks.get_labeled_vessels(vessel_mask, *optic_disc_center) if optic_disc_center is not None else process_masks.get_labeled_vessels(vessel_mask, mask_optic_disc=False)
         ctx.set("labeled_vessels", labeled_vessels)
 
         # --- Step 2: Compute mean temporal signal for each branch ---

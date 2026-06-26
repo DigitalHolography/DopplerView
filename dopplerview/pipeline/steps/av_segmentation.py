@@ -33,6 +33,10 @@ class RetinalAVSegmentationStep(BaseStep):
     
     def clean_mask(self, raw_mask, ctx):
         optic_disc_center = ctx.require("optic_disc_center")
+        if optic_disc_center is None:
+            self.logger.warning("    - Optic disc center not available. Skipping mask cleaning.")
+            return raw_mask
+        
         width, height = raw_mask.shape
         optic_disc_center = (optic_disc_center[0] / width, optic_disc_center[1] / height)
 
