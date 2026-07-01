@@ -1,11 +1,10 @@
 {
     "M0_ff_image": "image",
     "M0_ff_image_clean": "image",
+    "M1_ff_image": "image",
     "HF_M0_ff_image": "image",
     "LF_M0_ff_image": "image",
     "band_ratio_ff_image": "image",
-    
-    "M1_ff_image": "image",
 
     "retinal_vessel_mask": "mask",
     "vessel_segmentation_logits": "image",
@@ -16,6 +15,12 @@
 
     "correlation": "image",
     "correlation_vein": "image",
+    "correlation_LF_M0_ff": "image",
+    "correlation_HF_M0_ff": "image",
+    "correlation_band_ratio_ff": "image",
+    "diasys_LF_M0_ff": "image",
+    "diasys_HF_M0_ff": "image",
+    "diasys_band_ratio_ff": "image",
     "diasys_image": "image",
     "pre_artery_mask": "mask",
     "pre_vein_mask": "mask",
@@ -23,6 +28,7 @@
     "choroidal_vessel_mask": "mask",
     "choroidal_artery_mask": "mask",
     "choroidal_vein_mask": "mask",
+    "choroidal_aliased_artery_mask": "mask",
     
     "vessel_pulse": "signal",
     "pre_arterial_pulse": "signal",

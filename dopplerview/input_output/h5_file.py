@@ -38,4 +38,7 @@ def write_dict_to_h5(data_dict, h5_path, overwrite=True):
                     del h5_cache[key]
                 else:
                     continue
-            h5_cache.create_dataset(key, data=hdf5_safe(value))
+            try:
+                h5_cache.create_dataset(key, data=hdf5_safe(value))
+            except Exception as e:
+                logger.error(f"Failed to write key '{key}' to HDF5 file: {e}")

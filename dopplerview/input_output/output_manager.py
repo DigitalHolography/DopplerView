@@ -126,7 +126,7 @@ class OutputManager:
                 ctx.cache_values(produced_cache.keys())
 
             except Exception as e:
-                logger.exception(f"Error saving cache: {e}")
+                logger.exception(f"Error saving cache: {e} for step '{step_name}' with fingerprint '{step_fingerprint}'")
             self.cache_queue.task_done()
 
     def load_h5_schema(self, schema_path):
@@ -272,6 +272,7 @@ class OutputManager:
 
     def save(self, step_name, key, ctx):
         if ctx.get(key) is None:
+            logger.warning(f"Value for key '{key}' is None, skipping save.")
             return
         self.save_h5(key, ctx)
         if self.output_enabled:
@@ -283,7 +284,7 @@ class OutputManager:
     def disable_output(self):
         self.output_enabled = False
 
-    def save_overlay(self, step_name, filename, image, artery_mask, vein_mask=None):
+    def save_overlay(self, step_name, filename, image, masks, colors=[(0, 0, 255), (255, 0, 0)], artery_mask=None, vein_mask=None):
         if not self.output_enabled:
             return
         step_dir = self.ensure_step_dir(step_name)
@@ -294,14 +295,9 @@ class OutputManager:
         if img.ndim == 2:
             img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
 
-        if artery_mask is not None:
-            if vein_mask is not None:
-                img[artery_mask > 0] = [0, 0, 255]
-            else:
-                img[artery_mask > 0] = [255, 250, 250]
-
-        if vein_mask is not None:
-            img[vein_mask > 0] = [255, 0, 0]
+        for i, mask in enumerate(masks):
+            color = colors[i % len(colors)]
+            img[mask > 0] = color
 
         cv2.imwrite(str(path), img)
 

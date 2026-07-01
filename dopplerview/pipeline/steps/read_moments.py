@@ -59,8 +59,11 @@ class ReadMomentsStep(BaseStep):
                     try:
                         hf_m0_data = f["band_16000_18000"][:]
                     except:
-                        self.logger.info("Warning: HF_M0 dataset not found")
-                        hf_m0_data = None
+                        try:
+                            hf_m0_data = f["band_16000_20000"][:]
+                        except:
+                            self.logger.info("Warning: HF_M0 dataset not found")
+                            hf_m0_data = None
                 if hf_m0_data is not None:
                     HF_M0 = np.squeeze(np.array(hf_m0_data))
 

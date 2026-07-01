@@ -83,7 +83,7 @@ class PreArteryMaskStep(BaseStep):
         elif pre_mask_method == "gradient":
             self.logger.info("    - Pre-classifying arteries and veins using systolic gradient")
             pre_artery_mask, pre_vein_mask = pulse_analysis.compute_pre_masks_by_systolic_gradient(signals_n, labeled_vessels, sampling_frequency)
-        ctx.output_manager.save_overlay("pulse_analysis", "av_overlay_pre_masks", ctx.require("M0_ff_image"), pre_artery_mask, pre_vein_mask)
+        ctx.output_manager.save_overlay("pulse_analysis", "av_overlay_pre_masks", ctx.require("M0_ff_image"), [pre_artery_mask, pre_vein_mask])
         ctx.set("pre_artery_mask", pre_artery_mask)
         ctx.set("pre_vein_mask", pre_vein_mask)
 

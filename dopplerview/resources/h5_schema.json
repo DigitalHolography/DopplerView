@@ -12,6 +12,7 @@
         "Choroid": {
             "vessel_mask": "choroidal_vessel_mask",
             "artery_mask": "choroidal_artery_mask",
+            "aliased_artery_mask": "choroidal_aliased_artery_mask",
             "vein_mask": "choroidal_vein_mask"
         },
         "OpticDisc": {
@@ -47,5 +48,9 @@
     "laterality": {
         "eye_laterality": "eye_laterality",
         "eye_laterality_confidence": "eye_laterality_confidence"
+    },
+    "doppler_signal": {
+        "M0_ff": "M0_ff_video",
+        "M0_ff_cleaned": "video_cleaned"
     }
 }
