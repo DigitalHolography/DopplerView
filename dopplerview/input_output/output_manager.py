@@ -17,6 +17,20 @@ import threading
 import logging
 logger = logging.getLogger(__name__)
 
+class OutputContextView:
+    def __init__(self, ctx, overrides):
+        self.ctx = ctx
+        self.overrides = overrides
+
+    def get(self, key):
+        if key in self.overrides:
+            return self.overrides[key]
+        return self.ctx.get(key)
+
+    def has(self, key):
+        return key in self.overrides or self.ctx.has(key)
+
+
 class OutputManager:
     def __init__(
         self,
@@ -46,6 +60,39 @@ class OutputManager:
 
         self.cache_queue = queue.Queue()
         self.cache_worker = None
+
+    def _retranspose_output(self, key, value, type=None):
+        """transpose output to reflect input axes"""
+        spatial_output_types = {"image", "mask", "labeled_mask"}
+        spatial_h5_keys = {
+            "retinal_vessel_mask",
+            "labeled_vessels",
+            "vessel_segmentation_logits",
+            "retinal_artery_mask",
+            "retinal_vein_mask",
+            "retinal_artery_mask_clean",
+            "retinal_vein_mask_clean",
+            "choroidal_vessel_mask",
+            "choroidal_artery_mask",
+            "choroidal_vein_mask",
+            "optic_disc_mask",
+            "retinal_vessel_velocity",
+            "velocity_map_avg",
+            "fRMS_avg",
+            "fRMS_bkg_avg",
+        }
+
+        if not (
+            isinstance(value, np.ndarray)
+            and value.ndim >= 2
+            and (type in spatial_output_types or key in spatial_h5_keys)
+        ):
+            return value
+
+        if type in spatial_output_types and key not in spatial_h5_keys and value.ndim >= 3 and value.shape[-1] in (3, 4):
+            return np.swapaxes(value, -3, -2)
+
+        return np.swapaxes(value, -1, -2)
 
     def __del__(self):
         self.close_workers()
@@ -150,6 +197,8 @@ class OutputManager:
                 del h5[path]
 
             value = ctx.get(key)
+            #transpose outputs
+            value = self._retranspose_output(key, value)
             h5.create_dataset(path, data=value)
 
     def write_dopplerview_config(self):
@@ -220,7 +269,8 @@ class OutputManager:
 
         path = step_dir / f"{key}.png"
 
-        renderer.render(key, ctx, path)
+        output_ctx = OutputContextView(ctx, {key: self._retranspose_output(key, ctx.get(key), type)})
+        renderer.render(key, output_ctx, path)
     
     def ensure_step_dir(self, step_name):
             # Lasily create the output folder when we actually need to output something, to avoid creating empty output folders for runs that don't produce any outputs
@@ -246,7 +296,7 @@ class OutputManager:
 
         path = step_dir / f"{filename}.png"
 
-        renderer.render("value", {"value": value}, path, options=options)
+        renderer.render("value", {"value": self._retranspose_output("value", value, type)}, path, options=options)
 
     def save_async(self, step_name, key, ctx):
         self.output_queue.put((step_name, key, ctx)) 
@@ -285,6 +335,7 @@ class OutputManager:
         if vein_mask is not None:
             img[vein_mask > 0] = [255, 0, 0]
 
+        img = self._retranspose_output("value", img, "image")
         cv2.imwrite(str(path), img)
 
     def save_clusterization(self, step_name, filename, labels, z):

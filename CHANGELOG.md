@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.6.1
+* Restore saved spatial outputs to the input H5 orientation before writing PNG and H5 results.
+
 ## 1.6.0
 * GUI
     * Move configuration in a specific window, and allow dynamic modification of config files
