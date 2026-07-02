@@ -1,6 +1,7 @@
 from pathlib import Path
 import os
 import threading
+import traceback
 import time
 from dopplerview.input_output import user_config, read_folder, h5_file
 from dopplerview.models.registry import ModelRegistryConfig
@@ -373,18 +374,51 @@ class Pipeline:
 
     def run_batch(self, targets=None, callback=None):
         if callback:
-            callback("batch_start")
-        for i, input in enumerate(self.ctx.input_list):
-            logger.info(f"[Run Batch] Processing file: {input}")
+            callback("batch_start", len(self.ctx.input_list))
+
+        results = []
+        total = len(self.ctx.input_list)
+
+        for i, input_path in enumerate(self.ctx.input_list):
+            logger.info("[Run Batch] Processing file: %s", input_path)
+
+            if callback:
+                callback("pipeline_start", i, total)
+
             try:
-                self.ctx.load_input_folder(input)
-            except Exception as e:
-                logger.exception(f"[Run Batch] Error loading input folder {input}: {e}")
+                self.ctx.load_input_folder(input_path)
+                self.run(targets=targets, callback=callback)
+
+            except Exception:
+                error_text = traceback.format_exc()
+
+                logger.error(
+                    "[Run Batch] Failed processing file %s:\n%s",
+                    input_path,
+                    error_text,
+                )
+
+                results.append({
+                    "input": str(input_path),
+                    "status": "failed",
+                    "error": error_text,
+                })
+
+                if callback:
+                    callback("pipeline_failed", i, total, str(input_path), error_text)
+
                 continue
+
+            results.append({
+                "input": str(input_path),
+                "status": "success",
+                "error": None,
+            })
+
             if callback:
-                callback("pipeline_start", i, len(self.ctx.input_list))
-            self.run(targets=targets, callback=callback)
-            if callback:
-                callback("pipeline_done", i, len(self.ctx.input_list))
+                callback("pipeline_done", i, total)
+
         if callback:
-            callback("batch_done")
+            callback("batch_done", results)
+
+        return results

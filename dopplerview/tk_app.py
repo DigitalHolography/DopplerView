@@ -3,10 +3,12 @@ import os
 import subprocess
 import tkinter as tk
 import tkinter.font as tkfont
-from tkinter import filedialog, ttk
+from tkinter import filedialog, ttk, messagebox
 from pathlib import Path
 import threading
 import queue
+import multiprocessing
+import traceback
 import matplotlib
 
 from dopplerview.input_output import log_config, user_config
@@ -42,6 +44,217 @@ def np_to_tk(img: np.ndarray):
     return ImageTk.PhotoImage(pil_img)
 
 
+def _overlay_preview(image, artery_mask=None, vein_mask=None):
+    """Build a lightweight RGB preview image inside the worker process."""
+    if image is None:
+        return None
+
+    img = np.asarray(image).copy()
+    if img.ndim == 2:
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+
+    if artery_mask is not None:
+        if vein_mask is not None:
+            img[np.asarray(artery_mask) > 0] = [255, 0, 0]
+        else:
+            img[np.asarray(artery_mask) > 0] = [255, 250, 250]
+
+    if vein_mask is not None:
+        img[np.asarray(vein_mask) > 0] = [0, 0, 255]
+
+    return img.astype(np.uint8, copy=False)
+
+
+def _resize_preview_for_queue(img, max_side=900):
+    """Avoid sending very large arrays through multiprocessing.Queue."""
+    if img is None:
+        return None
+
+    img = np.asarray(img)
+    h, w = img.shape[:2]
+    largest = max(h, w)
+    if largest <= max_side:
+        return img.astype(np.uint8, copy=False)
+
+    scale = max_side / largest
+    new_size = (max(1, int(w * scale)), max(1, int(h * scale)))
+    return cv2.resize(img, new_size, interpolation=cv2.INTER_AREA).astype(np.uint8, copy=False)
+
+
+def _build_step_preview(pipeline, step_name):
+    """Extract the same previews as the Tk app, but from the child pipeline context."""
+    ctx = pipeline.ctx
+
+    if step_name == "preprocess":
+        return _resize_preview_for_queue(ctx.get("M0_ff_image"))
+
+    if step_name == "retinal_vessel_segmentation":
+        img = ctx.get("M0_ff_image")
+        vessel = ctx.get("retinal_vessel_mask")
+        return _resize_preview_for_queue(_overlay_preview(img, vessel, None))
+
+    if step_name == "retinal_artery_vein_segmentation":
+        img = ctx.get("M0_ff_image")
+        art = ctx.get("retinal_artery_mask")
+        vein = ctx.get("retinal_vein_mask")
+        return _resize_preview_for_queue(_overlay_preview(img, art, vein))
+
+    return None
+
+
+
+class _MultiprocessingQueueLogHandler(logging.Handler):
+    """Forward log messages from the pipeline child process to the Tk parent process."""
+
+    def __init__(self, queue_out):
+        super().__init__()
+        self.queue_out = queue_out
+
+    def emit(self, record):
+        try:
+            self.queue_out.put((
+                "log",
+                {
+                    "name": record.name,
+                    "levelno": record.levelno,
+                    "levelname": record.levelname,
+                    "message": self.format(record),
+                    "pathname": record.pathname,
+                    "lineno": record.lineno,
+                },
+            ))
+        except Exception:
+            # Logging must never crash the worker.
+            pass
+
+
+class _QueueTextStream:
+    """Redirect stdout/stderr lines from the child process to the parent logger."""
+
+    def __init__(self, queue_out, *, levelno: int, name: str):
+        self.queue_out = queue_out
+        self.levelno = levelno
+        self.name = name
+        self._buffer = ""
+
+    def write(self, text):
+        if not text:
+            return
+        self._buffer += str(text)
+        while "\n" in self._buffer:
+            line, self._buffer = self._buffer.split("\n", 1)
+            if line.strip():
+                self.queue_out.put((
+                    "log",
+                    {
+                        "name": self.name,
+                        "levelno": self.levelno,
+                        "levelname": logging.getLevelName(self.levelno),
+                        "message": line,
+                        "pathname": "",
+                        "lineno": 0,
+                    },
+                ))
+
+    def flush(self):
+        if self._buffer.strip():
+            self.queue_out.put((
+                "log",
+                {
+                    "name": self.name,
+                    "levelno": self.levelno,
+                    "levelname": logging.getLevelName(self.levelno),
+                    "message": self._buffer.strip(),
+                    "pathname": "",
+                    "lineno": 0,
+                },
+            ))
+        self._buffer = ""
+
+
+def _configure_child_process_logging(queue_out):
+    """
+    Configure logging in the spawned pipeline process.
+
+    On Windows, multiprocessing uses spawn: the child process starts with a fresh
+    interpreter and does not reliably inherit the parent logging handlers.  This
+    handler forwards child logs to the parent process through the same event queue
+    used for pipeline progress.
+    """
+    root_logger = logging.getLogger()
+    root_logger.handlers.clear()
+    root_logger.setLevel(logging.DEBUG)
+
+    handler = _MultiprocessingQueueLogHandler(queue_out)
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    root_logger.addHandler(handler)
+
+    sys.stdout = _QueueTextStream(queue_out, levelno=logging.INFO, name="pipeline.stdout")
+    sys.stderr = _QueueTextStream(queue_out, levelno=logging.ERROR, name="pipeline.stderr")
+
+def pipeline_process_worker(run_spec, queue_out):
+    """
+    Run the heavy DopplerView pipeline in a child process.
+
+    The Tk process must remain UI-only.  This isolates native crashes/hangs from
+    OpenCV, ONNXRuntime, PyTorch, h5py, etc. from Tkinter's event loop.
+    """
+    _configure_child_process_logging(queue_out)
+
+    try:
+        h5_schema_path = run_spec["h5_schema_path"]
+        output_config_path = run_spec["output_config_path"]
+        models_config_path = run_spec["models_config_path"]
+        dopplerview_config_path = run_spec.get("dopplerview_config_path")
+        input_list = [Path(p) for p in run_spec["input_list"]]
+        targets = run_spec.get("steps")
+        selected_models = run_spec.get("selected_models", {})
+        config_mode = run_spec.get("config_mode", "default")
+        output_enabled = bool(run_spec.get("output_enabled", False))
+
+        output_manager = OutputManager(
+            h5_schema_path,
+            output_config_path,
+            output_enabled=output_enabled,
+        )
+        pipeline = Pipeline(output_manager=output_manager)
+
+        pipeline.load_model_registry(models_config_path)
+        if dopplerview_config_path and Path(dopplerview_config_path).exists():
+            pipeline.load_dopplerview_config(dopplerview_config_path)
+
+        try:
+            pipeline.set_config_mode(config_mode)
+        except Exception:
+            logger.exception("Failed to set pipeline config mode in worker")
+
+        for task_name, model_name in selected_models.items():
+            if model_name:
+                try:
+                    pipeline.ctx.change_model_for_task(task_name, model_name)
+                except Exception:
+                    logger.exception("Failed to select model %s for task %s", model_name, task_name)
+
+        pipeline.ctx.clear_input_list()
+        pipeline.load_input_list_from_list(input_list)
+
+        def callback(event, *args):
+            queue_out.put((event, args))
+
+            if event == "step_done" and args:
+                step_name = args[0]
+                preview = _build_step_preview(pipeline, step_name)
+                if preview is not None:
+                    queue_out.put(("preview_image", (preview,)))
+
+        pipeline.run_batch(targets=targets, callback=callback)
+        queue_out.put(("worker_done", None))
+
+    except BaseException:
+        queue_out.put(("error", traceback.format_exc()))
+
+
 class MainWindow:
     def __init__(self, root):
         self.root = root
@@ -74,6 +287,10 @@ class MainWindow:
         self.image_tk = None  # keep reference (IMPORTANT)
 
         self.queue = queue.Queue()
+        self.pipeline_worker = None
+        self.output_worker = None
+        self.mp_context = multiprocessing.get_context("spawn")
+        self.selected_models: dict[str, str] = {}
 
         self.theme_var = tk.StringVar(value="dark")
         self._menus: list[tk.Menu] = []
@@ -624,7 +841,7 @@ class MainWindow:
         )
 
         state = "disabled"
-        self.btn_run_minimal = ttk.Button(container, text="Run Full Pipeline", command=self.run_full_pipelines, state=state)
+        self.btn_run_minimal = ttk.Button(container, text="Run Full Pipeline", command=self.run_pipelines_with_steps, state=state)
         self.btn_run_minimal.grid(row=4, column=0, pady=10)
 
         self.progress_minimal = ttk.Progressbar(container, maximum=100)
@@ -959,11 +1176,14 @@ class MainWindow:
             combo.grid(row=r + 1, column=0, sticky="ew", pady=2)
 
             def on_change(event=None):
-                ctx.change_model_for_task(task_name, var.get())
+                model_name = var.get()
+                self.selected_models[task_name] = model_name
+                ctx.change_model_for_task(task_name, model_name)
 
             combo.bind("<<ComboboxSelected>>", on_change)
 
             if values:
+                self.selected_models[task_name] = var.get()
                 ctx.change_model_for_task(task_name, var.get())
 
             return r + 2
@@ -1247,62 +1467,150 @@ class MainWindow:
         path = event.data.strip("{}")  # windows fix
         self.load_input(path)
 
-    def run_full_pipelines(self):
-        # full pipeline
-        self.run_pipelines(None)
-
     def run_pipelines_with_steps(self):
         steps = self.get_selected_steps()
         self.run_pipelines(steps=steps)
 
+    def _make_pipeline_run_spec(self, steps=None):
+        """Create a picklable description of the run for the child process."""
+        return {
+            "steps": steps,
+            "input_list": [str(p) for p in self.pipeline.ctx.input_list],
+            "h5_schema_path": str(self.output_manager.schema_path),
+            "output_config_path": str(self.output_manager.output_config_path),
+            "models_config_path": str(self.pipeline.ctx.model_registry_path),
+            "dopplerview_config_path": str(self.config_path.get()),
+            "config_mode": self.config_mode_var.get(),
+            "selected_models": dict(self.selected_models),
+            "output_enabled": self.enable_debug_output,
+        }
+
     def run_pipelines(self, steps=None):
+        if self.pipeline_worker is not None and self.pipeline_worker.is_alive():
+            return
+
         self.btn_run.config(state="disabled")
         self.btn_run_minimal.config(state="disabled")
-        thread = threading.Thread(
-            target=self._run_pipelines_worker,
-            args=(steps,),
-            daemon=True
+        self.progress["value"] = 0
+        self.progress_batch["value"] = 0
+        self.progress_minimal["value"] = 0
+
+        self.queue = self.mp_context.Queue()
+        run_spec = self._make_pipeline_run_spec(steps)
+
+        self.pipeline_worker = self.mp_context.Process(
+            target=pipeline_process_worker,
+            args=(run_spec, self.queue),
+            daemon=True,
         )
-        thread.start()
+        self.pipeline_worker.start()
 
         self.root.after(100, self.check_queue)
 
-    def _run_pipelines_worker(self, steps):
-        def callback(event, *args):
-            self.queue.put((event, args))
-        try:
-            self.pipeline.run_batch(targets=steps, callback=callback)
-        except Exception as e:
-            self.queue.put(("error", str(e)))
+    def _finish_pipeline_ui(self):
+        self.btn_run.config(state="enabled")
+        self.btn_run_minimal.config(state="enabled")
+        self.update_step_display()
 
-    def step_done_output(self, step_name):
-        if step_name == "preprocess":
-            img = self.pipeline.ctx.get("M0_ff_image")
-            if img is not None:
-                self.display_image(img)
+    def _terminate_pipeline_worker(self):
+        worker = self.pipeline_worker
+        if worker is None:
+            return
 
-        elif step_name == "retinal_vessel_segmentation":
-            img = self.pipeline.ctx.get("M0_ff_image")
-            vessel = self.pipeline.ctx.get("retinal_vessel_mask")
-            if img is not None and vessel is not None:
-                overlay = self.overlay(img, vessel, None)
-                self.display_image(overlay)
+        if worker.is_alive():
+            worker.terminate()
+            worker.join(timeout=2)
+            if worker.is_alive() and hasattr(worker, "kill"):
+                worker.kill()
+                worker.join(timeout=2)
+        else:
+            worker.join(timeout=0)
 
-        elif step_name == "retinal_artery_vein_segmentation":
-            img = self.pipeline.ctx.get("M0_ff_image")
-            art = self.pipeline.ctx.get("retinal_artery_mask")
-            vein = self.pipeline.ctx.get("retinal_vein_mask")
-            if img is not None and art is not None and vein is not None:
-                overlay = self.overlay(img, art, vein)
-                self.display_image(overlay)
-        
+        self.pipeline_worker = None
+
+    def _drain_pipeline_queue(self):
+        while True:
+            try:
+                self.queue.get_nowait()
+            except queue.Empty:
+                break
+            except Exception:
+                break
+
+    def handle_pipeline_error(self, error_text: str):
+        logger.error("Pipeline failed:\n%s", error_text)
+
+        self._terminate_pipeline_worker()
+        self._drain_pipeline_queue()
+
+        self.progress.stop()
+        self.progress_batch.stop()
+        self.progress_minimal.stop()
+        self.progress["value"] = 0
+        self.progress_batch["value"] = 0
+        self.progress_minimal["value"] = 0
+
+        self._finish_pipeline_ui()
+
+        self.root.after_idle(
+            lambda: messagebox.showerror(
+                "Pipeline error",
+                "The pipeline failed. The application was restored to an idle state.\n\n"
+                f"{error_text[-3000:]}",
+            )
+        )
+
+    def _handle_worker_exit_without_message(self):
+        worker = self.pipeline_worker
+        if worker is None:
+            return False
+
+        if worker.is_alive():
+            return False
+
+        exit_code = worker.exitcode
+        worker.join(timeout=0)
+        self.pipeline_worker = None
+
+        if exit_code not in (0, None):
+            self._finish_pipeline_ui()
+            message = f"The pipeline process stopped unexpectedly with exit code {exit_code}."
+            logger.error(message)
+            self.root.after_idle(lambda: messagebox.showerror("Pipeline error", message))
+            return True
+
+        return False
+
+    def _handle_pipeline_log(self, payload):
+        """Replay a log record produced by the pipeline child process in the parent logger."""
+        if isinstance(payload, tuple) and payload:
+            payload = payload[0]
+
+        if not isinstance(payload, dict):
+            logger.info("%s", payload)
+            return
+
+        name = payload.get("name") or "pipeline"
+        levelno = int(payload.get("levelno", logging.INFO))
+        message = payload.get("message", "")
+
+        logging.getLogger(name).log(levelno, "%s", message)
+
     def check_queue(self):
-        try:
-            while True:
-                event, data = self.queue.get_nowait()
-                if event == "pipeline_start":
+        max_events_per_tick = 50
 
-                    self.config_path.set(self.pipeline.ctx.dopplerview_config_path) # refresh config path
+        try:
+            for _ in range(max_events_per_tick):
+                try:
+                    event, data = self.queue.get_nowait()
+                except queue.Empty:
+                    break
+
+                if event == "log":
+                    self._handle_pipeline_log(data)
+
+                elif event == "pipeline_start":
+                    self.config_path.set(self.config_path.get())
 
                     i, total = data
                     self.measure_index = i
@@ -1320,7 +1628,7 @@ class MainWindow:
                         self.minimal_input_listbox.see(i)
 
                     self.progress["value"] = 0
-                    progress = (i / total) * 100
+                    progress = (i / total) * 100 if total else 0
                     self.progress_batch["value"] = progress
                     self.progress_minimal["value"] = progress
 
@@ -1329,17 +1637,20 @@ class MainWindow:
 
                 elif event == "step_start":
                     step_name, i, total = data
-                    step_ratio = i / total
-                    measure_ratio = self.measure_index / len(self.pipeline.ctx.input_list)
+                    step_ratio = i / total if total else 0
+                    input_count = max(1, len(self.pipeline.ctx.input_list))
+                    measure_ratio = self.measure_index / input_count
                     self.progress["value"] = step_ratio * 100
-
-                    self.progress_minimal["value"] = measure_ratio * 100 + step_ratio * 100 / len(self.pipeline.ctx.input_list)
+                    self.progress_minimal["value"] = measure_ratio * 100 + step_ratio * 100 / input_count
                     self.update_step_color(step_name, "running")
 
                 elif event == "step_done":
                     step_name, elapsed = data
                     self.update_step_color(step_name, "done")
-                    self.step_done_output(step_name)
+
+                elif event == "preview_image":
+                    img = data[0]
+                    self.display_image(img)
 
                 elif event == "step_skipped":
                     step_name = data[0]
@@ -1347,23 +1658,57 @@ class MainWindow:
 
                 elif event == "pipeline_done":
                     self.progress["value"] = 100
-                    self.btn_run.config(state="enabled")
-
-                    self.btn_run_minimal.config(state="enabled")
-
-                    self.update_step_display()  # refresh colors to reflect final cache status
+                    self._finish_pipeline_ui()
 
                 elif event == "batch_done":
+                    results = data[0] if data else []
+
                     self.progress_batch["value"] = 100
                     self.progress_minimal["value"] = 100
 
+                    self.btn_run.config(state="enabled")
+                    self.btn_run_minimal.config(state="enabled")
+
+                    failed = [r for r in results if r["status"] == "failed"]
+
+                    if failed:
+                        tk.messagebox.showwarning(
+                            "Batch finished with errors",
+                            f"{len(failed)} file(s) failed, "
+                            f"{len(results) - len(failed)} succeeded.\n\n"
+                            "See logs for details."
+                        )
+
+                elif event == "worker_done":
+                    if self.pipeline_worker is not None:
+                        self.pipeline_worker.join(timeout=0)
+                        self.pipeline_worker = None
+                    self._finish_pipeline_ui()
+
+                elif event == "pipeline_failed":
+                    i, total, input_path, error_text = data
+
+                    logger.error("Failed input %s:\n%s", input_path, error_text)
+
+                    self.progress["value"] = 0
+                    self.progress_batch["value"] = ((i + 1) / total) * 100
+                    self.progress_minimal["value"] = ((i + 1) / total) * 100
+
+                    self.update_step_display()
+
                 elif event == "error":
-                    logger.error("Error:", data)
+                    error_text = data[0] if isinstance(data, tuple) else str(data)
+                    self.handle_pipeline_error(error_text)
+                    return
 
-        except queue.Empty:
-            pass
+        except Exception:
+            logger.exception("Error while processing pipeline UI queue")
 
-        self.root.after(100, self.check_queue)
+        if self._handle_worker_exit_without_message():
+            return
+
+        if self.pipeline_worker is not None:
+            self.root.after(100, self.check_queue)
 
     # -------------------
     # Logo
@@ -1474,6 +1819,8 @@ class MainWindow:
 # -------------------
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
+
     if TkinterDnD:
         root = TkinterDnD.Tk()
     else:
