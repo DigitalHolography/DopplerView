@@ -40,7 +40,7 @@ class PreArteryMaskStep(BaseStep):
 
         sampling_frequency = pulse_analysis.get_effective_sampling_frequency(fs, stride)
         
-        self.logger.info(f"    - Camera sampling frequency: {fs} Hz, batch stride: {stride}. Effective sampling frequency after accounting for batch stride: {sampling_frequency:.2f} Hz                                            ")
+        self.logger.info(f"    - Camera sampling frequency: {fs} Hz, batch stride: {stride}. Effective sampling frequency after accounting for batch stride: {sampling_frequency:.2f} Hz")
 
         # --- Step 1: Separate mask into branches ---
         labeled_vessels, _ = process_masks.get_labeled_vessels(vessel_mask, *optic_disc_center) if optic_disc_center is not None else process_masks.get_labeled_vessels(vessel_mask, mask_optic_disc=False)

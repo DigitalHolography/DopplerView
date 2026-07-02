@@ -29,7 +29,10 @@
     "choroidal_artery_mask": "mask",
     "choroidal_vein_mask": "mask",
     "choroidal_aliased_artery_mask": "mask",
-    
+    "choroidal_artery_mask_clean": "mask",
+    "choroidal_vein_mask_clean": "mask",
+    "choroidal_aliased_artery_mask_clean": "mask",
+
     "vessel_pulse": "signal",
     "pre_arterial_pulse": "signal",
     "pre_arterial_pulse_filtered": "signal",

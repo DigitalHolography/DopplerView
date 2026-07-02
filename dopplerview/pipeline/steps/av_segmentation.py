@@ -1,6 +1,6 @@
 from dopplerview.pipeline.step import BaseStep
 import dopplerview.segmentation.process_masks as process_masks
-from skimage.morphology import binary_dilation, opening, disk
+from skimage.morphology import dilation, opening, disk
 from skimage.measure import label
 import numpy as np
 
@@ -78,7 +78,7 @@ class RetinalAVSegmentationStep(BaseStep):
 
 class ChoroidalAVSegmentationStep(BaseStep):
     requires = {"M0_ff_video", "M0_ff_image_cleaned", "HF_M0_FF", "retinal_artery_mask", "retinal_vein_mask", "correlation", "correlation_HF_M0_ff", "optic_disc_center"}
-    produces = {"choroidal_artery_mask", "choroidal_vein_mask", "choroidal_aliased_artery_mask"}
+    produces = {"choroidal_artery_mask", "choroidal_vein_mask", "choroidal_aliased_artery_mask", "choroidal_artery_mask_clean", "choroidal_vein_mask_clean", "choroidal_aliased_artery_mask_clean"}
     name = "choroidal_artery_vein_segmentation"
 
     def _relevant_config(self, ctx):
@@ -96,15 +96,14 @@ class ChoroidalAVSegmentationStep(BaseStep):
         # If optic disc center is available, remove vessels in the center region
         optic_disc_center = ctx.require("optic_disc_center")
         if optic_disc_center is not None:
-            center_radius = params.get("CenterRadius", 0.1)
-            mask_center = process_masks.disk_mask(h, w, center_radius, center=optic_disc_center)
+            mask_center = ctx.require("optic_disc_mask")
             clean_mask = clean_mask & ~mask_center
 
             # If optic disc center is available, retinal masks should be valid, and can be removed
             retinal_artery_mask = ctx.require("retinal_artery_mask")
             retinal_vein_mask = ctx.require("retinal_vein_mask")
             retinal_vessel_mask = retinal_artery_mask | retinal_vein_mask
-            dilated_retinal_vessel_mask = binary_dilation(retinal_vessel_mask)
+            dilated_retinal_vessel_mask = dilation(retinal_vessel_mask)
             clean_mask = clean_mask & ~dilated_retinal_vessel_mask
 
         return clean_mask
@@ -142,7 +141,7 @@ class ChoroidalAVSegmentationStep(BaseStep):
 
         retinal_artery_mask = self.get_retinal_artery_mask(ctx)
         retinal_vein_mask = self.get_retinal_vein_mask(ctx)
-        retinal_vessel_mask = retinal_artery_mask | retinal_vein_mask
+        retinal_vessel_mask = dilation(retinal_artery_mask | retinal_vein_mask)
 
         pre_aliased_arteries = corr_HF < -0.2   # Identify aliased arteries based on high frequency correlation
         connected_arteries = process_masks.connect_components(pre_aliased_arteries, max_distance=5)  # Connect disconnected aliased arteries that are close to each other
@@ -172,3 +171,13 @@ class ChoroidalAVSegmentationStep(BaseStep):
         ctx.set("choroidal_artery_mask", choroidal_artery_mask)
         ctx.set("choroidal_vein_mask", choroidal_vein_mask)
         ctx.set("choroidal_aliased_artery_mask", choroidal_aliased_artery_mask)
+
+        choroidal_artery_mask_clean = self.clean_vessel_mask(choroidal_artery_mask, ctx)
+        choroidal_vein_mask_clean = self.clean_vessel_mask(choroidal_vein_mask, ctx)
+        choroidal_aliased_artery_mask_clean = self.clean_vessel_mask(choroidal_aliased_artery_mask, ctx)
+
+        ctx.output_manager.save_overlay(self.name, "overlay_clean", ctx.require("M0_ff_image_cleaned"), [choroidal_artery_mask_clean, choroidal_vein_mask_clean, choroidal_aliased_artery_mask_clean], colors=[(0, 0, 255), (255, 0, 0), (0, 255, 0)])
+
+        ctx.set("choroidal_artery_mask_clean", choroidal_artery_mask_clean)
+        ctx.set("choroidal_vein_mask_clean", choroidal_vein_mask_clean)
+        ctx.set("choroidal_aliased_artery_mask_clean", choroidal_aliased_artery_mask_clean)
