@@ -1661,14 +1661,40 @@ class MainWindow:
                     self._finish_pipeline_ui()
 
                 elif event == "batch_done":
+                    results = data[0] if data else []
+
                     self.progress_batch["value"] = 100
                     self.progress_minimal["value"] = 100
+
+                    self.btn_run.config(state="enabled")
+                    self.btn_run_minimal.config(state="enabled")
+
+                    failed = [r for r in results if r["status"] == "failed"]
+
+                    if failed:
+                        tk.messagebox.showwarning(
+                            "Batch finished with errors",
+                            f"{len(failed)} file(s) failed, "
+                            f"{len(results) - len(failed)} succeeded.\n\n"
+                            "See logs for details."
+                        )
 
                 elif event == "worker_done":
                     if self.pipeline_worker is not None:
                         self.pipeline_worker.join(timeout=0)
                         self.pipeline_worker = None
                     self._finish_pipeline_ui()
+
+                elif event == "pipeline_failed":
+                    i, total, input_path, error_text = data
+
+                    logger.error("Failed input %s:\n%s", input_path, error_text)
+
+                    self.progress["value"] = 0
+                    self.progress_batch["value"] = ((i + 1) / total) * 100
+                    self.progress_minimal["value"] = ((i + 1) / total) * 100
+
+                    self.update_step_display()
 
                 elif event == "error":
                     error_text = data[0] if isinstance(data, tuple) else str(data)
