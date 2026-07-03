@@ -283,6 +283,7 @@ class MainWindow:
         config_path = user_config.ensure_config_file("default_DV_params.json")
         # self.pipeline.load_dopplerview_config(config_path)
         self.config_path = tk.StringVar(value=str(config_path))
+        self.status_var = tk.StringVar(value="Ready")
         self.register_config_file(config_path, "dopplerview_config")
 
         self.image_tk = None  # keep reference (IMPORTANT)
@@ -846,7 +847,15 @@ class MainWindow:
         self.btn_run_minimal.grid(row=4, column=0, pady=10)
 
         self.progress_minimal = ttk.Progressbar(container, maximum=100)
-        self.progress_minimal.grid(row=5, column=0, sticky="ew", padx=10, pady=(0, 10))
+        self.progress_minimal.grid(row=5, column=0, sticky="ew", padx=10, pady=(0, 4))
+
+        self.status_label_minimal = ttk.Label(
+            container,
+            textvariable=self.status_var,
+            anchor="center",
+            style="Muted.TLabel",
+        )
+        self.status_label_minimal.grid(row=6, column=0, sticky="ew", padx=10, pady=(0, 10))
 
     def _build_advanced_ui(self):
         frame = self.advanced_frame
@@ -1018,7 +1027,16 @@ class MainWindow:
 
         # --- Progress bar ---
         self.progress = ttk.Progressbar(frame, maximum=100)
-        self.progress.grid(row=row, column=0, sticky="ew", padx=5)
+        self.progress.grid(row=row, column=0, sticky="ew", padx=5, pady=(0, 4))
+        row += 1
+
+        self.status_label = ttk.Label(
+            frame,
+            textvariable=self.status_var,
+            anchor="center",
+            style="Muted.TLabel",
+        )
+        self.status_label.grid(row=row, column=0, sticky="ew", padx=5, pady=(0, 6))
         row += 1
 
         # --- Image display ---
@@ -1280,11 +1298,11 @@ class MainWindow:
 
         if mode == "minimal":
             self.minimal_frame.pack(fill="both", expand=True)
-            self.root.geometry("600x400")
+            self.root.geometry("600x420")
 
         elif mode == "advanced":
             self.advanced_frame.pack(fill="both", expand=True)
-            self.root.geometry("850x580")
+            self.root.geometry("850x650")
             self.resize_window()
 
     def resize_window(self):
@@ -1340,16 +1358,19 @@ class MainWindow:
             folder_list = [Path(f) for f in folders]
 
         self.pipeline.load_input_list_from_list(folder_list)
-        # self.pipeline
-        # if folder_list[0].suffix == ".holo":
-        #     self.pipeline.ctx.load_input_folder(folder_list[0])  # load first by default, pipeline will handle the rest in batch mode
-        # self.config_path.set(self.pipeline.ctx.dopplerview_config_path)
+
         self.update_step_display()
 
         self.btn_run.config(state="enabled")
         self.btn_run_minimal.config(state="enabled")
 
         self.refresh_input_listbox()
+
+        n_inputs = len(self.pipeline.ctx.input_list)
+        if n_inputs == 0:
+            self.status_var.set("Ready")
+        else:
+            self.status_var.set(f"Loaded {n_inputs} input file(s)")
 
     def refresh_input_listbox(self):
         # Advanced UI list
@@ -1615,6 +1636,13 @@ class MainWindow:
 
                     i, total = data
                     self.measure_index = i
+
+                    try:
+                        measure_name = Path(self.pipeline.ctx.input_list[i]).name
+                    except Exception:
+                        measure_name = "unknown input"
+                    self.status_var.set(f"Processing {i + 1} / {total}: {measure_name}")
+
                     self.input_listbox.selection_clear(0, tk.END)
                     self.minimal_input_listbox.selection_clear(0, tk.END)
 
@@ -1666,6 +1694,7 @@ class MainWindow:
 
                     self.progress_batch["value"] = 100
                     self.progress_minimal["value"] = 100
+                    self.status_var.set("Finished")
 
                     self.btn_run.config(state="enabled")
                     self.btn_run_minimal.config(state="enabled")
