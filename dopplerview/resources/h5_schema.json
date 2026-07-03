@@ -11,8 +11,12 @@
         },
         "Choroid": {
             "vessel_mask": "choroidal_vessel_mask",
-            "artery_mask": "choroidal_artery_mask",
-            "vein_mask": "choroidal_vein_mask"
+            "raw_artery_mask": "choroidal_artery_mask",
+            "raw_aliased_artery_mask": "choroidal_aliased_artery_mask",
+            "raw_vein_mask": "choroidal_vein_mask",
+            "artery_mask": "choroidal_artery_mask_clean",
+            "aliased_artery_mask": "choroidal_aliased_artery_mask_clean",
+            "vein_mask": "choroidal_vein_mask_clean"
         },
         "OpticDisc": {
             "center": "optic_disc_center",
@@ -47,5 +51,9 @@
     "laterality": {
         "eye_laterality": "eye_laterality",
         "eye_laterality_confidence": "eye_laterality_confidence"
+    },
+    "doppler_signal": {
+        "M0_ff": "M0_ff_video",
+        "M0_ff_cleaned": "video_cleaned"
     }
 }
