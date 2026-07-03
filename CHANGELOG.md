@@ -6,6 +6,7 @@
     * Enable / disable steps outputs in output folder (disabled by default)
     * Stop at retinal artery/vein segmentation and optic disc detection by default
 * Handle errors cleanly : step failures don't interrupt run_batch, and a crash does not affect GUI
+* First baseline for choroid artery / vein segmentation, using correlation maps with retinal arterial signal in different frequency bands
 
 ## 1.6.0
 * GUI
