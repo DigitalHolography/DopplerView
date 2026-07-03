@@ -1,26 +1,25 @@
-import sys
+import logging
 import os
+import queue
 import subprocess
+import sys
+import multiprocessing
 import tkinter as tk
 import tkinter.font as tkfont
-from tkinter import filedialog, ttk, messagebox
 from pathlib import Path
-import threading
-import queue
-import multiprocessing
-import traceback
-import matplotlib
+from tkinter import filedialog, messagebox, ttk
 
-import numpy as np
 import cv2
-from PIL import Image, ImageTk
 
-from dopplerview.input_output import log_config, user_config
+from dopplerview._version import __version__ as app_version
+from dopplerview.input_output import user_config
 from dopplerview.input_output.output_manager import OutputManager
 from dopplerview.pipeline.pipeline import Pipeline
-from dopplerview._version import __version__ as app_version
 
-import logging
+from dopplerview.ui.image_utils import np_to_tk
+from dopplerview.ui.theme import ThemeMixin
+from dopplerview.ui.worker import pipeline_process_worker
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -30,233 +29,8 @@ except ImportError:  # optional dependency
     TkinterDnD = None
     logger.warning("Warning: tkinterdnd2 not found, drag-and-drop functionality will be disabled.")
 
-try:
-    import sv_ttk
-except ImportError:  #  optional dependency
-    sv_ttk = None
 
-def np_to_tk(img: np.ndarray):
-    """Convert numpy image to Tkinter-compatible PhotoImage"""
-    if img.ndim == 2:
-        img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
-
-    img = (img).astype(np.uint8)
-    pil_img = Image.fromarray(img)
-    return ImageTk.PhotoImage(pil_img)
-
-
-def _overlay_preview(image, artery_mask=None, vein_mask=None):
-    """Build a lightweight RGB preview image inside the worker process."""
-    if image is None:
-        return None
-
-    img = np.asarray(image).copy()
-    if img.ndim == 2:
-        img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
-
-    if artery_mask is not None:
-        if vein_mask is not None:
-            img[np.asarray(artery_mask) > 0] = [255, 0, 0]
-        else:
-            img[np.asarray(artery_mask) > 0] = [255, 250, 250]
-
-    if vein_mask is not None:
-        img[np.asarray(vein_mask) > 0] = [0, 0, 255]
-
-    return img.astype(np.uint8, copy=False)
-
-
-def _resize_preview_for_queue(img, max_side=900):
-    """Avoid sending very large arrays through multiprocessing.Queue."""
-    if img is None:
-        return None
-
-    img = np.asarray(img)
-    h, w = img.shape[:2]
-    largest = max(h, w)
-    if largest <= max_side:
-        return img.astype(np.uint8, copy=False)
-
-    scale = max_side / largest
-    new_size = (max(1, int(w * scale)), max(1, int(h * scale)))
-    return cv2.resize(img, new_size, interpolation=cv2.INTER_AREA).astype(np.uint8, copy=False)
-
-
-def _build_step_preview(pipeline, step_name):
-    """Extract the same previews as the Tk app, but from the child pipeline context."""
-    ctx = pipeline.ctx
-
-    if step_name == "preprocess":
-        return _resize_preview_for_queue(ctx.get("M0_ff_image"))
-
-    if step_name == "retinal_vessel_segmentation":
-        img = ctx.get("M0_ff_image")
-        vessel = ctx.get("retinal_vessel_mask")
-        return _resize_preview_for_queue(_overlay_preview(img, vessel, None))
-
-    if step_name == "retinal_artery_vein_segmentation":
-        img = ctx.get("M0_ff_image")
-        art = ctx.get("retinal_artery_mask")
-        vein = ctx.get("retinal_vein_mask")
-        return _resize_preview_for_queue(_overlay_preview(img, art, vein))
-
-    return None
-
-
-
-class _MultiprocessingQueueLogHandler(logging.Handler):
-    """Forward log messages from the pipeline child process to the Tk parent process."""
-
-    def __init__(self, queue_out):
-        super().__init__()
-        self.queue_out = queue_out
-
-    def emit(self, record):
-        try:
-            self.queue_out.put((
-                "log",
-                {
-                    "name": record.name,
-                    "levelno": record.levelno,
-                    "levelname": record.levelname,
-                    "message": self.format(record),
-                    "pathname": record.pathname,
-                    "lineno": record.lineno,
-                },
-            ))
-        except Exception:
-            # Logging must never crash the worker.
-            pass
-
-
-class _QueueTextStream:
-    """Redirect stdout/stderr lines from the child process to the parent logger."""
-
-    def __init__(self, queue_out, *, levelno: int, name: str):
-        self.queue_out = queue_out
-        self.levelno = levelno
-        self.name = name
-        self._buffer = ""
-
-    def write(self, text):
-        if not text:
-            return
-        self._buffer += str(text)
-        while "\n" in self._buffer:
-            line, self._buffer = self._buffer.split("\n", 1)
-            if line.strip():
-                self.queue_out.put((
-                    "log",
-                    {
-                        "name": self.name,
-                        "levelno": self.levelno,
-                        "levelname": logging.getLevelName(self.levelno),
-                        "message": line,
-                        "pathname": "",
-                        "lineno": 0,
-                    },
-                ))
-
-    def flush(self):
-        if self._buffer.strip():
-            self.queue_out.put((
-                "log",
-                {
-                    "name": self.name,
-                    "levelno": self.levelno,
-                    "levelname": logging.getLevelName(self.levelno),
-                    "message": self._buffer.strip(),
-                    "pathname": "",
-                    "lineno": 0,
-                },
-            ))
-        self._buffer = ""
-
-
-def _configure_child_process_logging(queue_out):
-    """
-    Configure logging in the spawned pipeline process.
-
-    On Windows, multiprocessing uses spawn: the child process starts with a fresh
-    interpreter and does not reliably inherit the parent logging handlers.  This
-    handler forwards child logs to the parent process through the same event queue
-    used for pipeline progress.
-    """
-    root_logger = logging.getLogger()
-    root_logger.handlers.clear()
-    root_logger.setLevel(logging.DEBUG)
-
-    handler = _MultiprocessingQueueLogHandler(queue_out)
-    handler.setLevel(logging.DEBUG)
-    handler.setFormatter(logging.Formatter("%(message)s"))
-    root_logger.addHandler(handler)
-
-    sys.stdout = _QueueTextStream(queue_out, levelno=logging.INFO, name="pipeline.stdout")
-    sys.stderr = _QueueTextStream(queue_out, levelno=logging.ERROR, name="pipeline.stderr")
-
-def pipeline_process_worker(run_spec, queue_out):
-    """
-    Run the heavy DopplerView pipeline in a child process.
-
-    The Tk process must remain UI-only.  This isolates native crashes/hangs from
-    OpenCV, ONNXRuntime, PyTorch, h5py, etc. from Tkinter's event loop.
-    """
-    _configure_child_process_logging(queue_out)
-
-    try:
-        h5_schema_path = run_spec["h5_schema_path"]
-        output_config_path = run_spec["output_config_path"]
-        models_config_path = run_spec["models_config_path"]
-        dopplerview_config_path = run_spec.get("dopplerview_config_path")
-        input_list = [Path(p) for p in run_spec["input_list"]]
-        targets = run_spec.get("steps")
-        selected_models = run_spec.get("selected_models", {})
-        config_mode = run_spec.get("config_mode", "default")
-        output_enabled = bool(run_spec.get("output_enabled", False))
-
-        output_manager = OutputManager(
-            h5_schema_path,
-            output_config_path,
-            output_enabled=output_enabled,
-        )
-        pipeline = Pipeline(output_manager=output_manager)
-
-        pipeline.load_model_registry(models_config_path)
-        if dopplerview_config_path and Path(dopplerview_config_path).exists():
-            pipeline.load_dopplerview_config(dopplerview_config_path)
-
-        try:
-            pipeline.set_config_mode(config_mode)
-        except Exception:
-            logger.exception("Failed to set pipeline config mode in worker")
-
-        for task_name, model_name in selected_models.items():
-            if model_name:
-                try:
-                    pipeline.ctx.change_model_for_task(task_name, model_name)
-                except Exception:
-                    logger.exception("Failed to select model %s for task %s", model_name, task_name)
-
-        pipeline.ctx.clear_input_list()
-        pipeline.load_input_list_from_list(input_list)
-
-        def callback(event, *args):
-            queue_out.put((event, args))
-
-            if event == "step_done" and args:
-                step_name = args[0]
-                preview = _build_step_preview(pipeline, step_name)
-                if preview is not None:
-                    queue_out.put(("preview_image", (preview,)))
-
-        pipeline.run_batch(targets=targets, callback=callback)
-        queue_out.put(("worker_done", None))
-
-    except BaseException:
-        queue_out.put(("error", traceback.format_exc()))
-
-
-class MainWindow:
+class MainWindow(ThemeMixin):
     def __init__(self, root):
         self.root = root
         self.root.title(f"DopplerView {app_version}")
@@ -314,348 +88,6 @@ class MainWindow:
 
         self.enable_debug_output = False
 
-
-    def _apply_theme(self, theme: str | None = None) -> None:
-        """
-        Apply the selected application theme.
-
-        This controls both ttk widgets and classic tk widgets.  ttk styling is
-        applied through ttk.Style; classic tk widgets are handled through the Tk
-        option database and by recursively re-configuring existing widgets.
-        """
-        if theme is None:
-            theme = self.theme_var.get() if hasattr(self, "theme_var") else "dark"
-        theme = theme.lower()
-        if theme not in {"dark", "light"}:
-            theme = "dark"
-
-        if hasattr(self, "theme_var"):
-            self.theme_var.set(theme)
-
-        style = ttk.Style(self.root)
-        self._style = style
-        self._theme_name = theme
-
-        palettes = {
-            "dark": {
-                "bg": "#0f1116",
-                "surface": "#1b1f27",
-                "surface_alt": "#242a35",
-                "text": "#e8eef5",
-                "muted": "#9aa6b5",
-                "accent": "#4f9dff",
-                "select": "#2d5f9a",
-                "disabled": "#6f7a88",
-                "border": "#303746",
-            },
-            "light": {
-                "bg": "#f5f7fb",
-                "surface": "#ffffff",
-                "surface_alt": "#e9eef7",
-                "text": "#1f2937",
-                "muted": "#667085",
-                "accent": "#2563eb",
-                "select": "#cfe1ff",
-                "disabled": "#9ca3af",
-                "border": "#cfd7e6",
-            },
-        }
-        palette = palettes[theme]
-
-        self._bg_color = palette["bg"]
-        self._surface_color = palette["surface"]
-        self._surface_alt_color = palette["surface_alt"]
-        self._text_fg = palette["text"]
-        self._muted_fg = palette["muted"]
-        self._accent_color = palette["accent"]
-        self._select_color = palette["select"]
-        self._disabled_fg = palette["disabled"]
-        self._border_color = palette["border"]
-        self._text_bg = self._surface_color
-
-        # Use a theme that accepts color customization.
-        try:
-            style.theme_use("clam")
-        except tk.TclError:
-            pass
-
-        # sv_ttk can improve widget metrics; colors are still forced below.
-        if sv_ttk:
-            try:
-                sv_ttk.set_theme(theme)
-                style.theme_use("clam")
-            except Exception:
-                pass
-
-        self.root.configure(bg=self._bg_color)
-
-        # Tk option database: affects widgets created later unless explicitly overridden.
-        self.root.option_add("*Background", self._bg_color)
-        self.root.option_add("*Foreground", self._text_fg)
-        self.root.option_add("*activeBackground", self._select_color)
-        self.root.option_add("*activeForeground", self._text_fg)
-        self.root.option_add("*selectBackground", self._select_color)
-        self.root.option_add("*selectForeground", self._text_fg)
-        self.root.option_add("*insertBackground", self._text_fg)
-        self.root.option_add("*disabledForeground", self._disabled_fg)
-        self.root.option_add("*Menu.Background", self._surface_color)
-        self.root.option_add("*Menu.Foreground", self._text_fg)
-        self.root.option_add("*Menu.activeBackground", self._select_color)
-        self.root.option_add("*Menu.activeForeground", self._text_fg)
-
-        # ---------- ttk styles ----------
-        style.configure(".", background=self._bg_color, foreground=self._text_fg)
-
-        style.configure("TFrame", background=self._bg_color)
-        style.configure("Dark.TFrame", background=self._bg_color)
-        style.configure("Surface.TFrame", background=self._surface_color)
-
-        style.configure("TLabel", background=self._bg_color, foreground=self._text_fg)
-        style.configure("Muted.TLabel", background=self._bg_color, foreground=self._muted_fg)
-
-        for labelframe_style in ("TLabelframe", "TLabelFrame"):
-            style.configure(
-                labelframe_style,
-                background=self._bg_color,
-                foreground=self._text_fg,
-                bordercolor=self._border_color,
-                lightcolor=self._border_color,
-                darkcolor=self._border_color,
-            )
-        for label_style in ("TLabelframe.Label", "TLabelFrame.Label"):
-            style.configure(label_style, background=self._bg_color, foreground=self._text_fg)
-
-        style.configure(
-            "TButton",
-            background=self._surface_alt_color,
-            foreground=self._text_fg,
-            bordercolor=self._border_color,
-            focuscolor=self._accent_color,
-            padding=(10, 5),
-        )
-        style.map(
-            "TButton",
-            background=[
-                ("disabled", self._surface_color),
-                ("active", self._select_color),
-                ("pressed", self._select_color),
-            ],
-            foreground=[
-                ("disabled", self._disabled_fg),
-                ("active", self._text_fg),
-                ("pressed", self._text_fg),
-            ],
-        )
-
-        style.configure(
-            "TEntry",
-            fieldbackground=self._surface_color,
-            background=self._surface_color,
-            foreground=self._text_fg,
-            insertcolor=self._text_fg,
-            bordercolor=self._border_color,
-        )
-        style.map(
-            "TEntry",
-            fieldbackground=[("disabled", self._surface_color), ("readonly", self._surface_color)],
-            foreground=[("disabled", self._disabled_fg)],
-        )
-
-        style.configure(
-            "TCombobox",
-            fieldbackground=self._surface_color,
-            background=self._surface_alt_color,
-            foreground=self._text_fg,
-            arrowcolor=self._text_fg,
-            bordercolor=self._border_color,
-            selectbackground=self._select_color,
-            selectforeground=self._text_fg,
-        )
-        style.map(
-            "TCombobox",
-            fieldbackground=[("readonly", self._surface_color)],
-            foreground=[("readonly", self._text_fg)],
-            background=[("active", self._surface_alt_color)],
-            arrowcolor=[("active", self._text_fg)],
-        )
-
-        style.configure("TCheckbutton", background=self._bg_color, foreground=self._text_fg, focuscolor=self._accent_color)
-        style.map(
-            "TCheckbutton",
-            background=[("active", self._bg_color)],
-            foreground=[("disabled", self._disabled_fg), ("active", self._text_fg)],
-        )
-
-        style.configure("TRadiobutton", background=self._bg_color, foreground=self._text_fg, focuscolor=self._accent_color)
-        style.map(
-            "TRadiobutton",
-            background=[("active", self._bg_color)],
-            foreground=[("disabled", self._disabled_fg), ("active", self._text_fg)],
-        )
-
-        style.configure(
-            "Vertical.TScrollbar",
-            background=self._surface_alt_color,
-            troughcolor=self._bg_color,
-            bordercolor=self._border_color,
-            arrowcolor=self._text_fg,
-            gripcount=0,
-        )
-        style.map(
-            "Vertical.TScrollbar",
-            background=[("active", self._select_color)],
-            arrowcolor=[("active", self._text_fg)],
-        )
-
-        style.configure(
-            "TProgressbar",
-            background=self._accent_color,
-            troughcolor=self._surface_color,
-            bordercolor=self._border_color,
-            lightcolor=self._accent_color,
-            darkcolor=self._accent_color,
-        )
-
-    def set_theme(self, theme: str) -> None:
-        """Switch the whole application between the available themes."""
-        self._apply_theme(theme)
-        self._style_existing_widgets()
-        self.update_step_display()
-
-    def _style_existing_widgets(self) -> None:
-        """Re-apply current colors to all already-created widgets and menus."""
-        self._darken_tk_widget(self.root)
-
-        if hasattr(self, "config_window") and self.config_window.winfo_exists():
-            self._darken_tk_widget(self.config_window)
-
-        for menu in getattr(self, "_menus", []):
-            self._darken_menu(menu)
-
-    def _darken_menu(self, menu: tk.Menu) -> None:
-        """Best-effort dark styling for classic Tk menus."""
-        try:
-            menu.configure(
-                bg=self._surface_color,
-                fg=self._text_fg,
-                activebackground=self._select_color,
-                activeforeground=self._text_fg,
-                disabledforeground=self._disabled_fg,
-                selectcolor=self._accent_color,
-            )
-        except tk.TclError:
-            pass
-
-    def _darken_tk_widget(self, widget: tk.Misc) -> None:
-        """
-        Recursively apply dark colors to classic Tk widgets.
-
-        This is necessary because ttk themes do not affect tk.Frame, tk.Label,
-        tk.LabelFrame, tk.Listbox, tk.Checkbutton, tk.Radiobutton, tk.Canvas,
-        tk.Text, or tk.Menu.
-        """
-        cls = widget.winfo_class()
-
-        try:
-            if isinstance(widget, tk.Menu):
-                self._darken_menu(widget)
-
-            elif cls in {"Frame", "TFrame"}:
-                # ttk.Frame does not accept bg; tk.Frame does.
-                if not isinstance(widget, ttk.Frame):
-                    widget.configure(bg=self._bg_color)
-
-            elif cls in {"Labelframe", "LabelFrame"}:
-                widget.configure(
-                    bg=self._bg_color,
-                    fg=self._text_fg,
-                    highlightbackground=self._border_color,
-                    highlightcolor=self._accent_color,
-                )
-
-            elif cls == "Label":
-                widget.configure(
-                    bg=self._bg_color,
-                    fg=self._text_fg,
-                    activebackground=self._bg_color,
-                    activeforeground=self._text_fg,
-                )
-
-            elif cls == "Button":
-                widget.configure(
-                    bg=self._surface_alt_color,
-                    fg=self._text_fg,
-                    activebackground=self._select_color,
-                    activeforeground=self._text_fg,
-                    disabledforeground=self._disabled_fg,
-                    highlightbackground=self._bg_color,
-                    highlightcolor=self._accent_color,
-                )
-
-            elif cls in {"Checkbutton", "Radiobutton"}:
-                widget.configure(
-                    bg=self._bg_color,
-                    fg=self._text_fg,
-                    activebackground=self._bg_color,
-                    activeforeground=self._text_fg,
-                    disabledforeground=self._disabled_fg,
-                    selectcolor=self._surface_color,
-                    highlightbackground=self._bg_color,
-                    highlightcolor=self._accent_color,
-                )
-
-            elif cls == "Listbox":
-                widget.configure(
-                    bg=self._surface_color,
-                    fg=self._text_fg,
-                    selectbackground=self._select_color,
-                    selectforeground=self._text_fg,
-                    activestyle="none",
-                    highlightbackground=self._border_color,
-                    highlightcolor=self._accent_color,
-                    relief="flat",
-                )
-
-            elif cls == "Text":
-                widget.configure(
-                    bg=self._surface_color,
-                    fg=self._text_fg,
-                    insertbackground=self._text_fg,
-                    selectbackground=self._select_color,
-                    selectforeground=self._text_fg,
-                    highlightbackground=self._border_color,
-                    highlightcolor=self._accent_color,
-                    relief="flat",
-                )
-
-            elif cls == "Entry":
-                widget.configure(
-                    bg=self._surface_color,
-                    fg=self._text_fg,
-                    insertbackground=self._text_fg,
-                    selectbackground=self._select_color,
-                    selectforeground=self._text_fg,
-                    highlightbackground=self._border_color,
-                    highlightcolor=self._accent_color,
-                    relief="flat",
-                )
-
-            elif cls == "Canvas":
-                widget.configure(
-                    bg=self._bg_color,
-                    highlightbackground=self._bg_color,
-                    highlightcolor=self._accent_color,
-                )
-
-            elif cls == "Toplevel":
-                widget.configure(bg=self._bg_color)
-
-        except tk.TclError:
-            # Some widgets/classes do not support all options above.
-            pass
-
-        for child in widget.winfo_children():
-            self._darken_tk_widget(child)
 
     # -------------------
     # UI
@@ -1298,16 +730,16 @@ class MainWindow:
 
         if mode == "minimal":
             self.minimal_frame.pack(fill="both", expand=True)
-            self.root.geometry("600x420")
+            self.root.geometry("600x400")
 
         elif mode == "advanced":
             self.advanced_frame.pack(fill="both", expand=True)
-            self.root.geometry("850x650")
+            self.root.geometry("850x600")
             self.resize_window()
 
     def resize_window(self):
         image_height = self.image_tk.height() if self.image_tk else 0
-        window_height = 580 + image_height  # base height + image height
+        window_height = 600 + image_height  # base height + image height
         self.root.geometry(f"{self.root.winfo_width()}x{window_height}")
 
     def update_step_color(self, step, state):
@@ -1358,7 +790,10 @@ class MainWindow:
             folder_list = [Path(f) for f in folders]
 
         self.pipeline.load_input_list_from_list(folder_list)
-
+        # self.pipeline
+        # if folder_list[0].suffix == ".holo":
+        #     self.pipeline.ctx.load_input_folder(folder_list[0])  # load first by default, pipeline will handle the rest in batch mode
+        # self.config_path.set(self.pipeline.ctx.dopplerview_config_path)
         self.update_step_display()
 
         self.btn_run.config(state="enabled")
@@ -1638,7 +1073,7 @@ class MainWindow:
                     self.measure_index = i
 
                     try:
-                        measure_name = Path(self.pipeline.ctx.input_list[i]).name
+                        measure_name = Path(self.pipeline.ctx.input_list[i]).stem
                     except Exception:
                         measure_name = "unknown input"
                     self.status_var.set(f"Processing {i + 1} / {total}: {measure_name}")
@@ -1842,22 +1277,3 @@ class MainWindow:
             "For more information, visit our GitHub repository: https://github.com/DigitalHolography/DopplerView"
         )
         tk.messagebox.showinfo("Help - DopplerView", help_text)
-
-
-# -------------------
-# Run app
-# -------------------
-
-if __name__ == "__main__":
-    multiprocessing.freeze_support()
-
-    if TkinterDnD:
-        root = TkinterDnD.Tk()
-    else:
-        root = tk.Tk()
-    log_config.setup_logging()
-
-    matplotlib.use('Agg')
-
-    app = MainWindow(root)
-    root.mainloop()
