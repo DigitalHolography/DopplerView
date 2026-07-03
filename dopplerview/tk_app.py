@@ -11,13 +11,14 @@ import multiprocessing
 import traceback
 import matplotlib
 
-from dopplerview.input_output import log_config, user_config
 import numpy as np
 import cv2
 from PIL import Image, ImageTk
 
+from dopplerview.input_output import log_config, user_config
 from dopplerview.input_output.output_manager import OutputManager
 from dopplerview.pipeline.pipeline import Pipeline
+from dopplerview._version import __version__ as app_version
 
 import logging
 logger = logging.getLogger(__name__)
@@ -258,7 +259,7 @@ def pipeline_process_worker(run_spec, queue_out):
 class MainWindow:
     def __init__(self, root):
         self.root = root
-        self.root.title("DopplerView")
+        self.root.title(f"DopplerView {app_version}")
 
         self._minimal_title_font: tkfont.Font | None = None
 
