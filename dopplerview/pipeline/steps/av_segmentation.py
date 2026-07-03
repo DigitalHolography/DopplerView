@@ -143,6 +143,7 @@ class ChoroidalAVSegmentationStep(BaseStep):
         retinal_vein_mask = self.get_retinal_vein_mask(ctx)
         retinal_vessel_mask = dilation(retinal_artery_mask | retinal_vein_mask)
 
+        self.logger.info("    - Identifying choroidal aliased arteries with -0.2 correlation threshold in high frequency signal and -0.25 for M0 correlation.")
         pre_aliased_arteries = corr_HF < -0.2   # Identify aliased arteries based on high frequency correlation
         connected_arteries = process_masks.connect_components(pre_aliased_arteries, max_distance=5)  # Connect disconnected aliased arteries that are close to each other
         large_arteries = opening(connected_arteries, disk(2))
@@ -150,11 +151,13 @@ class ChoroidalAVSegmentationStep(BaseStep):
         aliased_arteries = process_masks.keep_connected_components(anti_correlated_vessels, large_arteries) # Keep only the vessels that are connected to the aliased arteries
         choroidal_aliased_artery_mask = aliased_arteries & ~retinal_vessel_mask  # Remove retinal vessels
 
+        self.logger.info("    - Identifying choroidal veins with -0.15 correlation threshold in M0 signal.")
         pre_veins = corr_M0 < -0.15
         veins = process_masks.keep_connected_components(pre_veins, aliased_arteries, negative=True)   # Remove aliased arteries from the vein mask
         veins = process_masks.remove_small_vessels(label(veins), min_size=10) > 0
         choroidal_vein_mask = veins & ~retinal_vessel_mask  # Remove retinal vessels
 
+        self.logger.info("    - Identifying choroidal arteries with 0.12 correlation threshold in M0 signal.")
         arteries = corr_M0 > 0.12
         arteries = process_masks.remove_small_vessels(label(arteries), min_size=10) > 0
         choroidal_artery_mask = arteries & ~retinal_vessel_mask  # Remove retinal vessels
@@ -176,8 +179,8 @@ class ChoroidalAVSegmentationStep(BaseStep):
         choroidal_vein_mask_clean = self.clean_vessel_mask(choroidal_vein_mask, ctx)
         choroidal_aliased_artery_mask_clean = self.clean_vessel_mask(choroidal_aliased_artery_mask, ctx)
 
-        ctx.output_manager.save_overlay(self.name, "overlay_clean", ctx.require("M0_ff_image_cleaned"), [choroidal_artery_mask_clean, choroidal_vein_mask_clean, choroidal_aliased_artery_mask_clean], colors=[(0, 0, 255), (255, 0, 0), (0, 255, 0)])
-
         ctx.set("choroidal_artery_mask_clean", choroidal_artery_mask_clean)
         ctx.set("choroidal_vein_mask_clean", choroidal_vein_mask_clean)
         ctx.set("choroidal_aliased_artery_mask_clean", choroidal_aliased_artery_mask_clean)
+        
+        ctx.output_manager.save_overlay(self.name, "overlay_clean", ctx.require("M0_ff_image_cleaned"), [choroidal_artery_mask_clean, choroidal_vein_mask_clean, choroidal_aliased_artery_mask_clean], colors=[(0, 0, 255), (255, 0, 0), (0, 255, 0)])

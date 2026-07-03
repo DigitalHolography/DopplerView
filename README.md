@@ -8,7 +8,6 @@ The project provides:
 * Automatic dependency resolution and selective recomputation
 * A model registry with HuggingFace integration
 * CLI execution
-* A Streamlit-based GUI, for dynamic debugging
 * A tkinter-based App used for deployement, with minimal and advanced UI
 
 ---
@@ -18,7 +17,6 @@ The project provides:
 DopplerView operates on **Holodoppler acquisition folders**.
 
 The pipeline processes spectral moments derived from Doppler holograms and performs:
-
 
 1. **Preprocessing**
 
@@ -35,7 +33,7 @@ The pipeline processes spectral moments derived from Doppler holograms and perfo
 
 4. **Pulse analysis**
 
-   * Computation of diastolic/systolic frames and temporal correlation map using the arterial signal obtained with the pre-classified arteries, following the strategy described in [Dubosc, Marius, et al. "Improving segmentation of retinal arteries and veins using cardiac signal in doppler holograms." arXiv preprint arXiv:2511.14654 (2025).](https://arxiv.org/abs/2511.14654)
+   * Computation of diastolic/systolic frames and temporal correlation map using the arterial signal obtained with the pre-classified arteries, following the strategy described in [Dubosc, Marius, et al. "Improving segmentation of retinal arteries and veins using cardiac signal in doppler holograms." arXiv preprint arXiv:2511.14654 (2025).](https://arxiv.org/abs/2511.14654) except for the pre-classification, now done by clustering the fourier harmonic features of the vessel branches.
 
 5. **Artery/vein semantic segmentation**
 
@@ -81,28 +79,27 @@ pip install -r requirements.txt
 
 # Usage
 
-DopplerView runs using a [HoloDoppler](https://github.com/DigitalHolography/HoloDopplerPython/tree/main) acquisition folder, with the following structure :
+DopplerView runs using a .holo folder with a corresponding [HoloDoppler](https://github.com/DigitalHolography/HoloDopplerPython/tree/main) folder, with the following structure :
 
 ```
 measure_id.holo
 measure_id/
 └── measure_id_HD/
     ├── json/
-    │   └── parameters.json            # The rendering parameters
-    ├── mp4/                           # Video of the rendered moments
-    ├── raw/
-    │   └── measure_id_HD_output.h5    # The .h5 file used as input
-    └── png/                           # Accumulated image of the moments
+    │   └── parameters_holodoppler.json      # The rendering parameters
+    ├── h5/
+    │   └── measure_id_HD_output.h5          # The .h5 file used as input
+    ├── mp4/                                 # Video of the rendered moments
+    └── png/                                 # Visualization of the rendering
 ```
 
 ## Executable (InnoSetup + TKinter)
 
-* Download the .exe of the latest release, and let the installer do its things.
+* Download the .exe of the latest release, and let the installer do its things. Configurations files will be automatically loaded in C:\\Users\\*user_name*\\AppData\\Roaming\\DopplerView\\*release_version*
 * Run DopplerView.exe
-   * Drag and drop a folder, and click on *Run the full pipeline*
-   * To select the steps and the models used in the pipeline, activate the *Advanced view*
-
-To create your 
+   * Drag and drop one or several .holo file(s), a folder containing .holo file(s) or a .txt file with the list of inputs, and click on *Run full pipeline*
+   * To select the steps and the config used in the pipeline, activate the *Advanced view* (*View* > *Advanced View*)
+   * To modify the models used in the pipline, the configuration or the .h5 output format : *Config* > *Open Configuration*
 
 
 ## CLI
@@ -120,7 +117,7 @@ dopplerview /path/to/measure.holo --config config.json
                         Path to JSON configuration file  
 *  `-t TARGETS [TARGETS ...], --targets TARGETS [TARGETS ...]`
                         List of target steps to run
-*  `-d, --debug`           Enable debug mode. In this mode, steps outputs are read from the .h5, and   
+*  `-d, --debug`           Enable debug mode. In this mode, steps outputs are read from the cache.h5 (C:\\Users\\*user_name*\\.cache\\dopplerview\\cache\\*measure_name*\\cache.h5), and   
                         only targeted steps are re-run. This is useful for debugging specific       
                         steps without having to re-run the entire pipeline.
 
@@ -138,27 +135,28 @@ dopplerview ./data/patient_01 \
 DopplerView/
 │
 ├── dopplerview/
-│   ├── pipeline/          # DAG engine, steps, context
-│   ├── models/            # Registry, manager, wrappers
 │   ├── input_output/      # Folder reading & output handling
+│   ├── models/            # Registry, manager, wrappers
+│   ├── pipeline/          # DAG engine, steps, context
 │   ├── utils/
 │   │   └── ...
-│   ├── tk_app.py             # Tkinter GUI
-│   ├── cli.py/            # Command-line script
+│   ├── ui                 # Tkinter GUI
+│   │   └── ...
+│   ├── cli.py             # Command-line script
 │   └── ...
 │
 ├── README.md
 ├── WORKFLOW.md            # Architecture documentation
 ├── CONTRIBUTING.md        # Developer guide
-├── pyproject.toml
-└── requirements.txt
+├── CHANGELOG.md           # Releases description
+└── LICENSE
 ```
 
 ---
 
 # Configuration
 
-The pipeline configuration is provided via a JSON file.
+The pipeline configuration is provided via a JSON file. It can either be the User configuration in C:\\Users\\*user_name*\\AppData\\Roaming\\DopplerView\\*release_version*\\default_DV_params.json
 
 It controls:
 
@@ -181,15 +179,13 @@ measure.holo
 measure/
 ├── measure_HD/
 └── measure_DV/
-   ├── output/                            # Output folders used for debuging
+   ├── h5/
+   │   └── measure_id_DV.h5      # The .h5 output
+   ├── output/                   # Output folders used for debuging
    │   ├── output_0
    │   └── ...
-   ├── config/
-   │   └── doppler_view_params.json      # The pipeline configuration
-   ├── h5/
-   │   └── measure_id_DV.h5              # The .h5 output
-   └── cache
-       └── cache.h5                      # The cache used for debugging
+   └── json/
+       └── DV_params.json        # The pipeline configuration
 ```
 
 Each pipeline run overwites the results in the .h5 file. The content of the .h5 file is decided by the [h5_schema.json](config/h5_schema.json).
@@ -206,4 +202,4 @@ It also creates an `output` folder, with the content produced by each step, depe
 
 # License
 
-MIT
+GPL-3

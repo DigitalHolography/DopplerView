@@ -16,7 +16,7 @@ class ReadMomentsStep(BaseStep):
 
     def read_hdf5(self, file_path):
         self.logger.info(f"    - Reading the HDF5 file: {file_path}")
-        M0, M1, M2, band_ratio, LF_M0, HF_M0 = None, None, None, None, None, None
+        M0, M1, M2, LF_M0, HF_M0 = None, None, None, None, None
 
         try:
             with h5py.File(file_path, "r") as f:
@@ -71,15 +71,18 @@ class ReadMomentsStep(BaseStep):
             self.logger.info(f"ID: {type(e).__name__}")
             raise
 
-        return M0, M1, M2, band_ratio, LF_M0, HF_M0
+        return M0, M1, M2, LF_M0, HF_M0
 
     def run(self, ctx):
         input_file = ctx.require("input_file")
-        M0, M1, M2, band_ratio, LF_M0, HF_M0 = self.read_hdf5(input_file)
+        M0, M1, M2, LF_M0, HF_M0 = self.read_hdf5(input_file)
         ctx.set("moment0", M0)
         ctx.set("moment1", M1)
         ctx.set("moment2", M2)
-        ctx.set("LF_M0", LF_M0)
-        ctx.set("HF_M0", HF_M0)
+        
+        if LF_M0 is not None:
+            ctx.set("LF_M0", LF_M0)
+        if HF_M0 is not None:
+            ctx.set("HF_M0", HF_M0)
 
         ctx.output_manager.output(self.name, "moment0", M0, "video")
