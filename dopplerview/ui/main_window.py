@@ -1,23 +1,25 @@
-import sys
+import logging
 import os
+import queue
 import subprocess
+import sys
+import multiprocessing
 import tkinter as tk
 import tkinter.font as tkfont
-from tkinter import filedialog, ttk
 from pathlib import Path
-import threading
-import queue
-import matplotlib
+from tkinter import filedialog, messagebox, ttk
 
-from dopplerview.input_output import log_config, user_config
-import numpy as np
 import cv2
-from PIL import Image, ImageTk
 
+from dopplerview._version import __version__ as app_version
+from dopplerview.input_output import user_config
 from dopplerview.input_output.output_manager import OutputManager
 from dopplerview.pipeline.pipeline import Pipeline
 
-import logging
+from dopplerview.ui.image_utils import np_to_tk
+from dopplerview.ui.theme import ThemeMixin
+from dopplerview.ui.worker import pipeline_process_worker
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -27,25 +29,11 @@ except ImportError:  # optional dependency
     TkinterDnD = None
     logger.warning("Warning: tkinterdnd2 not found, drag-and-drop functionality will be disabled.")
 
-try:
-    import sv_ttk
-except ImportError:  #  optional dependency
-    sv_ttk = None
 
-def np_to_tk(img: np.ndarray):
-    """Convert numpy image to Tkinter-compatible PhotoImage"""
-    if img.ndim == 2:
-        img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
-
-    img = (img).astype(np.uint8)
-    pil_img = Image.fromarray(img)
-    return ImageTk.PhotoImage(pil_img)
-
-
-class MainWindow:
+class MainWindow(ThemeMixin):
     def __init__(self, root):
         self.root = root
-        self.root.title("DopplerView")
+        self.root.title(f"DopplerView {app_version}")
 
         self._minimal_title_font: tkfont.Font | None = None
 
@@ -59,7 +47,7 @@ class MainWindow:
         self.register_config_file(h5_schema_path, "h5_schema")
         output_config_path = user_config.ensure_config_file("output_config.json")
         self.register_config_file(output_config_path, "output_config")
-        self.output_manager = OutputManager(h5_schema_path, output_config_path)
+        self.output_manager = OutputManager(h5_schema_path, output_config_path, output_enabled=False)
         self.pipeline = Pipeline(output_manager=self.output_manager)
 
         models_config = user_config.ensure_config_file("models.yaml")
@@ -69,17 +57,26 @@ class MainWindow:
         config_path = user_config.ensure_config_file("default_DV_params.json")
         # self.pipeline.load_dopplerview_config(config_path)
         self.config_path = tk.StringVar(value=str(config_path))
+        self.status_var = tk.StringVar(value="Ready")
         self.register_config_file(config_path, "dopplerview_config")
 
         self.image_tk = None  # keep reference (IMPORTANT)
 
         self.queue = queue.Queue()
+        self.pipeline_worker = None
+        self.output_worker = None
+        self.mp_context = multiprocessing.get_context("spawn")
+        self.selected_models: dict[str, str] = {}
+
+        self.theme_var = tk.StringVar(value="dark")
+        self._menus: list[tk.Menu] = []
 
         self._apply_theme()
         self._set_window_icon()
 
         # --- UI layout --
         self._build_ui()
+        self._darken_tk_widget(self.root)
         self._install_drop_targets()
         self.update_mode()  # set initial mode
 
@@ -89,55 +86,8 @@ class MainWindow:
         self.step_index = 0
         self.measure_index = 0
 
+        self.enable_debug_output = False
 
-    def _apply_theme(self) -> None:
-        """
-        Apply the Sun Valley ttk theme when available; otherwise fall back to a simple dark palette.
-        """
-        style = ttk.Style(self.root)
-        self._style = style
-        if sv_ttk:
-            try:
-                sv_ttk.set_theme("dark")
-            except Exception:
-                pass
-
-        # Fallback palette aligned with Sun Valley dark.
-        fallback_bg = "#0f1116"
-        fallback_surface = "#1b1f27"
-        fallback_fg = "#e8eef5"
-        fallback_muted = "#9aa6b5"
-        fallback_accent = "#4f9dff"
-
-        # Derive colors from the active theme when possible to keep consistency.
-        bg = style.lookup("TFrame", "background") or fallback_bg
-        fg = style.lookup("TLabel", "foreground") or fallback_fg
-        surface = (
-            style.lookup("TEntry", "fieldbackground")
-            or style.lookup("TEntry", "background")
-            or fallback_surface
-        )
-        muted = (
-            style.lookup("TLabel", "foreground", state=("disabled",)) or fallback_muted
-        )
-        accent = (
-            style.lookup("TButton", "bordercolor")
-            or style.lookup("TNotebook", "foreground")
-            or fallback_accent
-        )
-        select = (
-            style.lookup("TButton", "foreground", state=("selected",))
-        )
-
-        self.root.configure(bg=bg)
-        # set texts colors when created.
-        self._text_bg = surface
-        self._text_fg = fg
-        self._muted_fg = muted
-        self._bg_color = bg
-        self._surface_color = surface
-        self._accent_color = accent
-        self._select_color = select
 
     # -------------------
     # UI
@@ -146,21 +96,40 @@ class MainWindow:
     def _build_ui(self) -> None:
         self._build_menu()
 
-        container = ttk.Frame(self.root, padding=10)
+        container = ttk.Frame(self.root, padding=10, style="Dark.TFrame")
         container.pack(fill="both", expand=True)
 
-        self.minimal_frame = ttk.Frame(container, padding=10)
-        self.advanced_frame = ttk.Frame(container, padding=10)
+        self.minimal_frame = ttk.Frame(container, padding=10, style="Dark.TFrame")
+        self.advanced_frame = ttk.Frame(container, padding=10, style="Dark.TFrame")
 
         self._build_minimal_ui()
         self._build_advanced_ui()
 
     def _build_menu(self) -> None:
         self.ui_mode_var = tk.StringVar(value="minimal")
+        self._menus = []
 
-        menu_bar = tk.Menu(self.root, bg=self._bg_color)
+        menu_bar = tk.Menu(
+            self.root,
+            bg=self._surface_color,
+            fg=self._text_fg,
+            activebackground=self._select_color,
+            activeforeground=self._text_fg,
+            disabledforeground=self._disabled_fg,
+        )
+        self._menus.append(menu_bar)
 
-        view_menu = tk.Menu(menu_bar, tearoff=False, bg=self._bg_color)
+        view_menu = tk.Menu(
+            menu_bar,
+            tearoff=False,
+            bg=self._surface_color,
+            fg=self._text_fg,
+            activebackground=self._select_color,
+            activeforeground=self._text_fg,
+            disabledforeground=self._disabled_fg,
+            selectcolor=self._accent_color,
+        )
+        self._menus.append(view_menu)
         view_menu.add_radiobutton(
             label="Minimal UI",
             value="minimal",
@@ -173,18 +142,50 @@ class MainWindow:
             variable=self.ui_mode_var,
             command=self.update_mode,
         )
-
         menu_bar.add_cascade(label="View", menu=view_menu)
 
-        config_menu = tk.Menu(menu_bar, tearoff=False, bg=self._bg_color)
+        config_menu = tk.Menu(
+            menu_bar,
+            tearoff=False,
+            bg=self._surface_color,
+            fg=self._text_fg,
+            activebackground=self._select_color,
+            activeforeground=self._text_fg,
+            disabledforeground=self._disabled_fg,
+        )
+        self._menus.append(config_menu)
         config_menu.add_command(label="Open Configuration", command=self.show_config)
         config_menu.add_separator()
         config_menu.add_command(label="Modify dopplerview config", command=self.modify_dopplerview_config)
         config_menu.add_command(label="Modify models registry", command=self.modify_models_registry)
         config_menu.add_command(label="Modify h5 schema", command=self.modify_h5_schema)
         config_menu.add_command(label="Modify output config", command=self.modify_output_config)
-
         menu_bar.add_cascade(label="Config", menu=config_menu)
+
+        theme_menu = tk.Menu(
+            menu_bar,
+            tearoff=False,
+            bg=self._surface_color,
+            fg=self._text_fg,
+            activebackground=self._select_color,
+            activeforeground=self._text_fg,
+            disabledforeground=self._disabled_fg,
+            selectcolor=self._accent_color,
+        )
+        self._menus.append(theme_menu)
+        theme_menu.add_radiobutton(
+            label="Light",
+            value="light",
+            variable=self.theme_var,
+            command=lambda: self.set_theme("light"),
+        )
+        theme_menu.add_radiobutton(
+            label="Dark",
+            value="dark",
+            variable=self.theme_var,
+            command=lambda: self.set_theme("dark"),
+        )
+        menu_bar.add_cascade(label="Theme", menu=theme_menu)
 
         menu_bar.add_command(label="Help", command=self.show_help)
 
@@ -201,13 +202,15 @@ class MainWindow:
     def _build_minimal_ui(self):
         frame = self.minimal_frame
 
-        container = tk.Frame(frame)
+        container = tk.Frame(frame, bg=self._bg_color)
         container.place(relx=0.5, rely=0.5, anchor="center")
 
         self.minimal_title_label = tk.Label(
-            container, 
-            text="DopplerView", 
+            container,
+            text="DopplerView",
             font=self._get_minimal_title_font(),
+            bg=self._bg_color,
+            fg=self._text_fg,
         )
         self.minimal_title_label.grid(row=0, column=0, pady=(0, 10))
 
@@ -224,7 +227,7 @@ class MainWindow:
         # Input measures list
         # -------------------------------------------------
 
-        list_container = ttk.Frame(container)
+        list_container = ttk.Frame(container, style="Dark.TFrame")
         list_container.grid(
             row=3,
             column=0,
@@ -241,7 +244,11 @@ class MainWindow:
             width=50,
             bg=self._surface_color,
             fg=self._text_fg,
-            selectbackground=self._accent_color,
+            selectbackground=self._select_color,
+            selectforeground=self._text_fg,
+            highlightbackground=self._border_color,
+            highlightcolor=self._accent_color,
+            relief="flat",
             activestyle="none",
             exportselection=False,
         )
@@ -268,11 +275,19 @@ class MainWindow:
         )
 
         state = "disabled"
-        self.btn_run_minimal = ttk.Button(container, text="Run Full Pipeline", command=self.run_full_pipelines, state=state)
+        self.btn_run_minimal = ttk.Button(container, text="Run Full Pipeline", command=self.run_pipelines_with_steps, state=state)
         self.btn_run_minimal.grid(row=4, column=0, pady=10)
 
         self.progress_minimal = ttk.Progressbar(container, maximum=100)
-        self.progress_minimal.grid(row=5, column=0, sticky="ew", padx=10, pady=(0, 10))
+        self.progress_minimal.grid(row=5, column=0, sticky="ew", padx=10, pady=(0, 4))
+
+        self.status_label_minimal = ttk.Label(
+            container,
+            textvariable=self.status_var,
+            anchor="center",
+            style="Muted.TLabel",
+        )
+        self.status_label_minimal.grid(row=6, column=0, sticky="ew", padx=10, pady=(0, 10))
 
     def _build_advanced_ui(self):
         frame = self.advanced_frame
@@ -321,7 +336,14 @@ class MainWindow:
         # Input measures panel
         # -------------------------------------------------
 
-        self.input_panel = tk.LabelFrame(frame, text="Input Measures")
+        self.input_panel = tk.LabelFrame(
+            frame,
+            text="Input Measures",
+            bg=self._bg_color,
+            fg=self._text_fg,
+            highlightbackground=self._border_color,
+            highlightcolor=self._accent_color,
+        )
         self.input_panel.grid(
             row=row,
             column=0,
@@ -334,7 +356,7 @@ class MainWindow:
         self.input_panel.grid_rowconfigure(0, weight=1)
 
         # Listbox + scrollbar container
-        list_container = ttk.Frame(self.input_panel)
+        list_container = ttk.Frame(self.input_panel, style="Dark.TFrame")
         list_container.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
 
         list_container.grid_columnconfigure(0, weight=1)
@@ -345,7 +367,11 @@ class MainWindow:
             height=6,
             bg=self._surface_color,
             fg=self._text_fg,
-            selectbackground=self._accent_color,
+            selectbackground=self._select_color,
+            selectforeground=self._text_fg,
+            highlightbackground=self._border_color,
+            highlightcolor=self._accent_color,
+            relief="flat",
             activestyle="none",
             exportselection=False,
         )
@@ -382,7 +408,14 @@ class MainWindow:
         row += 1
 
         # --- Steps frame ---
-        self.steps_frame = tk.LabelFrame(frame, text="Pipeline Steps")
+        self.steps_frame = tk.LabelFrame(
+            frame,
+            text="Pipeline Steps",
+            bg=self._bg_color,
+            fg=self._text_fg,
+            highlightbackground=self._border_color,
+            highlightcolor=self._accent_color,
+        )
         self.steps_frame.grid(row=row, column=0, padx=5, pady=5, sticky="nsew")
         self.steps_frame.grid_columnconfigure(0, weight=1)
         row += 1
@@ -393,16 +426,24 @@ class MainWindow:
         steps = self.pipeline.get_step_names()
         waves = self.pipeline.engine.build_execution_waves(steps)
 
+        optional_steps = ["retinal_vessel_velocity_estimator", "arterial_waveform_analysis"]
+
         for i, wave in enumerate(waves):
             for j, step in enumerate(wave):
-                var = tk.BooleanVar(value=True)
+                var = tk.BooleanVar(value=step not in optional_steps)
 
                 cb = tk.Checkbutton(
                     self.steps_frame,
                     text=step,
                     variable=var,
                     command=lambda s=step: self.on_step_toggle(s),
+                    bg=self._bg_color,
                     fg=self._text_fg,
+                    activebackground=self._bg_color,
+                    activeforeground=self._text_fg,
+                    selectcolor=self._surface_color,
+                    highlightbackground=self._bg_color,
+                    highlightcolor=self._accent_color,
                 )
                 cb.grid(row=i, column=j, sticky="w")
 
@@ -418,11 +459,20 @@ class MainWindow:
 
         # --- Progress bar ---
         self.progress = ttk.Progressbar(frame, maximum=100)
-        self.progress.grid(row=row, column=0, sticky="ew", padx=5)
+        self.progress.grid(row=row, column=0, sticky="ew", padx=5, pady=(0, 4))
+        row += 1
+
+        self.status_label = ttk.Label(
+            frame,
+            textvariable=self.status_var,
+            anchor="center",
+            style="Muted.TLabel",
+        )
+        self.status_label.grid(row=row, column=0, sticky="ew", padx=5, pady=(0, 6))
         row += 1
 
         # --- Image display ---
-        self.image_label = tk.Label(frame)
+        self.image_label = tk.Label(frame, bg=self._bg_color, fg=self._text_fg)
         self.image_label.grid(row=row, column=0, pady=10, sticky="nsew")
 
     def _install_drop_targets(self) -> None:
@@ -449,14 +499,46 @@ class MainWindow:
         # -----------------------
         # LEFT: Models frame
         # -----------------------
-        models_frame = tk.LabelFrame(parent, text="Models")
+        models_frame = tk.LabelFrame(
+            parent,
+            text="Models",
+            bg=self._bg_color,
+            fg=self._text_fg,
+            highlightbackground=self._border_color,
+            highlightcolor=self._accent_color,
+        )
         models_frame.grid(row=0, column=0, padx=5, pady=5, sticky="nsew")
         models_frame.grid_columnconfigure(0, weight=1)
+
+        steps_frame = tk.LabelFrame(
+            parent,
+            text="Steps",
+            bg=self._bg_color,
+            fg=self._text_fg,
+            highlightbackground=self._border_color,
+            highlightcolor=self._accent_color,
+        )
+        steps_frame.grid(row=1, column=0, padx=5, pady=5, sticky="nsew")
+        steps_frame.grid_columnconfigure(0, weight=1)
+
+        debug_output_button = ttk.Checkbutton(
+            steps_frame,
+            text="Enable Debug Output",
+            command=self.toggle_debug_output
+        )
+        debug_output_button.grid(row=0, column=0, sticky="ew", pady=5)
 
         # -----------------------
         # RIGHT: Config panel
         # -----------------------
-        config_panel = tk.LabelFrame(parent, text="Configuration")
+        config_panel = tk.LabelFrame(
+            parent,
+            text="Configuration",
+            bg=self._bg_color,
+            fg=self._text_fg,
+            highlightbackground=self._border_color,
+            highlightcolor=self._accent_color,
+        )
         config_panel.grid(row=0, column=1, padx=5, pady=5, sticky="nsew")
         config_panel.grid_columnconfigure(0, weight=1)
 
@@ -474,6 +556,11 @@ class MainWindow:
             value="default",
             anchor="w",
             command=self.update_config_mode,
+            bg=self._bg_color,
+            fg=self._text_fg,
+            activebackground=self._bg_color,
+            activeforeground=self._text_fg,
+            selectcolor=self._surface_color,
         )
         rb_default.grid(row=0, column=0, sticky="w")
 
@@ -484,6 +571,11 @@ class MainWindow:
             value="local",
             anchor="w",
             command=self.update_config_mode,
+            bg=self._bg_color,
+            fg=self._text_fg,
+            activebackground=self._bg_color,
+            activeforeground=self._text_fg,
+            selectcolor=self._surface_color,
         )
         rb_local.grid(row=0, column=1, sticky="w")
 
@@ -516,7 +608,12 @@ class MainWindow:
         mm = ctx.model_manager
 
         def create_model_selector(parent_widget, label_text, task_name, r):
-            tk.Label(parent_widget, text=label_text).grid(row=r, column=0, sticky="w")
+            tk.Label(
+                parent_widget,
+                text=label_text,
+                bg=self._bg_color,
+                fg=self._text_fg,
+            ).grid(row=r, column=0, sticky="w")
 
             values = mm.get_model_name_list_for_task(task_name)
             var = tk.StringVar(value=values[0] if values else "")
@@ -530,11 +627,14 @@ class MainWindow:
             combo.grid(row=r + 1, column=0, sticky="ew", pady=2)
 
             def on_change(event=None):
-                ctx.change_model_for_task(task_name, var.get())
+                model_name = var.get()
+                self.selected_models[task_name] = model_name
+                ctx.change_model_for_task(task_name, model_name)
 
             combo.bind("<<ComboboxSelected>>", on_change)
 
             if values:
+                self.selected_models[task_name] = var.get()
                 ctx.change_model_for_task(task_name, var.get())
 
             return r + 2
@@ -577,17 +677,25 @@ class MainWindow:
 
         self.config_window = tk.Toplevel(self.root)
         self.config_window.title("DopplerView Configuration")
-        self.config_window.geometry("600x240")
+        self.config_window.geometry("600x300")
         self.config_window.configure(bg=self._bg_color)
 
-        container = ttk.Frame(self.config_window, padding=10)
+        container = ttk.Frame(self.config_window, padding=10, style="Dark.TFrame")
         container.pack(fill="both", expand=True)
 
         self._populate_configuration_frame(container)
+        self._darken_tk_widget(self.config_window)
 
     # -------------------
     # Actions
     # -------------------
+
+    def toggle_debug_output(self):
+        self.enable_debug_output = not self.enable_debug_output
+        if self.enable_debug_output:
+            self.output_manager.enable_output()
+        else:
+            self.output_manager.disable_output()
 
     def on_focus(self, event=None):
         self.check_config_updates()
@@ -626,22 +734,24 @@ class MainWindow:
 
         elif mode == "advanced":
             self.advanced_frame.pack(fill="both", expand=True)
-            self.root.geometry("850x580")
+            self.root.geometry("850x600")
             self.resize_window()
 
     def resize_window(self):
         image_height = self.image_tk.height() if self.image_tk else 0
-        window_height = 580 + image_height  # base height + image height
+        window_height = 600 + image_height  # base height + image height
         self.root.geometry(f"{self.root.winfo_width()}x{window_height}")
 
     def update_step_color(self, step, state):
         cb = self.step_checkboxes[step]
         if state == "done" or state == "cached":
-            color =  "#26ac5c"
+            color = "#26ac5c"
         elif state == "running":
             color = "#d7a61e"
+        else:
+            color = self._surface_color
 
-        cb.config(selectcolor=color)
+        cb.config(selectcolor=color, bg=self._bg_color, fg=self._text_fg)
 
     def update_step_display(self):
         pipeline = self.pipeline
@@ -662,7 +772,7 @@ class MainWindow:
                 else:
                     color = "#d7a61e"
             else:
-                color = "#ffffff"
+                color = self._surface_color
 
             cb.config(selectcolor=color)
 
@@ -690,6 +800,12 @@ class MainWindow:
         self.btn_run_minimal.config(state="enabled")
 
         self.refresh_input_listbox()
+
+        n_inputs = len(self.pipeline.ctx.input_list)
+        if n_inputs == 0:
+            self.status_var.set("Ready")
+        else:
+            self.status_var.set(f"Loaded {n_inputs} input file(s)")
 
     def refresh_input_listbox(self):
         # Advanced UI list
@@ -730,6 +846,7 @@ class MainWindow:
         elif config_type == "models_config":
             self.pipeline.load_model_registry(path)
             self._build_advanced_ui()  # rebuild to update model lists in dropdowns
+            self._darken_tk_widget(self.advanced_frame)
 
         elif config_type == "h5_schema":
             self.output_manager.load_h5_schema(path)
@@ -807,65 +924,160 @@ class MainWindow:
         path = event.data.strip("{}")  # windows fix
         self.load_input(path)
 
-    def run_full_pipelines(self):
-        # full pipeline
-        self.run_pipelines(None)
-
     def run_pipelines_with_steps(self):
         steps = self.get_selected_steps()
         self.run_pipelines(steps=steps)
 
+    def _make_pipeline_run_spec(self, steps=None):
+        """Create a picklable description of the run for the child process."""
+        return {
+            "steps": steps,
+            "input_list": [str(p) for p in self.pipeline.ctx.input_list],
+            "h5_schema_path": str(self.output_manager.schema_path),
+            "output_config_path": str(self.output_manager.output_config_path),
+            "models_config_path": str(self.pipeline.ctx.model_registry_path),
+            "dopplerview_config_path": str(self.config_path.get()),
+            "config_mode": self.config_mode_var.get(),
+            "selected_models": dict(self.selected_models),
+            "output_enabled": self.enable_debug_output,
+        }
+
     def run_pipelines(self, steps=None):
+        if self.pipeline_worker is not None and self.pipeline_worker.is_alive():
+            return
+
         self.btn_run.config(state="disabled")
         self.btn_run_minimal.config(state="disabled")
-        thread = threading.Thread(
-            target=self._run_pipelines_worker,
-            args=(steps,),
-            daemon=True
+        self.progress["value"] = 0
+        self.progress_batch["value"] = 0
+        self.progress_minimal["value"] = 0
+
+        self.queue = self.mp_context.Queue()
+        run_spec = self._make_pipeline_run_spec(steps)
+
+        self.pipeline_worker = self.mp_context.Process(
+            target=pipeline_process_worker,
+            args=(run_spec, self.queue),
+            daemon=True,
         )
-        thread.start()
+        self.pipeline_worker.start()
 
         self.root.after(100, self.check_queue)
 
-    def _run_pipelines_worker(self, steps):
-        def callback(event, *args):
-            self.queue.put((event, args))
-        try:
-            self.pipeline.run_batch(targets=steps, callback=callback)
-        except Exception as e:
-            self.queue.put(("error", str(e)))
+    def _finish_pipeline_ui(self):
+        self.btn_run.config(state="enabled")
+        self.btn_run_minimal.config(state="enabled")
+        self.update_step_display()
 
-    def step_done_output(self, step_name):
-        if step_name == "preprocess":
-            img = self.pipeline.ctx.get("M0_ff_image")
-            if img is not None:
-                self.display_image(img)
+    def _terminate_pipeline_worker(self):
+        worker = self.pipeline_worker
+        if worker is None:
+            return
 
-        elif step_name == "retinal_vessel_segmentation":
-            img = self.pipeline.ctx.get("M0_ff_image")
-            vessel = self.pipeline.ctx.get("retinal_vessel_mask")
-            if img is not None and vessel is not None:
-                overlay = self.overlay(img, vessel, None)
-                self.display_image(overlay)
+        if worker.is_alive():
+            worker.terminate()
+            worker.join(timeout=2)
+            if worker.is_alive() and hasattr(worker, "kill"):
+                worker.kill()
+                worker.join(timeout=2)
+        else:
+            worker.join(timeout=0)
 
-        elif step_name == "retinal_artery_vein_segmentation":
-            img = self.pipeline.ctx.get("M0_ff_image")
-            art = self.pipeline.ctx.get("retinal_artery_mask")
-            vein = self.pipeline.ctx.get("retinal_vein_mask")
-            if img is not None and art is not None and vein is not None:
-                overlay = self.overlay(img, art, vein)
-                self.display_image(overlay)
-        
+        self.pipeline_worker = None
+
+    def _drain_pipeline_queue(self):
+        while True:
+            try:
+                self.queue.get_nowait()
+            except queue.Empty:
+                break
+            except Exception:
+                break
+
+    def handle_pipeline_error(self, error_text: str):
+        logger.error("Pipeline failed:\n%s", error_text)
+
+        self._terminate_pipeline_worker()
+        self._drain_pipeline_queue()
+
+        self.progress.stop()
+        self.progress_batch.stop()
+        self.progress_minimal.stop()
+        self.progress["value"] = 0
+        self.progress_batch["value"] = 0
+        self.progress_minimal["value"] = 0
+
+        self._finish_pipeline_ui()
+
+        self.root.after_idle(
+            lambda: messagebox.showerror(
+                "Pipeline error",
+                "The pipeline failed. The application was restored to an idle state.\n\n"
+                f"{error_text[-3000:]}",
+            )
+        )
+
+    def _handle_worker_exit_without_message(self):
+        worker = self.pipeline_worker
+        if worker is None:
+            return False
+
+        if worker.is_alive():
+            return False
+
+        exit_code = worker.exitcode
+        worker.join(timeout=0)
+        self.pipeline_worker = None
+
+        if exit_code not in (0, None):
+            self._finish_pipeline_ui()
+            message = f"The pipeline process stopped unexpectedly with exit code {exit_code}."
+            logger.error(message)
+            self.root.after_idle(lambda: messagebox.showerror("Pipeline error", message))
+            return True
+
+        return False
+
+    def _handle_pipeline_log(self, payload):
+        """Replay a log record produced by the pipeline child process in the parent logger."""
+        if isinstance(payload, tuple) and payload:
+            payload = payload[0]
+
+        if not isinstance(payload, dict):
+            logger.info("%s", payload)
+            return
+
+        name = payload.get("name") or "pipeline"
+        levelno = int(payload.get("levelno", logging.INFO))
+        message = payload.get("message", "")
+
+        logging.getLogger(name).log(levelno, "%s", message)
+
     def check_queue(self):
-        try:
-            while True:
-                event, data = self.queue.get_nowait()
-                if event == "pipeline_start":
+        max_events_per_tick = 50
 
-                    self.config_path.set(self.pipeline.ctx.dopplerview_config_path) # refresh config path
+        try:
+            for _ in range(max_events_per_tick):
+                try:
+                    event, data = self.queue.get_nowait()
+                except queue.Empty:
+                    break
+
+                if event == "log":
+                    self._handle_pipeline_log(data)
+
+                elif event == "pipeline_start":
+                    self.config_path.set(self.config_path.get())
 
                     i, total = data
                     self.measure_index = i
+
+                    try:
+                        measure_name = Path(self.pipeline.ctx.input_list[i]).stem
+                    except Exception:
+                        measure_name = "unknown input"
+                    self.status_var.set(f"Processing {i + 1} / {total}: {measure_name}")
+
                     self.input_listbox.selection_clear(0, tk.END)
                     self.minimal_input_listbox.selection_clear(0, tk.END)
 
@@ -880,7 +1092,7 @@ class MainWindow:
                         self.minimal_input_listbox.see(i)
 
                     self.progress["value"] = 0
-                    progress = (i / total) * 100
+                    progress = (i / total) * 100 if total else 0
                     self.progress_batch["value"] = progress
                     self.progress_minimal["value"] = progress
 
@@ -889,17 +1101,20 @@ class MainWindow:
 
                 elif event == "step_start":
                     step_name, i, total = data
-                    step_ratio = i / total
-                    measure_ratio = self.measure_index / len(self.pipeline.ctx.input_list)
+                    step_ratio = i / total if total else 0
+                    input_count = max(1, len(self.pipeline.ctx.input_list))
+                    measure_ratio = self.measure_index / input_count
                     self.progress["value"] = step_ratio * 100
-
-                    self.progress_minimal["value"] = measure_ratio * 100 + step_ratio * 100 / len(self.pipeline.ctx.input_list)
+                    self.progress_minimal["value"] = measure_ratio * 100 + step_ratio * 100 / input_count
                     self.update_step_color(step_name, "running")
 
                 elif event == "step_done":
                     step_name, elapsed = data
                     self.update_step_color(step_name, "done")
-                    self.step_done_output(step_name)
+
+                elif event == "preview_image":
+                    img = data[0]
+                    self.display_image(img)
 
                 elif event == "step_skipped":
                     step_name = data[0]
@@ -907,23 +1122,58 @@ class MainWindow:
 
                 elif event == "pipeline_done":
                     self.progress["value"] = 100
-                    self.btn_run.config(state="enabled")
-
-                    self.btn_run_minimal.config(state="enabled")
-
-                    self.update_step_display()  # refresh colors to reflect final cache status
+                    self._finish_pipeline_ui()
 
                 elif event == "batch_done":
+                    results = data[0] if data else []
+
                     self.progress_batch["value"] = 100
                     self.progress_minimal["value"] = 100
+                    self.status_var.set("Finished")
+
+                    self.btn_run.config(state="enabled")
+                    self.btn_run_minimal.config(state="enabled")
+
+                    failed = [r for r in results if r["status"] == "failed"]
+
+                    if failed:
+                        tk.messagebox.showwarning(
+                            "Batch finished with errors",
+                            f"{len(failed)} file(s) failed, "
+                            f"{len(results) - len(failed)} succeeded.\n\n"
+                            "See logs for details."
+                        )
+
+                elif event == "worker_done":
+                    if self.pipeline_worker is not None:
+                        self.pipeline_worker.join(timeout=0)
+                        self.pipeline_worker = None
+                    self._finish_pipeline_ui()
+
+                elif event == "pipeline_failed":
+                    i, total, input_path, error_text = data
+
+                    logger.error("Failed input %s:\n%s", input_path, error_text)
+
+                    self.progress["value"] = 0
+                    self.progress_batch["value"] = ((i + 1) / total) * 100
+                    self.progress_minimal["value"] = ((i + 1) / total) * 100
+
+                    self.update_step_display()
 
                 elif event == "error":
-                    logger.error("Error:", data)
+                    error_text = data[0] if isinstance(data, tuple) else str(data)
+                    self.handle_pipeline_error(error_text)
+                    return
 
-        except queue.Empty:
-            pass
+        except Exception:
+            logger.exception("Error while processing pipeline UI queue")
 
-        self.root.after(100, self.check_queue)
+        if self._handle_worker_exit_without_message():
+            return
+
+        if self.pipeline_worker is not None:
+            self.root.after(100, self.check_queue)
 
     # -------------------
     # Logo
@@ -1027,20 +1277,3 @@ class MainWindow:
             "For more information, visit our GitHub repository: https://github.com/DigitalHolography/DopplerView"
         )
         tk.messagebox.showinfo("Help - DopplerView", help_text)
-
-
-# -------------------
-# Run app
-# -------------------
-
-if __name__ == "__main__":
-    if TkinterDnD:
-        root = TkinterDnD.Tk()
-    else:
-        root = tk.Tk()
-    log_config.setup_logging()
-
-    matplotlib.use('Agg')
-
-    app = MainWindow(root)
-    root.mainloop()

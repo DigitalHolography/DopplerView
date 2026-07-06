@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.7.0
+* GUI
+    * Enable light/dark theme switching, add release version in app title and status below progress bar
+    * Enable / disable steps outputs in output folder (disabled by default)
+    * Stop at retinal artery/vein segmentation and optic disc detection by default
+* Handle errors cleanly : step failures don't interrupt run_batch, and a crash does not affect GUI
+* First baseline for choroid artery / vein segmentation, using correlation maps with retinal arterial signal in different frequency bands
+
 ## 1.6.0
 * GUI
     * Move configuration in a specific window, and allow dynamic modification of config files

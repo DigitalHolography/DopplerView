@@ -1,3 +1,5 @@
+import cv2
+
 from dopplerview.pipeline.step import BaseStep
 from dopplerview.segmentation import process_masks
 
@@ -28,15 +30,16 @@ class OpticDiscSegmentationStep(BaseStep):
         h, w = model.spec.output_shape
         scale_x, scale_y = target_w / w, target_h / h
 
-        idx = np.argmax(boxes[:, 4, :])  # Assuming the confidence score is in the 5th column
+        idx = np.argmax(boxes[:, 4, :])  # The confidence score is in the 5th column
         bestbox = boxes[:, :, idx].flatten()
 
-                # Keep detections above confidence threshold
-        if bestbox[4] < 0.05:
-            self.logger.warning(
-                "Optic disc detection: no confident bounding box found."
+        ctx.output_manager.save_optic_disc_detections(self.name, "optic_disc_detection", boxes, scale_x, scale_y, ctx)
+        
+        # Keep detections above confidence threshold
+        if bestbox[4] < 0.2:
+            raise ValueError(
+                "No confident bounding box found."
             )
-            return np.zeros((target_h, target_w), dtype=bool)
 
         x_center = bestbox[0] * scale_x
         y_center = bestbox[1] * scale_y
@@ -46,6 +49,7 @@ class OpticDiscSegmentationStep(BaseStep):
         center = (int(x_center), int(y_center))
 
         self.logger.info(f"    - Optic disc center detected at: {center}")
+
 
         return (x_center, y_center), diameter_x, diameter_y
     
@@ -78,25 +82,26 @@ class OpticDiscSegmentationStep(BaseStep):
         h, w = model.spec.output_shape
 
         scores = predictions[:, 4]
+        scale_x = target_w / w
+        scale_y = target_h / h
+
+        ctx.output_manager.save_optic_disc_detections(self.name, "optic_disc_segmentation", pred, scale_x, scale_y, ctx)
 
         best_idx = np.argmax(scores)
 
         # Keep detections above confidence threshold
         if scores[best_idx] < 0.05:
-            self.logger.warning(
-                "Optic disc segmentation: no confident detections found."
+            raise ValueError(
+                "No confident detections found."
             )
-            return np.zeros((target_h, target_w), dtype=bool)
 
         best_box = predictions[best_idx, :4]
 
-        scaleX = target_w / w
-        scaleY = target_h / h
 
-        cx = best_box[0] * scaleX
-        cy = best_box[1] * scaleY
-        width = best_box[2] * scaleX
-        height = best_box[3] * scaleY
+        cx = best_box[0] * scale_x
+        cy = best_box[1] * scale_y
+        width = best_box[2] * scale_x
+        height = best_box[3] * scale_y
 
         rx = width / 2
         ry = height / 2
@@ -105,7 +110,7 @@ class OpticDiscSegmentationStep(BaseStep):
             self.logger.warning(
                 "Optic disc segmentation: invalid ellipse dimensions."
             )
-            return np.zeros((target_h, target_w), dtype=bool)
+            raise ValueError("Optic disc segmentation: invalid ellipse dimensions.")
 
         Y, X = np.indices((target_h, target_w))
 
@@ -144,8 +149,8 @@ class OpticDiscSegmentationStep(BaseStep):
                     center, width, height = self.deep_detection(ctx)
                     optic_disc_mask = process_masks.bbox_to_mask(center, width, height, M0_shape)
                 except Exception as e:
-                    self.logger.error(f"    - Error occurred during deep optic disc detection: {e}. Falling back to non-deep approach.")
-                    optic_disc_detection_method = "moment1"  # Fallback to moment1 detection if deep segmentation fails
+                    self.logger.error(f"    - Error occurred during deep optic disc detection: {e}.")
+                    center, width, height, optic_disc_mask = None, None, None, np.zeros(M0_shape, dtype=bool)
 
         if optic_disc_detection_method == "moment1":
             center, width, height = self.moment1_detection(ctx)
@@ -154,6 +159,8 @@ class OpticDiscSegmentationStep(BaseStep):
         if optic_disc_detection_method not in ["deep", "moment1"]:
             center, width, height = self.return_image_center(ctx)  # Fallback to image center if no model is used
             optic_disc_mask = process_masks.bbox_to_mask(center, width, height, M0_shape)
+
+        ctx.output_manager.output(self.name, "optic_disc_mask", optic_disc_mask, "mask")
 
         ctx.set("optic_disc_mask", optic_disc_mask)
         ctx.set("optic_disc_center", center)
