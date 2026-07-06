@@ -2,6 +2,7 @@ import h5py
 import numpy as np
 
 from dopplerview.pipeline.step import BaseStep
+from dopplerview.input_output.h5_file import read_bands
 
 class ReadMomentsStep(BaseStep):
     requires = {"input_file"}
@@ -40,32 +41,14 @@ class ReadMomentsStep(BaseStep):
                 except:
                     self.logger.info("Warning: moment2 dataset not found")
 
-                self.logger.info("    - Reading the LF_M0 data")
-                try:
-                    lf_m0_data = f["LF_M0"][()]
-                except:
-                    try:
-                        lf_m0_data = f["band_3000_9000"][:]
-                    except:
-                        self.logger.info("Warning: LF_M0 dataset not found")
-                        lf_m0_data = None
-                if lf_m0_data is not None:
-                    LF_M0 = np.squeeze(np.array(lf_m0_data))
-                
-                self.logger.info("    - Reading the HF_M0 data")
-                try:
-                    hf_m0_data = f["HF_M0"][()]
-                except:
-                    try:
-                        hf_m0_data = f["band_16000_18000"][:]
-                    except:
-                        try:
-                            hf_m0_data = f["band_16000_20000"][:]
-                        except:
-                            self.logger.info("Warning: HF_M0 dataset not found")
-                            hf_m0_data = None
-                if hf_m0_data is not None:
-                    HF_M0 = np.squeeze(np.array(hf_m0_data))
+                self.logger.info("    - Reading the LF_M0 and HF_M0 data")
+                bands = read_bands(f, generic_band_names=["LF_M0", "HF_M0"])
+                if len(bands) < 2:
+                    self.logger.info(f"Warning: {len(bands)} found in the HDF5 file. Expected at least 2 bands.")
+                else:
+                    self.logger.info(f"    - Using {bands[0][0]} as LF_M0 and {bands[1][0]} as HF_M0")
+                    LF_M0 = np.squeeze(np.array(bands[0][1]))
+                    HF_M0 = np.squeeze(np.array(bands[1][1]))
 
         except Exception as e:
             self.logger.info(f"ID: {type(e).__name__}")

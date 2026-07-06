@@ -44,28 +44,26 @@ def write_dict_to_h5(data_dict, h5_path, overwrite=True):
             except Exception as e:
                 logger.error(f"Failed to write key '{key}' to HDF5 file: {e}")
 
+import re
+
 def read_bands(h5, generic_band_names=["LF_M0", "HF_M0"]):
-    """
-    Reads the signal bands from the HDF5 file. Bands are expected to be named as "LF_M0", "HF_M0", or follow the patterns "band_<start_freq>_<end_freq>" or "band_<band_number>_<start_freq>_<end_freq>".
-    If the genereic band names are not found, it will attempt to read the bands based on the patterns.
+	"""
+	Reads the signal bands from the HDF5 file. Bands are expected to be named as "LF_M0", "HF_M0", or follow the patterns "band_<start_freq>_<end_freq>" or "band_<band_number>_<start_freq>_<end_freq>".
+	If the genereic band names are not found, it will attempt to read the bands based on the patterns.
 	Returns a list of tuples containing the band name and its corresponding data, ordered by the band_number if present, otherwise by the start frequency.
-    """
-    
+	"""
+	
 	bands = {}
-    
+	
 	# First, try to read the generic band names
 	for band_name in generic_band_names:
-		if band_name in h5:
+		if band_name in h5.keys():
 			bands[band_name] = h5[band_name][()]
 
 	# If no generic bands were found, look for bands with specific patterns
 	if not bands:
-		pattern = re.compile(r"band_(\d+)_(\d+)")
 		for key in h5.keys():
-			match = pattern.match(key)
-			if match:
-				start_freq = int(match.group(1))
-				end_freq = int(match.group(2))
+			if "band" in key:
 				bands[key] = h5[key][()]
 
 	# Sort the bands by their start frequency or band number

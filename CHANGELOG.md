@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.7.1
+* Update high frequency and low frequency band reading with the new naming convention *band_<band_nb>_<low_freq>_<high_freq>*, while keeping retro-compatibility
+
 ## 1.7.0
 * GUI
     * Enable light/dark theme switching, add release version in app title and status below progress bar
