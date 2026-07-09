@@ -25,21 +25,21 @@ class ReadMomentsStep(BaseStep):
 
                 try:
                     self.logger.info("    - Reading the M0 data")
-                    M0 = np.squeeze(np.array(f["moment0"][()]))
+                    M0 = np.squeeze(np.array(f["moment0" if "moment0" in f else "M0"][()]))
                 except:
-                    self.logger.info("Warning: moment0 dataset not found")
+                    self.logger.info("Warning: moment0 or M0 dataset not found")
 
                 try:
                     self.logger.info("    - Reading the M1 data")
-                    M1 = np.squeeze(np.array(f["moment1"][()]))
+                    M1 = np.squeeze(np.array(f["moment1" if "moment1" in f else "M1"][()]))
                 except:
-                    self.logger.info("Warning: moment1 dataset not found")
+                    self.logger.info("Warning: moment1 or M1 dataset not found")
 
-                try :
+                try:
                     self.logger.info("    - Reading the M2 data")
-                    M2 = np.squeeze(np.array(f["moment2"][()]))
+                    M2 = np.squeeze(np.array(f["moment2" if "moment2" in f else "M2"][()]))
                 except:
-                    self.logger.info("Warning: moment2 dataset not found")
+                    self.logger.info("Warning: moment2 or M2 dataset not found")
 
                 self.logger.info("    - Reading the LF_M0 and HF_M0 data")
                 bands = read_bands(f, generic_band_names=["LF_M0", "HF_M0"])
