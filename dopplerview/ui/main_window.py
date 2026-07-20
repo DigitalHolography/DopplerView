@@ -5,14 +5,14 @@ import subprocess
 import sys
 import multiprocessing
 import tkinter as tk
-import tkinter.font as tkfont
+import traceback
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 import cv2
 
 from dopplerview._version import __version__ as app_version
-from dopplerview.input_output import user_config
+from dopplerview.input_output import log_config, user_config
 from dopplerview.input_output.output_manager import OutputManager
 from dopplerview.pipeline.pipeline import Pipeline
 
@@ -30,12 +30,24 @@ except ImportError:  # optional dependency
     logger.warning("Warning: tkinterdnd2 not found, drag-and-drop functionality will be disabled.")
 
 
+class _UILogQueueHandler(logging.Handler):
+    """Move log records to a queue so Tk only ever updates on its main thread."""
+
+    def __init__(self, queue_out: queue.Queue):
+        super().__init__()
+        self.queue_out = queue_out
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            self.queue_out.put_nowait((self.format(record), record.levelno))
+        except Exception:
+            pass
+
+
 class MainWindow(ThemeMixin):
     def __init__(self, root):
         self.root = root
         self.root.title(f"DopplerView {app_version}")
-
-        self._minimal_title_font: tkfont.Font | None = None
 
         self._config_mtimes = {}
         self._config = {}
@@ -63,12 +75,20 @@ class MainWindow(ThemeMixin):
         self.image_tk = None  # keep reference (IMPORTANT)
 
         self.queue = queue.Queue()
+        self._ui_log_queue = queue.Queue()
+        self._ui_log_handler: logging.Handler | None = None
         self.pipeline_worker = None
         self.output_worker = None
         self.mp_context = multiprocessing.get_context("spawn")
         self.selected_models: dict[str, str] = {}
 
         self.theme_var = tk.StringVar(value="dark")
+        self.ui_mode_var = tk.StringVar(value="minimal")
+        self.show_logs_var = tk.BooleanVar(value=False)
+        self._logs_visible = False
+        self._height_before_logs: int | None = None
+        self.config_mode_var = tk.StringVar(value="default")
+        self.enable_debug_output = False
         self._menus: list[tk.Menu] = []
 
         self._apply_theme()
@@ -76,17 +96,19 @@ class MainWindow(ThemeMixin):
 
         # --- UI layout --
         self._build_ui()
+        self._install_ui_log_handler()
         self._darken_tk_widget(self.root)
         self._install_drop_targets()
         self.update_mode()  # set initial mode
-
-        self.config_mode_var = tk.StringVar(value="default")
         self.update_config_mode() # set initial config mode
 
         self.step_index = 0
         self.measure_index = 0
 
-        self.enable_debug_output = False
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.root.report_callback_exception = self._report_callback_exception
+        self.root.after(100, self._poll_ui_logs)
+        logger.info("DopplerView %s ready", app_version)
 
 
     # -------------------
@@ -94,19 +116,45 @@ class MainWindow(ThemeMixin):
     # -------------------
 
     def _build_ui(self) -> None:
+        self.root.geometry("900x680")
+        self.root.minsize(720, 540)
+        self.root.columnconfigure(0, weight=1)
+        self.root.rowconfigure(0, weight=1)
         self._build_menu()
 
-        container = ttk.Frame(self.root, padding=10, style="Dark.TFrame")
-        container.pack(fill="both", expand=True)
+        self.shell = ttk.Frame(self.root, padding=(12, 10, 12, 8))
+        self.shell.grid(row=0, column=0, sticky="nsew")
+        self.shell.columnconfigure(0, weight=1)
+        self.shell.rowconfigure(0, weight=1)
 
-        self.minimal_frame = ttk.Frame(container, padding=10, style="Dark.TFrame")
-        self.advanced_frame = ttk.Frame(container, padding=10, style="Dark.TFrame")
+        self.mode_notebook = ttk.Notebook(self.shell)
+        self.mode_notebook.grid(row=0, column=0, sticky="nsew")
+
+        self.minimal_frame = ttk.Frame(self.mode_notebook, padding=22)
+        self.advanced_frame = ttk.Frame(self.mode_notebook, padding=16)
+        self.mode_notebook.add(self.minimal_frame, text="Minimal")
+        self.mode_notebook.add(self.advanced_frame, text="Advanced")
+        self.mode_notebook.bind("<<NotebookTabChanged>>", self._on_mode_tab_changed)
 
         self._build_minimal_ui()
         self._build_advanced_ui()
+        self._build_log_panel()
+
+        footer = ttk.Frame(self.shell)
+        footer.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        footer.columnconfigure(0, weight=1)
+        ttk.Label(footer, textvariable=self.status_var, style="Status.TLabel").grid(
+            row=0, column=0, sticky="w"
+        )
+        self.footer_logs_button = ttk.Button(
+            footer,
+            text="Logs",
+            command=self._toggle_logs_from_button,
+            style="Toolbar.TButton",
+        )
+        self.footer_logs_button.grid(row=0, column=1, padx=(8, 0))
 
     def _build_menu(self) -> None:
-        self.ui_mode_var = tk.StringVar(value="minimal")
         self._menus = []
 
         menu_bar = tk.Menu(
@@ -187,191 +235,212 @@ class MainWindow(ThemeMixin):
         )
         menu_bar.add_cascade(label="Theme", menu=theme_menu)
 
+        logs_menu = tk.Menu(
+            menu_bar,
+            tearoff=False,
+            bg=self._surface_color,
+            fg=self._text_fg,
+            activebackground=self._select_color,
+            activeforeground=self._text_fg,
+            disabledforeground=self._disabled_fg,
+        )
+        self._menus.append(logs_menu)
+        logs_menu.add_checkbutton(
+            label="Show logs",
+            variable=self.show_logs_var,
+            command=self.toggle_logs,
+        )
+        logs_menu.add_command(label="Open log file", command=self.open_log_file)
+        logs_menu.add_command(label="Clear view", command=self.clear_log_view)
+        menu_bar.add_cascade(label="Logs", menu=logs_menu)
+
         menu_bar.add_command(label="Help", command=self.show_help)
 
         self.root.configure(menu=menu_bar)
 
-    def _get_minimal_title_font(self) -> tkfont.Font:
-        if self._minimal_title_font is None:
-            title_font = tkfont.nametofont("TkDefaultFont").copy()
-            base_size = int(title_font.cget("size")) or 10
-            title_font.configure(size=base_size * 2)
-            self._minimal_title_font = title_font
-        return self._minimal_title_font
-
     def _build_minimal_ui(self):
         frame = self.minimal_frame
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(0, weight=1)
 
-        container = tk.Frame(frame, bg=self._bg_color)
-        container.place(relx=0.5, rely=0.5, anchor="center")
+        container = ttk.Frame(frame)
+        container.grid(row=0, column=0, sticky="nsew", padx=34, pady=8)
+        container.columnconfigure(0, weight=1)
+        container.rowconfigure(2, weight=1)
 
-        self.minimal_title_label = tk.Label(
-            container,
+        header = ttk.Frame(container)
+        header.grid(row=0, column=0, sticky="ew", pady=(0, 18))
+        header.columnconfigure(0, weight=1)
+
+        self.minimal_title_label = ttk.Label(
+            header,
             text="DopplerView",
-            font=self._get_minimal_title_font(),
-            bg=self._bg_color,
-            fg=self._text_fg,
+            style="Hero.TLabel",
+            font=("Segoe UI", 28, "bold"),
+            anchor="center",
         )
-        self.minimal_title_label.grid(row=0, column=0, pady=(0, 10))
-
-        minimal_logo = self._load_scaled_logo_image(max_width=360, max_height=144)
+        self.minimal_title_label.grid(row=0, column=0, sticky="ew")
+        minimal_logo = self._load_scaled_logo_image(max_width=320, max_height=112)
         if minimal_logo is not None:
             self._minimal_logo_image = minimal_logo
-            self.minimal_logo_label = ttk.Label(container, image=self._minimal_logo_image)
-            self.minimal_logo_label.grid(row=1, column=0, pady=(0, 20))
+            self.minimal_logo_label = ttk.Label(header, image=self._minimal_logo_image, anchor="center")
+            self.minimal_logo_label.grid(row=1, column=0, sticky="ew", pady=(10, 0))
 
-        self.btn_load = ttk.Button(container, text="Select .holo file(s)", command=self.load_holo)
-        self.btn_load.grid(row=2, column=0, pady=(0, 10))
+        self.btn_load_minimal = ttk.Button(container, text="Load input", command=self.load_holo)
+        self.btn_load_minimal.grid(row=1, column=0, pady=(0, 12))
 
-        # -------------------------------------------------
-        # Input measures list
-        # -------------------------------------------------
+        self.minimal_file_count_var = tk.StringVar(value="No input selected")
+        self.minimal_file_detail_var = tk.StringVar(value="Drop one or more .holo files here.")
+        drop_frame = ttk.Frame(container, style="Drop.TFrame", padding=14)
+        drop_frame.grid(row=2, column=0, sticky="nsew", pady=(0, 14))
+        drop_frame.columnconfigure(0, weight=1)
+        drop_frame.rowconfigure(2, weight=1)
+        ttk.Label(
+            drop_frame,
+            textvariable=self.minimal_file_count_var,
+            style="Section.TLabel",
+            font=("Segoe UI", 11, "bold"),
+            anchor="center",
+        ).grid(row=0, column=0, sticky="ew")
+        ttk.Label(
+            drop_frame,
+            textvariable=self.minimal_file_detail_var,
+            style="Muted.TLabel",
+            anchor="center",
+            wraplength=620,
+        ).grid(row=1, column=0, sticky="ew", pady=(4, 10))
 
-        list_container = ttk.Frame(container, style="Dark.TFrame")
-        list_container.grid(
-            row=3,
-            column=0,
-            sticky="ew",
-            pady=(0, 10),
-        )
-
-        list_container.grid_columnconfigure(0, weight=1)
-        list_container.grid_rowconfigure(0, weight=1)
+        list_container = ttk.Frame(drop_frame)
+        list_container.grid(row=2, column=0, sticky="nsew")
+        list_container.columnconfigure(0, weight=1)
+        list_container.rowconfigure(0, weight=1)
 
         self.minimal_input_listbox = tk.Listbox(
             list_container,
-            height=3,
-            width=50,
-            bg=self._surface_color,
-            fg=self._text_fg,
-            selectbackground=self._select_color,
-            selectforeground=self._text_fg,
-            highlightbackground=self._border_color,
-            highlightcolor=self._accent_color,
-            relief="flat",
+            height=4,
             activestyle="none",
             exportselection=False,
         )
-
-        self.minimal_input_listbox.grid(
-            row=0,
-            column=0,
-            sticky="ew",
-        )
+        self.minimal_input_listbox.grid(row=0, column=0, sticky="nsew")
         self.minimal_input_listbox.bind("<Button-1>", lambda e: "break")
         self.minimal_input_listbox.bind("<B1-Motion>", lambda e: "break")
         self.minimal_input_listbox.bind("<Key>", lambda e: "break")
 
         minimal_scrollbar = ttk.Scrollbar(
-            list_container,
-            orient="vertical",
-            command=self.minimal_input_listbox.yview,
+            list_container, orient="vertical", command=self.minimal_input_listbox.yview
         )
-
         minimal_scrollbar.grid(row=0, column=1, sticky="ns")
+        self.minimal_input_listbox.config(yscrollcommand=minimal_scrollbar.set)
 
-        self.minimal_input_listbox.config(
-            yscrollcommand=minimal_scrollbar.set
+        self.btn_run_minimal = ttk.Button(
+            container,
+            text="Run full pipeline",
+            command=self.run_pipelines_with_steps,
+            state="disabled",
+            style="Accent.TButton",
         )
+        self.btn_run_minimal.grid(row=3, column=0, pady=(0, 14))
 
-        state = "disabled"
-        self.btn_run_minimal = ttk.Button(container, text="Run Full Pipeline", command=self.run_pipelines_with_steps, state=state)
-        self.btn_run_minimal.grid(row=4, column=0, pady=10)
-
-        self.progress_minimal = ttk.Progressbar(container, maximum=100)
-        self.progress_minimal.grid(row=5, column=0, sticky="ew", padx=10, pady=(0, 4))
+        progress_frame = ttk.Frame(container)
+        progress_frame.grid(row=4, column=0, sticky="ew")
+        progress_frame.columnconfigure(0, weight=1)
+        ttk.Label(progress_frame, text="Overall progress", style="Muted.TLabel").grid(
+            row=0, column=0, sticky="w", pady=(0, 4)
+        )
+        self.progress_minimal = ttk.Progressbar(progress_frame, maximum=100, mode="determinate")
+        self.progress_minimal.grid(row=1, column=0, sticky="ew")
 
         self.status_label_minimal = ttk.Label(
-            container,
+            progress_frame,
             textvariable=self.status_var,
             anchor="center",
             style="Muted.TLabel",
         )
-        self.status_label_minimal.grid(row=6, column=0, sticky="ew", padx=10, pady=(0, 10))
+        self.status_label_minimal.grid(row=2, column=0, sticky="ew", pady=(10, 0))
 
     def _build_advanced_ui(self):
         frame = self.advanced_frame
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(1, weight=1)
 
-        # Make frame expandable
-        # Main frame stays 1 column
-        frame.grid_columnconfigure(0, weight=1)
-
-        row = 0
-
-        # --- Buttons sub-frame (2 columns ONLY here) ---
-        self.buttons_frame = tk.Frame(frame, bg=self._bg_color)
-        self.buttons_frame.grid(row=row, column=0, sticky="ew", pady=5)
-
-        self.buttons_frame.grid_columnconfigure(0, weight=1)
-        self.buttons_frame.grid_columnconfigure(1, weight=1)
+        self.buttons_frame = ttk.Frame(frame)
+        self.buttons_frame.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        self.buttons_frame.columnconfigure(5, weight=1)
 
         self.btn_load = ttk.Button(
             self.buttons_frame,
-            text="Select .holo file(s)",
-            command=self.load_holo
+            text="Load input",
+            command=self.load_holo,
+            style="Toolbar.TButton",
         )
-        self.btn_load.grid(row=0, column=0, padx=5, sticky="ew")
+        self.btn_load.grid(row=0, column=0, padx=(0, 6))
 
         self.btn_select_config = ttk.Button(
             self.buttons_frame,
-            text="Select config",
-            command=self.load_dopplerview_config
+            text="Load config",
+            command=self.load_dopplerview_config,
+            style="Toolbar.TButton",
         )
-        self.btn_select_config.grid(row=0, column=1, padx=5, sticky="ew")
-
-        row += 1
-
-        self.config_path_label = tk.Label(
+        self.btn_select_config.grid(row=0, column=1, padx=(0, 6))
+        ttk.Button(
+            self.buttons_frame,
+            text="Settings",
+            command=self.show_config,
+            style="Toolbar.TButton",
+        ).grid(row=0, column=2, padx=(0, 12))
+        self.btn_run = ttk.Button(
+            self.buttons_frame,
+            text="Run pipeline",
+            command=self.run_pipelines_with_steps,
+            state="disabled",
+            style="Accent.TButton",
+        )
+        self.btn_run.grid(row=0, column=3, padx=(0, 8))
+        ttk.Button(
+            self.buttons_frame,
+            text="Logs",
+            command=self.show_logs,
+            style="Toolbar.TButton",
+        ).grid(row=0, column=4)
+        self.status_label = ttk.Label(
+            self.buttons_frame,
+            textvariable=self.status_var,
+            style="Muted.TLabel",
+            anchor="e",
+        )
+        self.status_label.grid(row=0, column=5, sticky="e", padx=(12, 0))
+        self.config_path_label = ttk.Label(
             self.buttons_frame,
             textvariable=self.config_path,
-            bg=self._bg_color,
-            fg=self._muted_fg,
-            justify="center",
-            wraplength=600,
+            style="Muted.TLabel",
+            anchor="w",
         )
-        self.config_path_label.grid(row=row, column=1, pady=5, sticky="ew")
-        row += 1
+        self.config_path_label.grid(row=1, column=0, columnspan=6, sticky="ew", pady=(8, 0))
 
-        # -------------------------------------------------
-        # Input measures panel
-        # -------------------------------------------------
+        content = ttk.Frame(frame)
+        content.grid(row=1, column=0, sticky="nsew")
+        content.columnconfigure(0, weight=1, minsize=330)
+        content.columnconfigure(1, weight=2, minsize=380)
+        content.rowconfigure(0, weight=1)
 
-        self.input_panel = tk.LabelFrame(
-            frame,
-            text="Input Measures",
-            bg=self._bg_color,
-            fg=self._text_fg,
-            highlightbackground=self._border_color,
-            highlightcolor=self._accent_color,
-        )
-        self.input_panel.grid(
-            row=row,
-            column=0,
-            padx=5,
-            pady=5,
-            sticky="nsew"
-        )
+        left = ttk.Frame(content)
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        left.columnconfigure(0, weight=1)
+        left.rowconfigure(1, weight=1)
 
-        self.input_panel.grid_columnconfigure(0, weight=1)
-        self.input_panel.grid_rowconfigure(0, weight=1)
+        self.input_panel = ttk.LabelFrame(left, text="Inputs", padding=8)
+        self.input_panel.grid(row=0, column=0, sticky="nsew", pady=(0, 10))
 
-        # Listbox + scrollbar container
-        list_container = ttk.Frame(self.input_panel, style="Dark.TFrame")
-        list_container.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
-
-        list_container.grid_columnconfigure(0, weight=1)
-        list_container.grid_rowconfigure(0, weight=1)
+        self.input_panel.columnconfigure(0, weight=1)
+        self.input_panel.rowconfigure(0, weight=1)
+        list_container = ttk.Frame(self.input_panel)
+        list_container.grid(row=0, column=0, sticky="nsew")
+        list_container.columnconfigure(0, weight=1)
+        list_container.rowconfigure(0, weight=1)
 
         self.input_listbox = tk.Listbox(
             list_container,
-            height=6,
-            bg=self._surface_color,
-            fg=self._text_fg,
-            selectbackground=self._select_color,
-            selectforeground=self._text_fg,
-            highlightbackground=self._border_color,
-            highlightcolor=self._accent_color,
-            relief="flat",
+            height=5,
             activestyle="none",
             exportselection=False,
         )
@@ -380,100 +449,234 @@ class MainWindow(ThemeMixin):
         self.input_listbox.bind("<B1-Motion>", lambda e: "break")
         self.input_listbox.bind("<Key>", lambda e: "break")
 
-        scrollbar = ttk.Scrollbar(
-            list_container,
-            orient="vertical",
-            command=self.input_listbox.yview
-        )
-
+        scrollbar = ttk.Scrollbar(list_container, orient="vertical", command=self.input_listbox.yview)
         scrollbar.grid(row=0, column=1, sticky="ns")
-
         self.input_listbox.config(yscrollcommand=scrollbar.set)
 
-        self.progress_batch = ttk.Progressbar(
-            self.input_panel,
-            maximum=100
-        )
-
-        self.progress_batch.grid(
-            row=1,
-            column=0,
-            sticky="ew",
-            padx=5,
-            pady=(0, 5)
-        )
-
-        row += 1
-
-        row += 1
-
-        # --- Steps frame ---
-        self.steps_frame = tk.LabelFrame(
-            frame,
-            text="Pipeline Steps",
-            bg=self._bg_color,
-            fg=self._text_fg,
-            highlightbackground=self._border_color,
-            highlightcolor=self._accent_color,
-        )
-        self.steps_frame.grid(row=row, column=0, padx=5, pady=5, sticky="nsew")
-        self.steps_frame.grid_columnconfigure(0, weight=1)
-        row += 1
+        self.steps_frame = ttk.LabelFrame(left, text="Pipeline steps", padding=8)
+        self.steps_frame.grid(row=1, column=0, sticky="nsew")
+        self.steps_frame.columnconfigure(0, weight=1)
+        self.steps_frame.columnconfigure(1, weight=1)
 
         self.step_vars = {}
         self.step_checkboxes = {}
-        
         steps = self.pipeline.get_step_names()
-        waves = self.pipeline.engine.build_execution_waves(steps)
+        optional_steps = {
+            "retinal_vessel_velocity_estimator",
+            "arterial_waveform_analysis",
+            "choroidal_artery_vein_segmentation",
+        }
 
-        optional_steps = ["retinal_vessel_velocity_estimator", "arterial_waveform_analysis", "choroidal_artery_vein_segmentation"]
-
-        for i, wave in enumerate(waves):
-            for j, step in enumerate(wave):
-                var = tk.BooleanVar(value=step not in optional_steps)
-
-                cb = tk.Checkbutton(
-                    self.steps_frame,
-                    text=step,
-                    variable=var,
-                    command=lambda s=step: self.on_step_toggle(s),
-                    bg=self._bg_color,
-                    fg=self._text_fg,
-                    activebackground=self._bg_color,
-                    activeforeground=self._text_fg,
-                    selectcolor=self._surface_color,
-                    highlightbackground=self._bg_color,
-                    highlightcolor=self._accent_color,
-                )
-                cb.grid(row=i, column=j, sticky="w")
-
-                self.step_vars[step] = var
-                self.step_checkboxes[step] = cb
+        for index, step in enumerate(steps):
+            var = tk.BooleanVar(value=step not in optional_steps)
+            label = step.replace("_", " ").title()
+            cb = ttk.Checkbutton(
+                self.steps_frame,
+                text=label,
+                variable=var,
+                command=lambda s=step: self.on_step_toggle(s),
+                style="Step.TCheckbutton",
+            )
+            cb.grid(row=index // 2, column=index % 2, sticky="w", padx=(0, 8))
+            self.step_vars[step] = var
+            self.step_checkboxes[step] = cb
         self.update_step_display()
 
-        # --- Run button ---
-        state = "disabled"
-        self.btn_run = ttk.Button(frame, text="Run Pipeline", command=self.run_pipelines_with_steps, state=state)
-        self.btn_run.grid(row=row, column=0, pady=5, padx=3, sticky="ew")
-        row += 1
-
-        # --- Progress bar ---
-        self.progress = ttk.Progressbar(frame, maximum=100)
-        self.progress.grid(row=row, column=0, sticky="ew", padx=5, pady=(0, 4))
-        row += 1
-
-        self.status_label = ttk.Label(
-            frame,
-            textvariable=self.status_var,
+        preview_panel = ttk.LabelFrame(content, text="Preview", padding=8)
+        preview_panel.grid(row=0, column=1, sticky="nsew")
+        preview_panel.columnconfigure(0, weight=1)
+        preview_panel.rowconfigure(0, weight=1)
+        preview_frame = ttk.Frame(preview_panel, style="Preview.TFrame", padding=12)
+        preview_frame.grid(row=0, column=0, sticky="nsew")
+        preview_frame.columnconfigure(0, weight=1)
+        preview_frame.rowconfigure(0, weight=1)
+        self.image_label = ttk.Label(
+            preview_frame,
+            text="A preview will appear here while the pipeline is running.",
             anchor="center",
             style="Muted.TLabel",
+            wraplength=480,
         )
-        self.status_label.grid(row=row, column=0, sticky="ew", padx=5, pady=(0, 6))
-        row += 1
+        self.image_label.grid(row=0, column=0, sticky="nsew")
 
-        # --- Image display ---
-        self.image_label = tk.Label(frame, bg=self._bg_color, fg=self._text_fg)
-        self.image_label.grid(row=row, column=0, pady=10, sticky="nsew")
+        progress_panel = ttk.Frame(preview_panel)
+        progress_panel.grid(row=1, column=0, sticky="ew", pady=(10, 0))
+        progress_panel.columnconfigure(0, weight=1)
+        ttk.Label(progress_panel, text="Current pipeline", style="Muted.TLabel").grid(
+            row=0, column=0, sticky="w", pady=(0, 4)
+        )
+        self.progress = ttk.Progressbar(progress_panel, maximum=100, mode="determinate")
+        self.progress.grid(row=1, column=0, sticky="ew", pady=(0, 8))
+        ttk.Label(progress_panel, text="Batch", style="Muted.TLabel").grid(
+            row=2, column=0, sticky="w", pady=(0, 4)
+        )
+        self.progress_batch = ttk.Progressbar(progress_panel, maximum=100, mode="determinate")
+        self.progress_batch.grid(row=3, column=0, sticky="ew")
+
+    def _build_log_panel(self) -> None:
+        self.log_panel = ttk.LabelFrame(self.shell, text="Application logs", padding=8)
+        self.log_panel.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
+        self.log_panel.columnconfigure(0, weight=1)
+        self.log_panel.rowconfigure(1, weight=1)
+
+        actions = ttk.Frame(self.log_panel)
+        actions.grid(row=0, column=0, sticky="ew", pady=(0, 6))
+        actions.columnconfigure(0, weight=1)
+        ttk.Label(
+            actions,
+            text=str(log_config.get_log_file()),
+            style="Muted.TLabel",
+        ).grid(row=0, column=0, sticky="w")
+        ttk.Button(actions, text="Open file", command=self.open_log_file).grid(
+            row=0, column=1, padx=(8, 6)
+        )
+        ttk.Button(actions, text="Clear view", command=self.clear_log_view).grid(row=0, column=2)
+
+        text_frame = ttk.Frame(self.log_panel, style="Log.TFrame")
+        text_frame.grid(row=1, column=0, sticky="nsew")
+        text_frame.columnconfigure(0, weight=1)
+        text_frame.rowconfigure(0, weight=1)
+        self.log_text = tk.Text(
+            text_frame,
+            height=7,
+            wrap="none",
+            state="disabled",
+            font=("Consolas", 9),
+            padx=8,
+            pady=6,
+        )
+        self.log_text.grid(row=0, column=0, sticky="nsew")
+        log_scrollbar = ttk.Scrollbar(text_frame, orient="vertical", command=self.log_text.yview)
+        log_scrollbar.grid(row=0, column=1, sticky="ns")
+        log_horizontal = ttk.Scrollbar(text_frame, orient="horizontal", command=self.log_text.xview)
+        log_horizontal.grid(row=1, column=0, sticky="ew")
+        self.log_text.configure(
+            yscrollcommand=log_scrollbar.set,
+            xscrollcommand=log_horizontal.set,
+        )
+        self._configure_log_tags()
+        self.log_panel.grid_remove()
+
+    def _on_mode_tab_changed(self, _event=None) -> None:
+        try:
+            index = self.mode_notebook.index("current")
+        except tk.TclError:
+            return
+        mode = "advanced" if index == 1 else "minimal"
+        self.ui_mode_var.set(mode)
+        if mode == "advanced" and self.root.winfo_width() < 1000:
+            self.root.geometry("1060x720")
+
+    def _install_ui_log_handler(self) -> None:
+        handler = _UILogQueueHandler(self._ui_log_queue)
+        handler.setLevel(logging.INFO)
+        handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s", "%H:%M:%S"))
+        logging.getLogger().addHandler(handler)
+        self._ui_log_handler = handler
+
+    def _poll_ui_logs(self) -> None:
+        try:
+            for _ in range(200):
+                try:
+                    message, levelno = self._ui_log_queue.get_nowait()
+                except queue.Empty:
+                    break
+                self._append_log_line(message, levelno)
+            self.root.after(100, self._poll_ui_logs)
+        except tk.TclError:
+            return
+
+    def _append_log_line(self, message: str, levelno: int) -> None:
+        if not hasattr(self, "log_text"):
+            return
+        if levelno >= logging.ERROR:
+            tag = "error"
+        elif levelno >= logging.WARNING:
+            tag = "warning"
+        elif levelno <= logging.DEBUG:
+            tag = "debug"
+        else:
+            tag = "info"
+
+        self.log_text.configure(state="normal")
+        self.log_text.insert("end", f"{message}\n", tag)
+        line_count = int(self.log_text.index("end-1c").split(".")[0])
+        if line_count > 4000:
+            self.log_text.delete("1.0", f"{line_count - 3500}.0")
+        self.log_text.see("end")
+        self.log_text.configure(state="disabled")
+
+    def _configure_log_tags(self) -> None:
+        if not hasattr(self, "log_text"):
+            return
+        self.log_text.tag_configure("debug", foreground=self._muted_fg)
+        self.log_text.tag_configure("info", foreground=self._text_fg)
+        self.log_text.tag_configure("warning", foreground=self._warning_color)
+        self.log_text.tag_configure("error", foreground=self._error_color)
+
+    def toggle_logs(self) -> None:
+        if self.show_logs_var.get():
+            if not self._logs_visible:
+                self._height_before_logs = self.root.winfo_height()
+            self.log_panel.grid()
+            self.footer_logs_button.configure(text="Hide logs")
+            current_height = self.root.winfo_height()
+            available_height = max(540, self.root.winfo_screenheight() - 80)
+            target_height = min(840, available_height)
+            if current_height < target_height:
+                self.root.geometry(f"{self.root.winfo_width()}x{target_height}")
+            self._logs_visible = True
+        else:
+            self.log_panel.grid_remove()
+            self.footer_logs_button.configure(text="Logs")
+            if self._logs_visible and self._height_before_logs is not None:
+                self.root.geometry(
+                    f"{self.root.winfo_width()}x{self._height_before_logs}"
+                )
+            self._logs_visible = False
+            self._height_before_logs = None
+
+    def _toggle_logs_from_button(self) -> None:
+        self.show_logs_var.set(not self.show_logs_var.get())
+        self.toggle_logs()
+
+    def show_logs(self) -> None:
+        self.show_logs_var.set(True)
+        self.toggle_logs()
+        self.log_text.focus_set()
+
+    def clear_log_view(self) -> None:
+        if not hasattr(self, "log_text"):
+            return
+        self.log_text.configure(state="normal")
+        self.log_text.delete("1.0", "end")
+        self.log_text.configure(state="disabled")
+
+    def open_log_file(self) -> None:
+        path = log_config.get_log_file()
+        if not path.exists():
+            messagebox.showinfo("Logs", "No log file has been created yet.", parent=self.root)
+            return
+        self.open_with_default_app(path)
+
+    def _report_callback_exception(self, exc_type, value, tb) -> None:
+        details = "".join(traceback.format_exception(exc_type, value, tb))
+        logger.error("Unhandled UI error:\n%s", details)
+        self.show_logs()
+        messagebox.showerror(
+            "DopplerView error",
+            "An unexpected error occurred. The details are available in the Logs panel.",
+            parent=self.root,
+        )
+
+    def _on_close(self) -> None:
+        if self.pipeline_worker is not None:
+            self._terminate_pipeline_worker()
+        if self._ui_log_handler is not None:
+            logging.getLogger().removeHandler(self._ui_log_handler)
+            self._ui_log_handler.close()
+            self._ui_log_handler = None
+        self.root.destroy()
 
     def _install_drop_targets(self) -> None:
         if DND_FILES is None:
@@ -499,31 +702,17 @@ class MainWindow(ThemeMixin):
         # -----------------------
         # LEFT: Models frame
         # -----------------------
-        models_frame = tk.LabelFrame(
-            parent,
-            text="Models",
-            bg=self._bg_color,
-            fg=self._text_fg,
-            highlightbackground=self._border_color,
-            highlightcolor=self._accent_color,
-        )
+        models_frame = ttk.LabelFrame(parent, text="Models", padding=10)
         models_frame.grid(row=0, column=0, padx=5, pady=5, sticky="nsew")
         models_frame.grid_columnconfigure(0, weight=1)
 
-        steps_frame = tk.LabelFrame(
-            parent,
-            text="Steps",
-            bg=self._bg_color,
-            fg=self._text_fg,
-            highlightbackground=self._border_color,
-            highlightcolor=self._accent_color,
-        )
+        steps_frame = ttk.LabelFrame(parent, text="Outputs", padding=10)
         steps_frame.grid(row=1, column=0, padx=5, pady=5, sticky="nsew")
         steps_frame.grid_columnconfigure(0, weight=1)
 
         debug_output_button = ttk.Checkbutton(
             steps_frame,
-            text="Enable Debug Output",
+            text="Enable debug output",
             command=self.toggle_debug_output
         )
         debug_output_button.grid(row=0, column=0, sticky="ew", pady=5)
@@ -531,51 +720,32 @@ class MainWindow(ThemeMixin):
         # -----------------------
         # RIGHT: Config panel
         # -----------------------
-        config_panel = tk.LabelFrame(
-            parent,
-            text="Configuration",
-            bg=self._bg_color,
-            fg=self._text_fg,
-            highlightbackground=self._border_color,
-            highlightcolor=self._accent_color,
-        )
+        config_panel = ttk.LabelFrame(parent, text="Configuration", padding=10)
         config_panel.grid(row=0, column=1, padx=5, pady=5, sticky="nsew")
         config_panel.grid_columnconfigure(0, weight=1)
 
         # --- Radio buttons ---
-        radio_frame = tk.Frame(config_panel, bg=self._bg_color)
+        radio_frame = ttk.Frame(config_panel)
         radio_frame.grid(row=0, column=0, sticky="ew", pady=(0, 5))
 
         radio_frame.grid_columnconfigure(0, weight=1)
         radio_frame.grid_columnconfigure(1, weight=1)
 
-        rb_default = tk.Radiobutton(
+        rb_default = ttk.Radiobutton(
             radio_frame,
             text="Use default config",
             variable=self.config_mode_var,
             value="default",
-            anchor="w",
             command=self.update_config_mode,
-            bg=self._bg_color,
-            fg=self._text_fg,
-            activebackground=self._bg_color,
-            activeforeground=self._text_fg,
-            selectcolor=self._surface_color,
         )
         rb_default.grid(row=0, column=0, sticky="w")
 
-        rb_local = tk.Radiobutton(
+        rb_local = ttk.Radiobutton(
             radio_frame,
             text="Use local config",
             variable=self.config_mode_var,
             value="local",
-            anchor="w",
             command=self.update_config_mode,
-            bg=self._bg_color,
-            fg=self._text_fg,
-            activebackground=self._bg_color,
-            activeforeground=self._text_fg,
-            selectcolor=self._surface_color,
         )
         rb_local.grid(row=0, column=1, sticky="w")
 
@@ -608,11 +778,9 @@ class MainWindow(ThemeMixin):
         mm = ctx.model_manager
 
         def create_model_selector(parent_widget, label_text, task_name, r):
-            tk.Label(
+            ttk.Label(
                 parent_widget,
                 text=label_text,
-                bg=self._bg_color,
-                fg=self._text_fg,
             ).grid(row=r, column=0, sticky="w")
 
             values = mm.get_model_name_list_for_task(task_name)
@@ -677,11 +845,14 @@ class MainWindow(ThemeMixin):
 
         self.config_window = tk.Toplevel(self.root)
         self.config_window.title("DopplerView Configuration")
-        self.config_window.geometry("600x300")
+        self.config_window.geometry("720x440")
+        self.config_window.minsize(640, 380)
+        self.config_window.transient(self.root)
         self.config_window.configure(bg=self._bg_color)
 
-        container = ttk.Frame(self.config_window, padding=10, style="Dark.TFrame")
+        container = ttk.Frame(self.config_window, padding=16)
         container.pack(fill="both", expand=True)
+        self.config_container = container
 
         self._populate_configuration_frame(container)
         self._darken_tk_widget(self.config_window)
@@ -724,34 +895,23 @@ class MainWindow(ThemeMixin):
 
     def update_mode(self):
         mode = self.ui_mode_var.get()
-
-        self.minimal_frame.pack_forget()
-        self.advanced_frame.pack_forget()
-
-        if mode == "minimal":
-            self.minimal_frame.pack(fill="both", expand=True)
-            self.root.geometry("600x400")
-
-        elif mode == "advanced":
-            self.advanced_frame.pack(fill="both", expand=True)
-            self.root.geometry("850x600")
-            self.resize_window()
+        self.mode_notebook.select(self.advanced_frame if mode == "advanced" else self.minimal_frame)
+        if mode == "advanced" and self.root.winfo_width() < 1000:
+            self.root.geometry("1060x720")
 
     def resize_window(self):
-        image_height = self.image_tk.height() if self.image_tk else 0
-        window_height = 600 + image_height  # base height + image height
-        self.root.geometry(f"{self.root.winfo_width()}x{window_height}")
+        # The preview now lives in an expanding panel; keep the window stable.
+        self.root.update_idletasks()
 
     def update_step_color(self, step, state):
         cb = self.step_checkboxes[step]
         if state == "done" or state == "cached":
-            color = "#26ac5c"
+            style = "Done.Step.TCheckbutton"
         elif state == "running":
-            color = "#d7a61e"
+            style = "Running.Step.TCheckbutton"
         else:
-            color = self._surface_color
-
-        cb.config(selectcolor=color, bg=self._bg_color, fg=self._text_fg)
+            style = "Step.TCheckbutton"
+        cb.configure(style=style)
 
     def update_step_display(self):
         pipeline = self.pipeline
@@ -768,13 +928,13 @@ class MainWindow(ThemeMixin):
             # -------- label logic --------
             if is_checked:
                 if is_cached:
-                    color =  "#26ac5c"
+                    style = "Done.Step.TCheckbutton"
                 else:
-                    color = "#d7a61e"
+                    style = "Step.TCheckbutton"
             else:
-                color = self._surface_color
+                style = "Inactive.Step.TCheckbutton"
 
-            cb.config(selectcolor=color)
+            cb.configure(style=style)
 
     def load_input(self, folders):
         # self.input_folder.set(folders)
@@ -822,6 +982,19 @@ class MainWindow(ThemeMixin):
             for path in self.pipeline.ctx.input_list:
                 self.minimal_input_listbox.insert(tk.END, str(path))
 
+        input_list = list(self.pipeline.ctx.input_list)
+        if hasattr(self, "minimal_file_count_var"):
+            count = len(input_list)
+            if count:
+                suffix = "s" if count != 1 else ""
+                self.minimal_file_count_var.set(f"{count} input file{suffix} selected")
+                first_path = input_list[0]
+                detail = str(first_path) if count == 1 else f"First file: {first_path}"
+                self.minimal_file_detail_var.set(detail)
+            else:
+                self.minimal_file_count_var.set("No input selected")
+                self.minimal_file_detail_var.set("Drop one or more .holo files here.")
+
     def load_holo(self):
         file_path = filedialog.askopenfilenames(filetypes=[("Holo files", "*.holo")], defaultextension=".holo")
         if file_path:
@@ -845,8 +1018,10 @@ class MainWindow(ThemeMixin):
 
         elif config_type == "models_config":
             self.pipeline.load_model_registry(path)
-            self._build_advanced_ui()  # rebuild to update model lists in dropdowns
-            self._darken_tk_widget(self.advanced_frame)
+            if hasattr(self, "config_container") and self.config_container.winfo_exists():
+                for child in self.config_container.winfo_children():
+                    child.destroy()
+                self._populate_configuration_frame(self.config_container)
 
         elif config_type == "h5_schema":
             self.output_manager.load_h5_schema(path)
@@ -921,8 +1096,12 @@ class MainWindow(ThemeMixin):
         return [step for step, var in self.step_vars.items() if var.get()]
 
     def on_drop(self, event):
-        path = event.data.strip("{}")  # windows fix
-        self.load_input(path)
+        try:
+            paths = list(self.root.tk.splitlist(event.data))
+        except tk.TclError:
+            paths = [event.data.strip("{}")]
+        if paths:
+            self.load_input(paths)
 
     def run_pipelines_with_steps(self):
         steps = self.get_selected_steps()
@@ -951,6 +1130,8 @@ class MainWindow(ThemeMixin):
         self.progress["value"] = 0
         self.progress_batch["value"] = 0
         self.progress_minimal["value"] = 0
+        self.status_var.set("Starting pipeline…")
+        logger.info("Starting pipeline for %d input(s)", len(self.pipeline.ctx.input_list))
 
         self.queue = self.mp_context.Queue()
         run_spec = self._make_pipeline_run_spec(steps)
@@ -996,6 +1177,7 @@ class MainWindow(ThemeMixin):
 
     def handle_pipeline_error(self, error_text: str):
         logger.error("Pipeline failed:\n%s", error_text)
+        self.show_logs()
 
         self._terminate_pipeline_worker()
         self._drain_pipeline_queue()
@@ -1033,6 +1215,7 @@ class MainWindow(ThemeMixin):
             self._finish_pipeline_ui()
             message = f"The pipeline process stopped unexpectedly with exit code {exit_code}."
             logger.error(message)
+            self.show_logs()
             self.root.after_idle(lambda: messagebox.showerror("Pipeline error", message))
             return True
 
@@ -1239,12 +1422,16 @@ class MainWindow(ThemeMixin):
         if img.ndim == 2:
             img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
         self.image_tk = np_to_tk(img)  # keep reference!
-        self.image_label.config(image=self.image_tk)
+        self.image_label.config(image=self.image_tk, text="")
         if self.ui_mode_var.get() == "advanced":
             self.resize_window()
 
     def cleanup_image(self):
-        self.image_label.config(image="")
+        self.image_tk = None
+        self.image_label.config(
+            image="",
+            text="A preview will appear here while the pipeline is running.",
+        )
 
     def overlay(self, image, artery_mask, vein_mask):
         img = image.copy()
@@ -1272,8 +1459,9 @@ class MainWindow(ThemeMixin):
             "DopplerView is a tool for segmentation, classification and analysis of diverse structures and signals on data issued from laser doppler holography.\n"
             "It takes as input measure.holo file(s) with a corresponding measure/measure_HD folder containing the hologram data resulting from holodoppler processing of raw videos, and produces a variety of outputs including artery/vein segmentation masks, velocity estimates, waveform analyses, and more.\n\n"
             "1. Load a .holo file, or drag-and-drop it into the application. You can also load a batch folder containing multiple .holo files, or a .txt file containing a list of paths to .holo files.\n"
-            "2. In advanced UI (View -> Advanced UI), select which pipeline steps to run or run the full pipeline.\n"
-            "3. View the results, including artery/vein segmentation overlays.\n\n"
+            "2. In the Advanced tab, select which pipeline steps to run or run the full pipeline.\n"
+            "3. View the results, including artery/vein segmentation overlays.\n"
+            "4. Open the Logs panel from the footer or Logs menu to follow processing details.\n\n"
             "For more information, visit our GitHub repository: https://github.com/DigitalHolography/DopplerView"
         )
         tk.messagebox.showinfo("Help - DopplerView", help_text)
