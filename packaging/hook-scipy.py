@@ -2,16 +2,16 @@
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 from pathlib import Path
 import scipy.stats._distn_infrastructure as _mod
-import shutil
 
 hiddenimports = collect_submodules('scipy.stats')
 hiddenimports += collect_submodules('scipy.special')
 hiddenimports += collect_submodules('scipy._lib')
-hiddenimports += collect_submodules('scipy._lib.array_api_compat')
-hiddenimports += collect_submodules('scipy._lib.array_api_compat.numpy')
+
+hiddenimports += collect_submodules('scipy._external.array_api_compat')
+hiddenimports += collect_submodules('scipy._external.array_api_compat.numpy')
 hiddenimports += [
-    'scipy._lib.array_api_compat.numpy.fft',
-    'scipy._lib.array_api_compat.numpy.linalg',
+    'scipy._external.array_api_compat.numpy.fft',
+    'scipy._external.array_api_compat.numpy.linalg',
 ]
 
 datas = collect_data_files('scipy')
