@@ -197,6 +197,7 @@ class Context:
         self.output_manager.set_DV_folder(self.DV_folder)
         self.output_manager.set_dopplerview_config(self.dopplerview_config)
         self.output_manager.ensure_output_folder()  # Lazily create the output folder when we actually need to output something, to avoid creating empty output folders for runs that don't produce any outputs
+        self.output_manager.write_app_versions(self.HD_folder.input_file)
     
     def start_output_manager(self):
         self.output_manager.start()
