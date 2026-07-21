@@ -155,6 +155,36 @@ class OutputManager:
             value = ctx.get(key)
             h5.create_dataset(path, data=value)
 
+    def write_app_versions(self, input_h5_path):
+        """Write the Holodoppler and DopplerView versions to the output H5 file."""
+        with h5py.File(input_h5_path, "r") as input_h5:
+            if "HD_version" not in input_h5:
+                raise KeyError(f"HD_version not found in Holodoppler H5 file: {input_h5_path}")
+
+            hd_version = input_h5["HD_version"][()]
+            if isinstance(hd_version, bytes):
+                hd_version = hd_version.decode("utf-8")
+            else:
+                hd_version = str(hd_version)
+
+        with h5py.File(self.h5_path, "a") as h5:
+            if "app_versions" in h5:
+                del h5["app_versions"]
+
+            app_versions = json.dumps({
+                "HD_version": hd_version,
+                "DV_version": __version__,
+            })
+            string_dtype = h5py.string_dtype(encoding="utf-8")
+            h5.create_dataset("app_versions", data=app_versions, dtype=string_dtype)
+
+        logger.info(
+            "[OutputManager] Wrote app versions to %s: HD=%s, DV=%s",
+            self.h5_path,
+            hd_version,
+            __version__,
+        )
+
     def write_dopplerview_config(self):
         if self.output_dir is None:
             raise ValueError("Output directory is not set. Cannot write DopplerView configuration.")
