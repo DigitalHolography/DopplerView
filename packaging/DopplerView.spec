@@ -86,7 +86,7 @@ hiddenimports += collect_submodules("skimage")
 hiddenimports += collect_submodules("onnxruntime")
 
 a = Analysis(
-    [os.path.join(ROOT, "dopplerview", "tk_app.py")],
+    [os.path.join(ROOT, "dopplerview", "ui", "app.py")],
     pathex=[ROOT],
     binaries=[],
     datas=datas + [

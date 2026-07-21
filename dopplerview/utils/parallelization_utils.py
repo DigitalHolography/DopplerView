@@ -50,7 +50,7 @@ def run_in_parallel(func, iterable, n_jobs=-1, chunking=True, task_name=None):
             )
             return np.concatenate(results, axis=0)
         except KeyboardInterrupt:
-            print("Interrupted cleanly")
+            logger.info("Interrupted cleanly")
 
     try:
         results = joblib.Parallel(n_jobs=n_jobs, backend="threading")(
@@ -58,4 +58,4 @@ def run_in_parallel(func, iterable, n_jobs=-1, chunking=True, task_name=None):
             )
         return np.stack(results, axis=0)
     except KeyboardInterrupt:
-        print("Interrupted cleanly")
+        logger.info("Interrupted cleanly")

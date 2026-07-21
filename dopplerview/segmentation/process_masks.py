@@ -4,9 +4,10 @@ Process binary masks
 
 import numpy as np
 from skimage.morphology import closing, skeletonize, disk
-from skimage.measure import label
+from skimage.measure import label, regionprops
 from skimage.segmentation import watershed, find_boundaries
 from scipy.ndimage import distance_transform_edt, binary_dilation, convolve
+from dopplerview.utils.parallelization_utils import run_in_parallel
 
 import logging
 logger = logging.getLogger(__name__)
@@ -79,14 +80,20 @@ def bwareafilt_largest(binary_mask, connectivity=2):
     largest_label = counts.argmax()
     return labeled == largest_label
 
-def get_labeled_vesselness(mask, x_center, y_center, r1=0.1, r2=0.35, numCircles=10):
+def get_labeled_vessels(mask, mask_optic_disc=True, x_center=None, y_center=None, r1=0.1, r2=0.35):
     numX, numY = mask.shape
-    dr = (r2 - r1) / numCircles
+
+    if mask_optic_disc:
+        if x_center is None:
+            x_center = numY / 2
+        if y_center is None:
+            y_center = numX / 2
 
     # Skeletonize and remove central circle
     skel = skeletonize(mask)
-    circle_mask = disk_mask(numX, numY, R1=r1, center=(x_center / numY, y_center/ numX))
-    skel = skel & ~circle_mask
+    if mask_optic_disc:
+        circle_mask = disk_mask(numX, numY, R1=r1, center=(x_center / numY, y_center/ numX))
+        skel = skel & ~circle_mask
 
     # Remove branch points
     neigh = np.array([[1,1,1],[1,10,1],[1,1,1]])
@@ -119,7 +126,8 @@ def get_labeled_vesselness(mask, x_center, y_center, r1=0.1, r2=0.35, numCircles
         branch_pixels = (L == i)
         labeled_vessels[branch_pixels] = i
     
-    labeled_vessels *= ~circle_mask
+    if mask_optic_disc:
+        labeled_vessels *= ~circle_mask
 
     return labeled_vessels, edges
 
@@ -262,3 +270,122 @@ def bbox_to_mask(center, width, height, target_shape):
             optic_disk_mask = np.zeros((h, w), dtype=bool)
 
         return optic_disk_mask
+
+def draw_connection(mask, point1, point2, thickness=1):
+    """
+    Draw a line connecting two points in a binary mask.
+
+    Parameters:
+    - mask: 2D numpy array (binary mask)
+    - point1: Tuple (x1, y1) for the first point
+    - point2: Tuple (x2, y2) for the second point
+    - thickness: Thickness of the line
+
+    Returns:
+    - mask_with_line: 2D numpy array with the line drawn
+    """
+    from skimage.draw import line
+
+    rr, cc = line(point1[1], point1[0], point2[1], point2[0])
+    
+    # Ensure the coordinates are within the mask bounds
+    rr = np.clip(rr, 0, mask.shape[0] - 1)
+    cc = np.clip(cc, 0, mask.shape[1] - 1)
+
+    mask_with_line = mask.copy()
+    
+    for t in range(-thickness // 2, thickness // 2 + 1):
+        rr_offset = np.clip(rr + t, 0, mask.shape[0] - 1)
+        cc_offset = np.clip(cc + t, 0, mask.shape[1] - 1)
+        mask_with_line[rr_offset, cc_offset] = True
+
+    return mask_with_line
+
+from functools import partial
+
+def get_all_points_in_radius(mask, center, radius):
+    """
+    Get all points in the mask that are within a given radius from a center point.
+
+    Parameters:
+    - mask: 2D numpy array (binary mask)
+    - center: Tuple (x, y) for the center point
+    - radius: Radius in pixels
+
+    Returns:
+    - points_in_radius: List of tuples (x, y) of points within the radius
+    """
+    y_indices, x_indices = np.where(mask)
+    points_in_radius = []
+    
+    for x, y in zip(x_indices, y_indices):
+        if np.sqrt((x - center[0])**2 + (y - center[1])**2) <= radius:
+            points_in_radius.append((x, y))
+    
+    return points_in_radius
+
+def connect_components(mask, max_distance=5):
+    """
+    Connect components in a binary mask that are within a certain distance of each other.
+
+    Parameters:
+    - mask: 2D numpy array (binary mask)
+    - max_distance: Maximum distance to connect components
+
+    Returns:
+    - connected_mask: 2D numpy array (binary mask) with connected components
+    """
+    labeled_mask = label(mask)
+    props = regionprops(labeled_mask)
+
+    # Create a distance map
+    # distance_map = distance_transform_edt(~mask)
+
+    mask_cpy = mask.copy()
+
+    def connect_neighbours(prop, mask, labeled_mask, max_distance):
+        # Get the coordinates of the current component
+        coords = prop.coords
+
+        # Check if any pixel in the component is within max_distance of another component
+        for coord in coords:
+            neighbourhood = get_all_points_in_radius((labeled_mask != 0) & (labeled_mask != prop.label), (coord[1], coord[0]), max_distance)
+            for neighbour in neighbourhood:
+                # if not mask[neighbour[1], neighbour[0]]:
+                #     # Draw a line between the two points
+                    mask = draw_connection(mask, (coord[1], coord[0]), (neighbour[0], neighbour[1]), thickness=2)
+
+        return mask
+    
+    f = partial(connect_neighbours, mask=mask_cpy, labeled_mask=labeled_mask, max_distance=max_distance)
+    masks = run_in_parallel(f, props, n_jobs=-1, chunking=False)
+
+    return np.logical_or.reduce(masks)
+
+def keep_connected_components(mask, anchor, negative=False):
+    """
+    Keep only the connected components in the mask that are connected to the anchor.
+
+    Parameters:
+    - mask: 2D numpy array (binary mask)
+    - anchor: 2D numpy array (binary mask) indicating the anchor points
+
+    Returns:
+    - cleaned_mask: 2D numpy array (binary mask) with only the connected components
+      that are connected to the anchor.
+    """
+    labeled_mask = label(mask)
+    anchor_labels = np.unique(labeled_mask[anchor > 0])
+    
+    negative_mask = np.isin(labeled_mask, anchor_labels) if negative else ~np.isin(labeled_mask, anchor_labels)
+    
+    cleaned_mask = mask & ~negative_mask
+
+    return cleaned_mask
+
+def remove_small_vessels(labeled_vessels, min_size=10):
+    unique_labels, counts = np.unique(labeled_vessels, return_counts=True)
+    small_labels = unique_labels[counts < min_size]
+    for label in small_labels:
+        labeled_vessels[labeled_vessels == label] = 0
+    return labeled_vessels

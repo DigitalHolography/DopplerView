@@ -8,6 +8,8 @@ import shutil
 from pathlib import Path
 import dopplerview.input_output.user_config as user_config
 
+import logging
+logger = logging.getLogger(__name__)
 class HolodopplerFolder:
     def __init__(self, parent_directory):
         self.directory = None

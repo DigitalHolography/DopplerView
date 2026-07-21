@@ -1,6 +1,7 @@
 from pathlib import Path
 import os
 import threading
+import traceback
 import time
 from dopplerview.input_output import user_config, read_folder, h5_file
 from dopplerview.models.registry import ModelRegistryConfig
@@ -18,7 +19,7 @@ from dopplerview.pipeline.steps.optic_disc import OpticDiscSegmentationStep
 from dopplerview.pipeline.steps.eye_laterality_classification import EyeLateralityClassificationStep
 from dopplerview.pipeline.steps.vessel_segmentation import RetinalVesselSegmentationStep, ChoroidalVesselSegmentationStep
 from dopplerview.pipeline.steps.pulse_analysis import PulseAnalysisStep
-from dopplerview.pipeline.steps.av_segmentation import AVSegmentationStep
+from dopplerview.pipeline.steps.av_segmentation import ChoroidalAVSegmentationStep, RetinalAVSegmentationStep
 from dopplerview.input_output.read_folder import DopplerViewFolder, HolodopplerFolder
 from dopplerview.pipeline.steps.vessel_velocity_estimator import VesselVelocityEstimatorStep
 from dopplerview.pipeline.steps.arterial_waveform_analysis import ArterialWaveformAnalysisStep
@@ -132,16 +133,17 @@ class Context:
         self.clear()  # Clear cache before loading new input
         self.measure_folder = measure_folder
 
-        self.HD_folder = HolodopplerFolder(self.measure_folder)
-        self.set("input_file", self.HD_folder.input_file)
-        self.load_holodoppler_config(self.HD_folder.holodoppler_config)
-
         self.output_manager.unset_DV_folder()  # Unset previous DV folder to avoid accidentally writing outputs to the wrong place if the new input doesn't have a DV folder
         self.load_DV_folder()
         self.output_manager.set_DV_folder(self.DV_folder)
 
         if self.debug_mode:
             self._read_h5_into_cache()
+
+        self.HD_folder = HolodopplerFolder(self.measure_folder)
+        logger.info(f"[Pipeline] Loading Holodoppler folder: {self.HD_folder.directory}")
+        self.set("input_file", self.HD_folder.input_file)
+        self.load_holodoppler_config(self.HD_folder.holodoppler_config)
 
     def load_DV_folder(self):
         if not self.measure_folder:
@@ -277,7 +279,8 @@ class Pipeline:
             RetinalVesselSegmentationStep(),
             ChoroidalVesselSegmentationStep(),
             PulseAnalysisStep(),
-            AVSegmentationStep(),
+            RetinalAVSegmentationStep(),
+            ChoroidalAVSegmentationStep(),
             VesselVelocityEstimatorStep(),
             ArterialWaveformAnalysisStep(),
         }
@@ -373,18 +376,51 @@ class Pipeline:
 
     def run_batch(self, targets=None, callback=None):
         if callback:
-            callback("batch_start")
-        for i, input in enumerate(self.ctx.input_list):
-            logger.info(f"[Run Batch] Processing file: {input}")
+            callback("batch_start", len(self.ctx.input_list))
+
+        results = []
+        total = len(self.ctx.input_list)
+
+        for i, input_path in enumerate(self.ctx.input_list):
+            logger.info("[Run Batch] Processing file: %s", input_path)
+
+            if callback:
+                callback("pipeline_start", i, total)
+
             try:
-                self.ctx.load_input_folder(input)
-            except Exception as e:
-                logger.exception(f"[Run Batch] Error loading input folder {input}: {e}")
+                self.ctx.load_input_folder(input_path)
+                self.run(targets=targets, callback=callback)
+
+            except Exception:
+                error_text = traceback.format_exc()
+
+                logger.error(
+                    "[Run Batch] Failed processing file %s:\n%s",
+                    input_path,
+                    error_text,
+                )
+
+                results.append({
+                    "input": str(input_path),
+                    "status": "failed",
+                    "error": error_text,
+                })
+
+                if callback:
+                    callback("pipeline_failed", i, total, str(input_path), error_text)
+
                 continue
+
+            results.append({
+                "input": str(input_path),
+                "status": "success",
+                "error": None,
+            })
+
             if callback:
-                callback("pipeline_start", i, len(self.ctx.input_list))
-            self.run(targets=targets, callback=callback)
-            if callback:
-                callback("pipeline_done", i, len(self.ctx.input_list))
+                callback("pipeline_done", i, total)
+
         if callback:
-            callback("batch_done")
+            callback("batch_done", results)
+
+        return results

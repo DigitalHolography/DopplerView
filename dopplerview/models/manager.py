@@ -34,7 +34,7 @@ class ModelManager:
             raise ValueError(f"Model '{model_name}' is not compatible with task '{task_name}'")
         if model_name != self.model_tasks[task_name]:
             self.model_tasks[task_name] = model_name
-            print(f"Changed model for task '{task_name}' to '{model_name}'")
+            logger.info(f"Changed model for task '{task_name}' to '{model_name}'")
 
     def get_model_name_list_for_task(self, task_name: str):
         return self.registry.list_models_for_task(task_name)

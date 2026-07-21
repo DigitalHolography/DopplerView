@@ -49,6 +49,9 @@ class RetinalVesselSegmentationStep(VesselSegmentationStep):
     
     def clean_vessel_mask(self, raw_mask, ctx):
         optic_disc_center = ctx.require("optic_disc_center")
+        if optic_disc_center is None:
+            self.logger.warning("    - Optic disc center not available. Skipping mask cleaning.")
+            return raw_mask
         width, height = raw_mask.shape
         optic_disc_center = (optic_disc_center[0] / width, optic_disc_center[1] / height)
 
@@ -70,7 +73,13 @@ class RetinalVesselSegmentationStep(VesselSegmentationStep):
 
         if method == "AI":
             self.logger.info("    - Use deep learning model for vessel segmentation.")
-            return self.deep_segmentation(ctx)
+            mask = self.deep_segmentation(ctx)
+            ctx.output_manager.output(self.name, "mask", mask, "mask")
+            if mask.sum() == 0:
+                self.logger.warning("    - No vessels detected in the retinal vessel mask using deep model. Fallback to Frangi filter.")
+                method = "frangi"
+            else:
+                return mask
 
         if method == "frangi":
             self.logger.info("    - Use Frangi filter for vessel segmentation.")
@@ -84,6 +93,8 @@ class RetinalVesselSegmentationStep(VesselSegmentationStep):
         clean_mask = self.clean_vessel_mask(raw_mask, ctx)
 
         ctx.set("retinal_vessel_mask", clean_mask)
+
+        ctx.output_manager.output(self.name, "retinal_vessel_mask", clean_mask, "mask")
 
 
 class ChoroidalVesselSegmentationStep(VesselSegmentationStep):
