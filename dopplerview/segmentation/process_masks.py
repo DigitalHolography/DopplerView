@@ -80,7 +80,7 @@ def bwareafilt_largest(binary_mask, connectivity=2):
     largest_label = counts.argmax()
     return labeled == largest_label
 
-def get_labeled_vessels(mask, mask_optic_disc=True, x_center=None, y_center=None, r1=0.1, r2=0.35):
+def get_labeled_vessels(mask, mask_optic_disc=True, x_center=None, y_center=None, r1=0.1):
     numX, numY = mask.shape
 
     if mask_optic_disc:

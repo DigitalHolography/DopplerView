@@ -47,6 +47,10 @@
 
     "retinal_artery_velocity_signal": "signal",
     "retinal_vein_velocity_signal": "signal",
+    "retinal_artery_M0ff_signal": "signal",
+    "retinal_vein_M0ff_signal": "signal",
+    "artery_section_mask": "mask",
+    "vein_section_mask": "mask",
     "velocity_map_avg": "image",
     "fRMS_avg": "image",
     "fRMS_bkg_avg": "image"
