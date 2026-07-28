@@ -16,7 +16,7 @@ from dopplerview.input_output import log_config, user_config
 from dopplerview.input_output.output_manager import OutputManager
 from dopplerview.pipeline.pipeline import Pipeline
 
-from dopplerview.ui.image_utils import np_to_tk
+from dopplerview.ui.image_utils import np_to_tk, resize_preview_to_fit
 from dopplerview.ui.theme import ThemeMixin
 from dopplerview.ui.worker import pipeline_process_worker
 
@@ -73,6 +73,8 @@ class MainWindow(ThemeMixin):
         self.register_config_file(config_path, "dopplerview_config")
 
         self.image_tk = None  # keep reference (IMPORTANT)
+        self.preview_image = None
+        self._preview_resize_job = None
 
         self.queue = queue.Queue()
         self._ui_log_queue = queue.Queue()
@@ -486,12 +488,17 @@ class MainWindow(ThemeMixin):
         preview_panel.grid(row=0, column=1, sticky="nsew")
         preview_panel.columnconfigure(0, weight=1)
         preview_panel.rowconfigure(0, weight=1)
-        preview_frame = ttk.Frame(preview_panel, style="Preview.TFrame", padding=12)
-        preview_frame.grid(row=0, column=0, sticky="nsew")
-        preview_frame.columnconfigure(0, weight=1)
-        preview_frame.rowconfigure(0, weight=1)
+        self.preview_frame = ttk.Frame(
+            preview_panel,
+            style="Preview.TFrame",
+            padding=12,
+        )
+        self.preview_frame.grid(row=0, column=0, sticky="nsew")
+        self.preview_frame.columnconfigure(0, weight=1)
+        self.preview_frame.rowconfigure(0, weight=1)
+        self.preview_frame.bind("<Configure>", self._schedule_preview_resize)
         self.image_label = ttk.Label(
-            preview_frame,
+            self.preview_frame,
             text="A preview will appear here while the pipeline is running.",
             anchor="center",
             style="Muted.TLabel",
@@ -1419,14 +1426,39 @@ class MainWindow(ThemeMixin):
     # -------------------
 
     def display_image(self, img):
-        if img.ndim == 2:
-            img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
-        self.image_tk = np_to_tk(img)  # keep reference!
-        self.image_label.config(image=self.image_tk, text="")
+        self.preview_image = img.copy()
+        self._render_preview()
         if self.ui_mode_var.get() == "advanced":
             self.resize_window()
 
+    def _schedule_preview_resize(self, _event=None):
+        if self.preview_image is None:
+            return
+        if self._preview_resize_job is not None:
+            self.root.after_cancel(self._preview_resize_job)
+        self._preview_resize_job = self.root.after(50, self._render_preview)
+
+    def _render_preview(self):
+        self._preview_resize_job = None
+        if self.preview_image is None:
+            return
+
+        # The frame has 12 px of padding on each side.
+        max_width = max(1, self.preview_frame.winfo_width() - 24)
+        max_height = max(1, self.preview_frame.winfo_height() - 24)
+        fitted = resize_preview_to_fit(
+            self.preview_image,
+            max_width,
+            max_height,
+        )
+        self.image_tk = np_to_tk(fitted)  # keep reference!
+        self.image_label.config(image=self.image_tk, text="")
+
     def cleanup_image(self):
+        if self._preview_resize_job is not None:
+            self.root.after_cancel(self._preview_resize_job)
+            self._preview_resize_job = None
+        self.preview_image = None
         self.image_tk = None
         self.image_label.config(
             image="",

@@ -47,6 +47,8 @@ hiddenimports = [
     'scipy._lib.array_api_compat.numpy',
     'scipy._lib.array_api_compat.numpy.fft',
     'scipy._lib.array_api_compat.numpy.linalg',
+    'scipy._external.array_api_compat.numpy.fft',
+    'scipy._external.array_api_compat.numpy.linalg',
     # skimage — force-import modules loaded lazily via lazy_loader
     "skimage",
     "skimage.filters",
