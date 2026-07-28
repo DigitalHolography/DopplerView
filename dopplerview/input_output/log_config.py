@@ -1,10 +1,11 @@
 from pathlib import Path
 import os
 import logging
+import sys
 
 def get_log_dir():
     if os.name == "nt":
-        base = Path(os.getenv("APPDATA"))
+        base = Path(os.getenv("APPDATA") or Path.home() / "AppData" / "Roaming")
     else:
         base = Path.home() / ".config"
 
@@ -29,13 +30,15 @@ def setup_logging():
 
     console_formatter = logging.Formatter("%(message)s")
 
-    # --- Terminal handler ---
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(console_formatter)
-
     # --- File handler ---
-    file_handler = logging.FileHandler(get_log_file(), mode="w")
+    file_handler = logging.FileHandler(get_log_file(), mode="w", encoding="utf-8")
     file_handler.setFormatter(file_formatter)
 
-    logger.addHandler(console_handler)
+    # Windowed PyInstaller builds intentionally have no stderr stream. Keep a
+    # console handler for source/CLI runs only when the stream is writable.
+    stream = sys.stderr
+    if stream is not None and hasattr(stream, "write"):
+        console_handler = logging.StreamHandler(stream)
+        console_handler.setFormatter(console_formatter)
+        logger.addHandler(console_handler)
     logger.addHandler(file_handler)

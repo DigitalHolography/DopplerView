@@ -46,8 +46,8 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 Source: "{#PayloadDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\{#MyAppVersionedName}"; Filename: "{app}\DopplerView.exe"
-Name: "{autodesktop}\{#MyAppVersionedName}"; Filename: "{app}\DopplerView.exe"; Tasks: desktopicon
+Name: "{autoprograms}\{#MyAppVersionedName}"; Filename: "{app}\DopplerView.exe"; WorkingDir: "{app}"
+Name: "{autodesktop}\{#MyAppVersionedName}"; Filename: "{app}\DopplerView.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\DopplerView.exe"; Description: "Launch {#MyAppVersionedName}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\DopplerView.exe"; Description: "Launch {#MyAppVersionedName}"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent

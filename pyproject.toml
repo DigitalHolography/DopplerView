@@ -28,7 +28,8 @@ dependencies = [
     "torchvision",
     "typer",
     "huggingface_hub",
-    "tkinterdnd2"
+    "tkinterdnd2",
+    "sv-ttk>=2.6.1"
 ]
 
 [project.optional-dependencies]

@@ -89,6 +89,19 @@ def _configure_child_process_logging(queue_out):
     handler forwards child logs to the parent process through the same event queue
     used for pipeline progress.
     """
+    sys.stdout = _QueueTextStream(queue_out, levelno=logging.INFO, name="pipeline.stdout")
+    sys.stderr = _QueueTextStream(queue_out, levelno=logging.ERROR, name="pipeline.stderr")
+
+    # huggingface_hub installs a console handler while this windowed worker's
+    # stderr is still None. Let its records propagate through our queue handler
+    # instead of producing logging-framework tracebacks.
+    huggingface_logger = logging.getLogger("huggingface_hub")
+    huggingface_logger.handlers.clear()
+    huggingface_logger.propagate = True
+
+    # Internal logging failures should never be presented as pipeline failures.
+    logging.raiseExceptions = False
+
     root_logger = logging.getLogger()
     root_logger.handlers.clear()
     root_logger.setLevel(logging.DEBUG)
@@ -97,9 +110,6 @@ def _configure_child_process_logging(queue_out):
     handler.setLevel(logging.DEBUG)
     handler.setFormatter(logging.Formatter("%(message)s"))
     root_logger.addHandler(handler)
-
-    sys.stdout = _QueueTextStream(queue_out, levelno=logging.INFO, name="pipeline.stdout")
-    sys.stderr = _QueueTextStream(queue_out, levelno=logging.ERROR, name="pipeline.stderr")
 
 def pipeline_process_worker(run_spec, queue_out):
     """
