@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dopplerview"
-version = "1.7.2"
+version = "1.7.3"
 description = "Doppler holography vessel segmentation pipeline"
 authors = [{ name = "Marius Dubosc" }]
 readme = "README.md"
@@ -28,7 +28,8 @@ dependencies = [
     "torchvision",
     "typer",
     "huggingface_hub",
-    "tkinterdnd2"
+    "tkinterdnd2",
+    "sv-ttk>=2.6.1"
 ]
 
 [project.optional-dependencies]

@@ -13,6 +13,27 @@ def np_to_tk(img: np.ndarray):
     return ImageTk.PhotoImage(pil_img)
 
 
+def resize_preview_to_fit(img: np.ndarray, max_width: int, max_height: int) -> np.ndarray:
+    """Downscale an image to fit fully inside the available preview area."""
+    img = np.asarray(img)
+    height, width = img.shape[:2]
+    max_width = max(1, int(max_width))
+    max_height = max(1, int(max_height))
+
+    scale = min(1.0, max_width / width, max_height / height)
+    if scale == 1.0:
+        return img.astype(np.uint8, copy=False)
+
+    new_size = (
+        max(1, min(max_width, int(width * scale))),
+        max(1, min(max_height, int(height * scale))),
+    )
+    return cv2.resize(img, new_size, interpolation=cv2.INTER_AREA).astype(
+        np.uint8,
+        copy=False,
+    )
+
+
 def overlay_preview(image, artery_mask=None, vein_mask=None):
     """Build a lightweight RGB preview image inside the worker process."""
     if image is None:

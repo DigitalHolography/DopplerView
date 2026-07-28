@@ -7,9 +7,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-from dopplerview._version import __version__ as app_version
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from dopplerview._version import __version__ as app_version  # noqa: E402
+
 INSTALL_DIR = PROJECT_ROOT / "packaging"
 SPEC_FILE = INSTALL_DIR / "DopplerView.spec"
 ISS_FILE = INSTALL_DIR / "DopplerView.iss"
