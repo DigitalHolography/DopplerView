@@ -91,7 +91,6 @@ class MainWindow(ThemeMixin):
         self._height_before_logs: int | None = None
         self.config_mode_var = tk.StringVar(value="default")
         self.enable_debug_output = False
-        self._menus: list[tk.Menu] = []
 
         self._apply_theme()
         self._set_window_icon()
@@ -122,7 +121,6 @@ class MainWindow(ThemeMixin):
         self.root.minsize(720, 540)
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
-        self._build_menu()
 
         self.shell = ttk.Frame(self.root, padding=(12, 10, 12, 8))
         self.shell.grid(row=0, column=0, sticky="nsew")
@@ -145,120 +143,37 @@ class MainWindow(ThemeMixin):
         footer = ttk.Frame(self.shell)
         footer.grid(row=2, column=0, sticky="ew", pady=(8, 0))
         footer.columnconfigure(0, weight=1)
-        ttk.Label(footer, textvariable=self.status_var, style="Status.TLabel").grid(
-            row=0, column=0, sticky="w"
+
+        self.footer_theme_button = ttk.Button(
+            footer,
+            text="Light mode",
+            command=self._toggle_theme,
+            style="Toolbar.TButton",
         )
+        self.footer_theme_button.grid(row=0, column=1, padx=(8, 0))
+
+        self.footer_help_button = ttk.Button(
+            footer,
+            text="Help",
+            command=self.show_help,
+            style="Toolbar.TButton",
+        )
+        self.footer_help_button.grid(row=0, column=2, padx=(8, 0))
+
         self.footer_logs_button = ttk.Button(
             footer,
             text="Logs",
             command=self._toggle_logs_from_button,
             style="Toolbar.TButton",
         )
-        self.footer_logs_button.grid(row=0, column=1, padx=(8, 0))
+        self.footer_logs_button.grid(row=0, column=3, padx=(8, 0))
 
-    def _build_menu(self) -> None:
-        self._menus = []
-
-        menu_bar = tk.Menu(
-            self.root,
-            bg=self._surface_color,
-            fg=self._text_fg,
-            activebackground=self._select_color,
-            activeforeground=self._text_fg,
-            disabledforeground=self._disabled_fg,
+    def _toggle_theme(self) -> None:
+        new_theme = "light" if self.theme_var.get() == "dark" else "dark"
+        self.set_theme(new_theme)
+        self.footer_theme_button.configure(
+            text="Dark mode" if new_theme == "light" else "Light mode"
         )
-        self._menus.append(menu_bar)
-
-        view_menu = tk.Menu(
-            menu_bar,
-            tearoff=False,
-            bg=self._surface_color,
-            fg=self._text_fg,
-            activebackground=self._select_color,
-            activeforeground=self._text_fg,
-            disabledforeground=self._disabled_fg,
-            selectcolor=self._accent_color,
-        )
-        self._menus.append(view_menu)
-        view_menu.add_radiobutton(
-            label="Minimal UI",
-            value="minimal",
-            variable=self.ui_mode_var,
-            command=self.update_mode,
-        )
-        view_menu.add_radiobutton(
-            label="Advanced UI",
-            value="advanced",
-            variable=self.ui_mode_var,
-            command=self.update_mode,
-        )
-        menu_bar.add_cascade(label="View", menu=view_menu)
-
-        config_menu = tk.Menu(
-            menu_bar,
-            tearoff=False,
-            bg=self._surface_color,
-            fg=self._text_fg,
-            activebackground=self._select_color,
-            activeforeground=self._text_fg,
-            disabledforeground=self._disabled_fg,
-        )
-        self._menus.append(config_menu)
-        config_menu.add_command(label="Open Configuration", command=self.show_config)
-        config_menu.add_separator()
-        config_menu.add_command(label="Modify dopplerview config", command=self.modify_dopplerview_config)
-        config_menu.add_command(label="Modify models registry", command=self.modify_models_registry)
-        config_menu.add_command(label="Modify h5 schema", command=self.modify_h5_schema)
-        config_menu.add_command(label="Modify output config", command=self.modify_output_config)
-        menu_bar.add_cascade(label="Config", menu=config_menu)
-
-        theme_menu = tk.Menu(
-            menu_bar,
-            tearoff=False,
-            bg=self._surface_color,
-            fg=self._text_fg,
-            activebackground=self._select_color,
-            activeforeground=self._text_fg,
-            disabledforeground=self._disabled_fg,
-            selectcolor=self._accent_color,
-        )
-        self._menus.append(theme_menu)
-        theme_menu.add_radiobutton(
-            label="Light",
-            value="light",
-            variable=self.theme_var,
-            command=lambda: self.set_theme("light"),
-        )
-        theme_menu.add_radiobutton(
-            label="Dark",
-            value="dark",
-            variable=self.theme_var,
-            command=lambda: self.set_theme("dark"),
-        )
-        menu_bar.add_cascade(label="Theme", menu=theme_menu)
-
-        logs_menu = tk.Menu(
-            menu_bar,
-            tearoff=False,
-            bg=self._surface_color,
-            fg=self._text_fg,
-            activebackground=self._select_color,
-            activeforeground=self._text_fg,
-            disabledforeground=self._disabled_fg,
-        )
-        self._menus.append(logs_menu)
-        logs_menu.add_checkbutton(
-            label="Show logs",
-            variable=self.show_logs_var,
-            command=self.toggle_logs,
-        )
-        logs_menu.add_command(label="Open log file", command=self.open_log_file)
-        logs_menu.add_command(label="Clear view", command=self.clear_log_view)
-        menu_bar.add_cascade(label="Logs", menu=logs_menu)
-
-        menu_bar.add_command(label="Help", command=self.show_help)
-
-        self.root.configure(menu=menu_bar)
 
     def _build_minimal_ui(self):
         frame = self.minimal_frame
@@ -1493,7 +1408,7 @@ class MainWindow(ThemeMixin):
             "1. Load a .holo file, or drag-and-drop it into the application. You can also load a batch folder containing multiple .holo files, or a .txt file containing a list of paths to .holo files.\n"
             "2. In the Advanced tab, select which pipeline steps to run or run the full pipeline.\n"
             "3. View the results, including artery/vein segmentation overlays.\n"
-            "4. Open the Logs panel from the footer or Logs menu to follow processing details.\n\n"
+            "4. Open the Logs panel from the footer to follow processing details.\n\n"
             "For more information, visit our GitHub repository: https://github.com/DigitalHolography/DopplerView"
         )
         tk.messagebox.showinfo("Help - DopplerView", help_text)
