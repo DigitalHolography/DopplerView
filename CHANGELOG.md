@@ -1,6 +1,8 @@
 # Changelog
 
 ## 1.7.4
+* GUI
+    * Remove top menu bar
 * Restore steps caching following pipeline execution
 
 ## 1.7.3
