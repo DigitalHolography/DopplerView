@@ -5,7 +5,7 @@ from skimage.measure import label
 import numpy as np
 
 class RetinalAVSegmentationStep(BaseStep):
-    requires = {"M0_ff_video", "M0_ff_image_cleaned", "correlation", "diasys_image", "optic_disc_center"}
+    requires = {"M0_ff_video", "M0_ff_image_cleaned", "correlation_M0", "diasys_image", "optic_disc_center"}
     produces = {"retinal_artery_mask", "retinal_vein_mask", "retinal_artery_mask_clean", "retinal_vein_mask_clean"}
     name = "retinal_artery_vein_segmentation"
 
@@ -77,7 +77,7 @@ class RetinalAVSegmentationStep(BaseStep):
         ctx.output_manager.save_overlay(self.name, "av_overlay_cleaned", ctx.require("M0_ff_image_cleaned"), [artery_mask_clean, vein_mask_clean])
 
 class ChoroidalAVSegmentationStep(BaseStep):
-    requires = {"M0_ff_video", "M0_ff_image_cleaned", "HF_M0_FF", "retinal_artery_mask", "retinal_vein_mask", "correlation", "correlation_HF_M0_ff", "optic_disc_center"}
+    requires = {"M0_ff_video", "M0_ff_image_cleaned", "HF_M0_FF", "retinal_artery_mask", "retinal_vein_mask", "correlation_M0", "correlation_HF_M0_ff", "optic_disc_center"}
     produces = {"choroidal_artery_mask", "choroidal_vein_mask", "choroidal_aliased_artery_mask", "choroidal_artery_mask_clean", "choroidal_vein_mask_clean", "choroidal_aliased_artery_mask_clean"}
     name = "choroidal_artery_vein_segmentation"
 
@@ -115,7 +115,7 @@ class ChoroidalAVSegmentationStep(BaseStep):
                 return ctx.require("retinal_artery_mask")
 
         corr_HF = ctx.require("correlation_HF_M0_ff")
-        corr_M0 = ctx.require("correlation")
+        corr_M0 = ctx.require("correlation_M0")
 
         retinal_artery_mask = (corr_HF > 0.3) | (corr_M0 > 0.35)
 
@@ -136,7 +136,7 @@ class ChoroidalAVSegmentationStep(BaseStep):
         # - veins with negative correlation with the retinal arteries, less present in the high frequency signal
         # - aliased arteries with almost perfect negative correlation with the retinal arteries, dominant in the high frequency signal
 
-        corr_M0 = ctx.require("correlation")
+        corr_M0 = ctx.require("correlation_M0")
         corr_HF = ctx.require("correlation_HF_M0_ff")
 
         retinal_artery_mask = self.get_retinal_artery_mask(ctx)
