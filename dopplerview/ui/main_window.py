@@ -80,6 +80,8 @@ class MainWindow(ThemeMixin):
         self._ui_log_queue = queue.Queue()
         self._ui_log_handler: logging.Handler | None = None
         self.pipeline_worker = None
+        self.pipeline_commands = None
+        self._validated_steps: set[str] = set()
         self.output_worker = None
         self.mp_context = multiprocessing.get_context("spawn")
         self.selected_models: dict[str, str] = {}
@@ -720,6 +722,7 @@ class MainWindow(ThemeMixin):
                 model_name = var.get()
                 self.selected_models[task_name] = model_name
                 ctx.change_model_for_task(task_name, model_name)
+                self._invalidate_step_colors(task_name)
 
             combo.bind("<<ComboboxSelected>>", on_change)
 
@@ -835,17 +838,15 @@ class MainWindow(ThemeMixin):
             style = "Step.TCheckbutton"
         cb.configure(style=style)
 
+    def _invalidate_step_colors(self, step):
+        affected = {step, *self.pipeline.get_downstream_steps(step)}
+        self._validated_steps.difference_update(affected)
+        self.update_step_display()
+
     def update_step_display(self):
-        pipeline = self.pipeline
-
-        selected = self.get_selected_steps()
-
-        # Steps that will actually run
-        pipeline.set_targets(selected)
-
         for step, cb in self.step_checkboxes.items():
             is_checked = self.step_vars[step].get()
-            is_cached = pipeline.is_cached(step)
+            is_cached = step in self._validated_steps
 
             # -------- label logic --------
             if is_checked:
@@ -865,6 +866,7 @@ class MainWindow(ThemeMixin):
         self.progress_minimal["value"] = 0
         self.progress_batch["value"] = 0
         self.pipeline.ctx.clear_input_list()
+        self._validated_steps.clear()
 
         if isinstance(folders, str):
             folder_list = [Path(f) for f in folders.split() if f]
@@ -1044,9 +1046,6 @@ class MainWindow(ThemeMixin):
         }
 
     def run_pipelines(self, steps=None):
-        if self.pipeline_worker is not None and self.pipeline_worker.is_alive():
-            return
-
         self.btn_run.config(state="disabled")
         self.btn_run_minimal.config(state="disabled")
         self.progress["value"] = 0
@@ -1055,22 +1054,29 @@ class MainWindow(ThemeMixin):
         self.status_var.set("Starting pipeline…")
         logger.info("Starting pipeline for %d input(s)", len(self.pipeline.ctx.input_list))
 
-        self.queue = self.mp_context.Queue()
         run_spec = self._make_pipeline_run_spec(steps)
 
-        self.pipeline_worker = self.mp_context.Process(
-            target=pipeline_process_worker,
-            args=(run_spec, self.queue),
-            daemon=True,
-        )
-        self.pipeline_worker.start()
+        if self.pipeline_worker is None or not self.pipeline_worker.is_alive():
+            self.queue = self.mp_context.Queue()
+            self.pipeline_commands = self.mp_context.Queue()
+            self.pipeline_worker = self.mp_context.Process(
+                target=pipeline_process_worker,
+                args=(self.pipeline_commands, self.queue),
+                daemon=True,
+            )
+            self.pipeline_worker.start()
+
+        self.pipeline_commands.put(run_spec)
 
         self.root.after(100, self.check_queue)
 
     def _finish_pipeline_ui(self):
         self.btn_run.config(state="enabled")
         self.btn_run_minimal.config(state="enabled")
-        self.update_step_display()
+        # The authoritative runtime cache lives in the persistent child
+        # process.  Recomputing the display here from the UI process's empty
+        # Pipeline context would overwrite the green step_done/step_skipped
+        # states received from that child.
 
     def _terminate_pipeline_worker(self):
         worker = self.pipeline_worker
@@ -1087,6 +1093,7 @@ class MainWindow(ThemeMixin):
             worker.join(timeout=0)
 
         self.pipeline_worker = None
+        self.pipeline_commands = None
 
     def _drain_pipeline_queue(self):
         while True:
@@ -1206,6 +1213,7 @@ class MainWindow(ThemeMixin):
 
                 elif event == "step_start":
                     step_name, i, total = data
+                    self._validated_steps.discard(step_name)
                     step_ratio = i / total if total else 0
                     input_count = max(1, len(self.pipeline.ctx.input_list))
                     measure_ratio = self.measure_index / input_count
@@ -1215,6 +1223,7 @@ class MainWindow(ThemeMixin):
 
                 elif event == "step_done":
                     step_name, elapsed = data
+                    self._validated_steps.add(step_name)
                     self.update_step_color(step_name, "done")
 
                 elif event == "preview_image":
@@ -1223,6 +1232,7 @@ class MainWindow(ThemeMixin):
 
                 elif event == "step_skipped":
                     step_name = data[0]
+                    self._validated_steps.add(step_name)
                     self.update_step_color(step_name, "cached")
 
                 elif event == "pipeline_done":
@@ -1250,9 +1260,6 @@ class MainWindow(ThemeMixin):
                         )
 
                 elif event == "worker_done":
-                    if self.pipeline_worker is not None:
-                        self.pipeline_worker.join(timeout=0)
-                        self.pipeline_worker = None
                     self._finish_pipeline_ui()
 
                 elif event == "pipeline_failed":

@@ -3,6 +3,7 @@
 ## 1.7.4
 * GUI
     * Remove top menu bar
+* Restore steps caching following pipeline execution
 
 ## 1.7.3
 * Add HD and DV app versions in the h5
