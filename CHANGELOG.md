@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.7.4
+* Restore steps caching following pipeline execution
+
 ## 1.7.3
 * Add HD and DV app versions in the h5
 * Update UI
