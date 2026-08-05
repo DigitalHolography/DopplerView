@@ -137,8 +137,6 @@ class ThemeMixin:
         self._style_classic_widget_tree(self.root)
         if hasattr(self, "config_window") and self.config_window.winfo_exists():
             self._style_classic_widget_tree(self.config_window)
-        for menu in getattr(self, "_menus", []):
-            self._style_menu(menu)
 
     def _style_menu(self, menu: tk.Menu) -> None:
         try:
