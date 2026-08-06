@@ -3,6 +3,9 @@
 ## 1.8.0
 * Add unit tests for DAG engine execution, cache behavior and output worker
 * Ensure DAG determinism
+* Correct matplotlib backend issue in GUI
+* Save outputs even for cached steps
+* Refactorize OutputManager
 
 ## 1.7.4
 * GUI
