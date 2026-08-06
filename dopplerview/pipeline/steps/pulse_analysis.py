@@ -89,7 +89,7 @@ class PreArteryMaskStep(BaseStep):
 
 class ComputeTemporalCuesStep(BaseStep):
     requires = {"M0_ff_video", "pre_artery_mask", "choroidal_vessel_mask"}
-    produces = {"correlation", "diasys_image", "pre_arterial_pulse", "choroidal_pulse", "pre_arterial_pulse_filtered", "choroidal_pulse_filtered", "pre_arterial_pulse_cleaned", "pre_venous_pulse", "pre_venous_pulse_filtered", "M0_ff_image_cleaned", "beat_period", "systole_image", "diastole_image", "systole_index_list", "correlation_LF_M0_ff", "correlation_HF_M0_ff", "correlation_band_ratio_ff", "diasys_LF_M0_ff", "diasys_HF_M0_ff", "diasys_band_ratio_ff"}
+    produces = {"correlation_M0", "diasys_image", "pre_arterial_pulse", "choroidal_pulse", "pre_arterial_pulse_filtered", "choroidal_pulse_filtered", "pre_arterial_pulse_cleaned", "pre_venous_pulse", "pre_venous_pulse_filtered", "M0_ff_image_cleaned", "beat_period", "systole_image", "diastole_image", "systole_index_list", "correlation_LF_M0_ff", "correlation_HF_M0_ff", "correlation_band_ratio_ff", "diasys_LF_M0_ff", "diasys_HF_M0_ff", "diasys_band_ratio_ff"}
     name = "temporal_cues"
 
     def _relevant_config(self, ctx):
@@ -152,7 +152,7 @@ class ComputeTemporalCuesStep(BaseStep):
         # --- Compute correlation map with filtered pulses ---
 
         correlation_artery = signal_processing.compute_correlation(video_cleaned, arterial_pulse_cleaned)
-        ctx.set("correlation", correlation_artery)
+        ctx.set("correlation_M0", correlation_artery)
         ctx.output_manager.output("pulse_analysis", f"correlation map RGB", correlation_artery, "image", options={"blue_gray_red": True, "M0_ff_image": M0_ff_image_cleaned})
 
         LF_M0_ff = ctx.require("LF_M0_ff")

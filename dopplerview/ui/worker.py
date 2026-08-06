@@ -111,63 +111,80 @@ def _configure_child_process_logging(queue_out):
     handler.setFormatter(logging.Formatter("%(message)s"))
     root_logger.addHandler(handler)
 
-def pipeline_process_worker(run_spec, queue_out):
+def pipeline_process_worker(command_queue, queue_out):
     """
-    Run the heavy DopplerView pipeline in a child process.
+    Run GUI pipeline commands in a persistent child process.
 
     The Tk process must remain UI-only.  This isolates native crashes/hangs from
-    OpenCV, ONNXRuntime, PyTorch, h5py, etc. from Tkinter's event loop.
+    OpenCV, ONNXRuntime, PyTorch, h5py, etc. from Tkinter's event loop. Keeping
+    this process alive between runs also keeps the Pipeline context and its
+    runtime cache alive, just as the pre-multiprocessing GUI did.
     """
     _configure_child_process_logging(queue_out)
 
-    try:
-        h5_schema_path = run_spec["h5_schema_path"]
-        output_config_path = run_spec["output_config_path"]
-        models_config_path = run_spec["models_config_path"]
-        dopplerview_config_path = run_spec.get("dopplerview_config_path")
-        input_list = [Path(p) for p in run_spec["input_list"]]
-        targets = run_spec.get("steps")
-        selected_models = run_spec.get("selected_models", {})
-        config_mode = run_spec.get("config_mode", "default")
-        output_enabled = bool(run_spec.get("output_enabled", False))
+    pipeline = None
 
-        output_manager = OutputManager(
-            h5_schema_path,
-            output_config_path,
-            output_enabled=output_enabled,
-        )
-        pipeline = Pipeline(output_manager=output_manager)
-
-        pipeline.load_model_registry(models_config_path)
-        if dopplerview_config_path and Path(dopplerview_config_path).exists():
-            pipeline.load_dopplerview_config(dopplerview_config_path)
+    while True:
+        run_spec = command_queue.get()
+        if run_spec is None:
+            return
 
         try:
-            pipeline.set_config_mode(config_mode)
-        except Exception:
-            logger.exception("Failed to set pipeline config mode in worker")
+            h5_schema_path = run_spec["h5_schema_path"]
+            output_config_path = run_spec["output_config_path"]
+            models_config_path = run_spec["models_config_path"]
+            dopplerview_config_path = run_spec.get("dopplerview_config_path")
+            input_list = [Path(p) for p in run_spec["input_list"]]
+            targets = run_spec.get("steps")
+            selected_models = run_spec.get("selected_models", {})
+            config_mode = run_spec.get("config_mode", "default")
+            output_enabled = bool(run_spec.get("output_enabled", False))
 
-        for task_name, model_name in selected_models.items():
-            if model_name:
-                try:
-                    pipeline.ctx.change_model_for_task(task_name, model_name)
-                except Exception:
-                    logger.exception("Failed to select model %s for task %s", model_name, task_name)
+            if pipeline is None:
+                output_manager = OutputManager(
+                    h5_schema_path,
+                    output_config_path,
+                    output_enabled=output_enabled,
+                )
+                pipeline = Pipeline(output_manager=output_manager)
+            elif output_enabled:
+                pipeline.ctx.output_manager.enable_output()
+            else:
+                pipeline.ctx.output_manager.disable_output()
 
-        pipeline.ctx.clear_input_list()
-        pipeline.load_input_list_from_list(input_list)
+            pipeline.load_model_registry(models_config_path)
+            if dopplerview_config_path and Path(dopplerview_config_path).exists():
+                pipeline.load_dopplerview_config(dopplerview_config_path)
 
-        def callback(event, *args):
-            queue_out.put((event, args))
+            try:
+                pipeline.set_config_mode(config_mode)
+            except Exception:
+                logger.exception("Failed to set pipeline config mode in worker")
 
-            if event == "step_done" and args:
-                step_name = args[0]
-                preview = build_step_preview(pipeline, step_name)
-                if preview is not None:
-                    queue_out.put(("preview_image", (preview,)))
+            for task_name, model_name in selected_models.items():
+                if model_name:
+                    try:
+                        pipeline.ctx.change_model_for_task(task_name, model_name)
+                    except Exception:
+                        logger.exception("Failed to select model %s for task %s", model_name, task_name)
 
-        pipeline.run_batch(targets=targets, callback=callback)
-        queue_out.put(("worker_done", None))
+            # Updating the batch list must not clear the current measure's
+            # runtime cache. load_input_folder() will clear it itself when the
+            # next run actually switches to another measure.
+            pipeline.ctx.clear_input_list()
+            pipeline.load_input_list_from_list(input_list)
 
-    except BaseException:
-        queue_out.put(("error", traceback.format_exc()))
+            def callback(event, *args):
+                queue_out.put((event, args))
+
+                if event == "step_done" and args:
+                    step_name = args[0]
+                    preview = build_step_preview(pipeline, step_name)
+                    if preview is not None:
+                        queue_out.put(("preview_image", (preview,)))
+
+            pipeline.run_batch(targets=targets, callback=callback)
+            queue_out.put(("worker_done", None))
+
+        except BaseException:
+            queue_out.put(("error", traceback.format_exc()))

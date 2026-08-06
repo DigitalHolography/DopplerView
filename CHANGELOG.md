@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.7.4
+* GUI
+    * Remove top menu bar
+* Restore steps caching following pipeline execution
+
+## 1.7.3
+* Add HD and DV app versions in the h5
+* Update UI
+
+## 1.7.2
+* Update keys for moments reading
+
 ## 1.7.1
 * Update high frequency and low frequency band reading with the new naming convention *band_<band_nb>_<low_freq>_<high_freq>*, while keeping retro-compatibility
 

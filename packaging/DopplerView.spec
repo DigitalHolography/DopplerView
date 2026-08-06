@@ -80,6 +80,7 @@ hiddenimports = [
     "pandas",
     "yaml",
     "tqdm",
+    "psutil",
 ]
 
 hiddenimports += collect_submodules("scipy.stats")

@@ -80,6 +80,8 @@ class MainWindow(ThemeMixin):
         self._ui_log_queue = queue.Queue()
         self._ui_log_handler: logging.Handler | None = None
         self.pipeline_worker = None
+        self.pipeline_commands = None
+        self._validated_steps: set[str] = set()
         self.output_worker = None
         self.mp_context = multiprocessing.get_context("spawn")
         self.selected_models: dict[str, str] = {}
@@ -91,7 +93,6 @@ class MainWindow(ThemeMixin):
         self._height_before_logs: int | None = None
         self.config_mode_var = tk.StringVar(value="default")
         self.enable_debug_output = False
-        self._menus: list[tk.Menu] = []
 
         self._apply_theme()
         self._set_window_icon()
@@ -122,7 +123,6 @@ class MainWindow(ThemeMixin):
         self.root.minsize(720, 540)
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
-        self._build_menu()
 
         self.shell = ttk.Frame(self.root, padding=(12, 10, 12, 8))
         self.shell.grid(row=0, column=0, sticky="nsew")
@@ -145,120 +145,37 @@ class MainWindow(ThemeMixin):
         footer = ttk.Frame(self.shell)
         footer.grid(row=2, column=0, sticky="ew", pady=(8, 0))
         footer.columnconfigure(0, weight=1)
-        ttk.Label(footer, textvariable=self.status_var, style="Status.TLabel").grid(
-            row=0, column=0, sticky="w"
+
+        self.footer_theme_button = ttk.Button(
+            footer,
+            text="Light mode",
+            command=self._toggle_theme,
+            style="Toolbar.TButton",
         )
+        self.footer_theme_button.grid(row=0, column=1, padx=(8, 0))
+
+        self.footer_help_button = ttk.Button(
+            footer,
+            text="Help",
+            command=self.show_help,
+            style="Toolbar.TButton",
+        )
+        self.footer_help_button.grid(row=0, column=2, padx=(8, 0))
+
         self.footer_logs_button = ttk.Button(
             footer,
             text="Logs",
             command=self._toggle_logs_from_button,
             style="Toolbar.TButton",
         )
-        self.footer_logs_button.grid(row=0, column=1, padx=(8, 0))
+        self.footer_logs_button.grid(row=0, column=3, padx=(8, 0))
 
-    def _build_menu(self) -> None:
-        self._menus = []
-
-        menu_bar = tk.Menu(
-            self.root,
-            bg=self._surface_color,
-            fg=self._text_fg,
-            activebackground=self._select_color,
-            activeforeground=self._text_fg,
-            disabledforeground=self._disabled_fg,
+    def _toggle_theme(self) -> None:
+        new_theme = "light" if self.theme_var.get() == "dark" else "dark"
+        self.set_theme(new_theme)
+        self.footer_theme_button.configure(
+            text="Dark mode" if new_theme == "light" else "Light mode"
         )
-        self._menus.append(menu_bar)
-
-        view_menu = tk.Menu(
-            menu_bar,
-            tearoff=False,
-            bg=self._surface_color,
-            fg=self._text_fg,
-            activebackground=self._select_color,
-            activeforeground=self._text_fg,
-            disabledforeground=self._disabled_fg,
-            selectcolor=self._accent_color,
-        )
-        self._menus.append(view_menu)
-        view_menu.add_radiobutton(
-            label="Minimal UI",
-            value="minimal",
-            variable=self.ui_mode_var,
-            command=self.update_mode,
-        )
-        view_menu.add_radiobutton(
-            label="Advanced UI",
-            value="advanced",
-            variable=self.ui_mode_var,
-            command=self.update_mode,
-        )
-        menu_bar.add_cascade(label="View", menu=view_menu)
-
-        config_menu = tk.Menu(
-            menu_bar,
-            tearoff=False,
-            bg=self._surface_color,
-            fg=self._text_fg,
-            activebackground=self._select_color,
-            activeforeground=self._text_fg,
-            disabledforeground=self._disabled_fg,
-        )
-        self._menus.append(config_menu)
-        config_menu.add_command(label="Open Configuration", command=self.show_config)
-        config_menu.add_separator()
-        config_menu.add_command(label="Modify dopplerview config", command=self.modify_dopplerview_config)
-        config_menu.add_command(label="Modify models registry", command=self.modify_models_registry)
-        config_menu.add_command(label="Modify h5 schema", command=self.modify_h5_schema)
-        config_menu.add_command(label="Modify output config", command=self.modify_output_config)
-        menu_bar.add_cascade(label="Config", menu=config_menu)
-
-        theme_menu = tk.Menu(
-            menu_bar,
-            tearoff=False,
-            bg=self._surface_color,
-            fg=self._text_fg,
-            activebackground=self._select_color,
-            activeforeground=self._text_fg,
-            disabledforeground=self._disabled_fg,
-            selectcolor=self._accent_color,
-        )
-        self._menus.append(theme_menu)
-        theme_menu.add_radiobutton(
-            label="Light",
-            value="light",
-            variable=self.theme_var,
-            command=lambda: self.set_theme("light"),
-        )
-        theme_menu.add_radiobutton(
-            label="Dark",
-            value="dark",
-            variable=self.theme_var,
-            command=lambda: self.set_theme("dark"),
-        )
-        menu_bar.add_cascade(label="Theme", menu=theme_menu)
-
-        logs_menu = tk.Menu(
-            menu_bar,
-            tearoff=False,
-            bg=self._surface_color,
-            fg=self._text_fg,
-            activebackground=self._select_color,
-            activeforeground=self._text_fg,
-            disabledforeground=self._disabled_fg,
-        )
-        self._menus.append(logs_menu)
-        logs_menu.add_checkbutton(
-            label="Show logs",
-            variable=self.show_logs_var,
-            command=self.toggle_logs,
-        )
-        logs_menu.add_command(label="Open log file", command=self.open_log_file)
-        logs_menu.add_command(label="Clear view", command=self.clear_log_view)
-        menu_bar.add_cascade(label="Logs", menu=logs_menu)
-
-        menu_bar.add_command(label="Help", command=self.show_help)
-
-        self.root.configure(menu=menu_bar)
 
     def _build_minimal_ui(self):
         frame = self.minimal_frame
@@ -805,6 +722,7 @@ class MainWindow(ThemeMixin):
                 model_name = var.get()
                 self.selected_models[task_name] = model_name
                 ctx.change_model_for_task(task_name, model_name)
+                self._invalidate_step_colors(task_name)
 
             combo.bind("<<ComboboxSelected>>", on_change)
 
@@ -920,17 +838,15 @@ class MainWindow(ThemeMixin):
             style = "Step.TCheckbutton"
         cb.configure(style=style)
 
+    def _invalidate_step_colors(self, step):
+        affected = {step, *self.pipeline.get_downstream_steps(step)}
+        self._validated_steps.difference_update(affected)
+        self.update_step_display()
+
     def update_step_display(self):
-        pipeline = self.pipeline
-
-        selected = self.get_selected_steps()
-
-        # Steps that will actually run
-        pipeline.set_targets(selected)
-
         for step, cb in self.step_checkboxes.items():
             is_checked = self.step_vars[step].get()
-            is_cached = pipeline.is_cached(step)
+            is_cached = step in self._validated_steps
 
             # -------- label logic --------
             if is_checked:
@@ -950,6 +866,7 @@ class MainWindow(ThemeMixin):
         self.progress_minimal["value"] = 0
         self.progress_batch["value"] = 0
         self.pipeline.ctx.clear_input_list()
+        self._validated_steps.clear()
 
         if isinstance(folders, str):
             folder_list = [Path(f) for f in folders.split() if f]
@@ -1129,9 +1046,6 @@ class MainWindow(ThemeMixin):
         }
 
     def run_pipelines(self, steps=None):
-        if self.pipeline_worker is not None and self.pipeline_worker.is_alive():
-            return
-
         self.btn_run.config(state="disabled")
         self.btn_run_minimal.config(state="disabled")
         self.progress["value"] = 0
@@ -1140,22 +1054,29 @@ class MainWindow(ThemeMixin):
         self.status_var.set("Starting pipeline…")
         logger.info("Starting pipeline for %d input(s)", len(self.pipeline.ctx.input_list))
 
-        self.queue = self.mp_context.Queue()
         run_spec = self._make_pipeline_run_spec(steps)
 
-        self.pipeline_worker = self.mp_context.Process(
-            target=pipeline_process_worker,
-            args=(run_spec, self.queue),
-            daemon=True,
-        )
-        self.pipeline_worker.start()
+        if self.pipeline_worker is None or not self.pipeline_worker.is_alive():
+            self.queue = self.mp_context.Queue()
+            self.pipeline_commands = self.mp_context.Queue()
+            self.pipeline_worker = self.mp_context.Process(
+                target=pipeline_process_worker,
+                args=(self.pipeline_commands, self.queue),
+                daemon=True,
+            )
+            self.pipeline_worker.start()
+
+        self.pipeline_commands.put(run_spec)
 
         self.root.after(100, self.check_queue)
 
     def _finish_pipeline_ui(self):
         self.btn_run.config(state="enabled")
         self.btn_run_minimal.config(state="enabled")
-        self.update_step_display()
+        # The authoritative runtime cache lives in the persistent child
+        # process.  Recomputing the display here from the UI process's empty
+        # Pipeline context would overwrite the green step_done/step_skipped
+        # states received from that child.
 
     def _terminate_pipeline_worker(self):
         worker = self.pipeline_worker
@@ -1172,6 +1093,7 @@ class MainWindow(ThemeMixin):
             worker.join(timeout=0)
 
         self.pipeline_worker = None
+        self.pipeline_commands = None
 
     def _drain_pipeline_queue(self):
         while True:
@@ -1291,6 +1213,7 @@ class MainWindow(ThemeMixin):
 
                 elif event == "step_start":
                     step_name, i, total = data
+                    self._validated_steps.discard(step_name)
                     step_ratio = i / total if total else 0
                     input_count = max(1, len(self.pipeline.ctx.input_list))
                     measure_ratio = self.measure_index / input_count
@@ -1300,6 +1223,7 @@ class MainWindow(ThemeMixin):
 
                 elif event == "step_done":
                     step_name, elapsed = data
+                    self._validated_steps.add(step_name)
                     self.update_step_color(step_name, "done")
 
                 elif event == "preview_image":
@@ -1308,6 +1232,7 @@ class MainWindow(ThemeMixin):
 
                 elif event == "step_skipped":
                     step_name = data[0]
+                    self._validated_steps.add(step_name)
                     self.update_step_color(step_name, "cached")
 
                 elif event == "pipeline_done":
@@ -1335,9 +1260,6 @@ class MainWindow(ThemeMixin):
                         )
 
                 elif event == "worker_done":
-                    if self.pipeline_worker is not None:
-                        self.pipeline_worker.join(timeout=0)
-                        self.pipeline_worker = None
                     self._finish_pipeline_ui()
 
                 elif event == "pipeline_failed":
@@ -1493,7 +1415,7 @@ class MainWindow(ThemeMixin):
             "1. Load a .holo file, or drag-and-drop it into the application. You can also load a batch folder containing multiple .holo files, or a .txt file containing a list of paths to .holo files.\n"
             "2. In the Advanced tab, select which pipeline steps to run or run the full pipeline.\n"
             "3. View the results, including artery/vein segmentation overlays.\n"
-            "4. Open the Logs panel from the footer or Logs menu to follow processing details.\n\n"
+            "4. Open the Logs panel from the footer to follow processing details.\n\n"
             "For more information, visit our GitHub repository: https://github.com/DigitalHolography/DopplerView"
         )
         tk.messagebox.showinfo("Help - DopplerView", help_text)
