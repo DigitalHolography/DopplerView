@@ -202,6 +202,7 @@ class Context:
         if self.DV_folder is None:
             self.load_DV_folder()
 
+        self.output_manager.begin_run()
         self.output_manager.set_DV_folder(self.DV_folder)
         self.output_manager.set_dopplerview_config(self.dopplerview_config)
         self.output_manager.ensure_output_folder()  # Lazily create the output folder when we actually need to output something, to avoid creating empty output folders for runs that don't produce any outputs

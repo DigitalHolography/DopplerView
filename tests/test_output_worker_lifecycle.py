@@ -44,6 +44,38 @@ def test_close_flushes_accepted_output_work(bare_output_manager_factory):
     assert saved == [("first", "a", 1), ("second", "b", 2)]
 
 
+def test_each_run_gets_a_new_debug_output_folder(
+    bare_output_manager_factory, tmp_path
+):
+    manager = bare_output_manager_factory()
+    manager.output_enabled = True
+    manager.write_dopplerview_config = lambda: None
+    manager.write_version_file = lambda: None
+
+    class RunFolder:
+        def __init__(self):
+            self.index = -1
+
+        def create_output_folder(self):
+            self.index += 1
+            path = tmp_path / f"output_{self.index}"
+            path.mkdir()
+            return path
+
+    manager.dopplerview_folder = RunFolder()
+
+    manager.begin_run()
+    manager.ensure_output_folder()
+    first_output = manager.output_dir
+
+    manager.begin_run()
+    manager.ensure_output_folder()
+    second_output = manager.output_dir
+
+    assert first_output == tmp_path / "output_0"
+    assert second_output == tmp_path / "output_1"
+
+
 def test_shutdown_clears_worker_references(bare_output_manager_factory):
     manager = bare_output_manager_factory()
     manager.start()

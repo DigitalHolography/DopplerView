@@ -70,3 +70,33 @@ def test_debug_export_queues_cache_with_configuration_hash(fake_context_factory)
     assert ctx.output_manager.cached == [
         ("compute", step.config_fingerprint(ctx))
     ]
+
+
+def test_cached_upstream_step_exports_outputs_when_skipped(fake_context_factory):
+    source = make_step("source", {"input"}, {"cached_image"})
+    target = make_step("target", {"cached_image"}, {"result"})
+    engine = DAGEngine([source, target])
+    ctx = fake_context_factory(
+        {
+            "input": "source",
+            "cached_image": "cached pixels",
+            "result": "old result",
+        },
+        config={"threshold": 1},
+    )
+    ctx.metadata["step_hashes"] = {
+        source.name: source.config_fingerprint(ctx),
+        target.name: target.config_fingerprint(ctx),
+    }
+    events = []
+
+    # The target is deliberately re-run by current target semantics, while its
+    # valid cached dependency must still pass through the output manager.
+    engine.run(
+        ctx,
+        targets=["target"],
+        callback=lambda event, *args: events.append((event, args)),
+    )
+
+    assert ("step_skipped", ("source",)) in events
+    assert ("source", "cached_image") in ctx.output_manager.saved

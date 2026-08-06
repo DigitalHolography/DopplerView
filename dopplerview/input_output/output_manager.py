@@ -8,6 +8,7 @@ from dopplerview.input_output import h5_file
 from dopplerview._version import __version__
 import dopplerview.utils.json_utils as json_utils
 import dopplerview.input_output.output_renderer as output_renderer
+from dopplerview.utils.matplotlib_backend import serialized_render
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -228,6 +229,17 @@ class OutputManager:
     def set_dopplerview_config(self, config):
         self.dopplerview_config = config
 
+    def begin_run(self):
+        """Reset state whose lifetime is one pipeline run.
+
+        The DopplerView folder and canonical H5 destination are measure-scoped,
+        but diagnostic output directories are run-scoped. Reusing an
+        OutputManager must therefore never reuse ``output_dir``.
+        """
+        if self.running:
+            raise RuntimeError("Cannot begin a new output run while writers are active.")
+        self.close_output_folder()
+
     def set_DV_folder(self, DV_folder):
         self.dopplerview_folder = DV_folder
         self.h5_path = self.dopplerview_folder.get_h5_path()
@@ -373,6 +385,7 @@ class OutputManager:
 
         cv2.imwrite(str(path), img)
 
+    @serialized_render
     def save_clusterization(self, step_name, filename, labels, z):
         if not self.output_enabled:
             return

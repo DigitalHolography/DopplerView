@@ -1,8 +1,8 @@
 import imageio
 from dopplerview.utils.image_utils import normalize_to_uint8, save_numpy_as_avi, save_labeled_branches, normalize_image, lab_duo_image
+from dopplerview.utils.matplotlib_backend import serialized_render
 import matplotlib.pyplot as plt
 import numpy as np
-import matplotlib.pyplot as plt
 
 class OutputRenderer:
     def render(self, key, ctx, path, options=None):
@@ -20,6 +20,7 @@ class ImageRenderer(OutputRenderer):
             imageio.imwrite(path, normalize_to_uint8(ctx.get(key)))
 
 class SignalRenderer(OutputRenderer):
+    @serialized_render
     def render(self, key, ctx, path, options=None):
         plt.figure()
         plt.title(key)
@@ -48,6 +49,7 @@ class VideoRenderer(OutputRenderer):
         save_numpy_as_avi(ctx.get(key), path.with_suffix(".avi"))
 
 class OpticDiscRenderer(OutputRenderer):
+    @serialized_render
     def render(self, key, ctx, path, options=None):
         image = ctx.get("M0_ff_image")
         center = ctx.get("optic_disc_center")
@@ -83,6 +85,6 @@ class OpticDiscRenderer(OutputRenderer):
         plt.close()
 
 class LabeledMaskRenderer(OutputRenderer):
+    @serialized_render
     def render(self, key, ctx, path, options=None):
         save_labeled_branches(ctx.get(key), path)
-        plt.close()

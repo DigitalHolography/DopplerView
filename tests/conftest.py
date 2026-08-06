@@ -61,6 +61,7 @@ def bare_output_manager_factory():
         manager.cache_queue = queue.Queue()
         manager.output_worker = None
         manager.cache_worker = None
+        manager.output_dir = None
         return manager
 
     return factory

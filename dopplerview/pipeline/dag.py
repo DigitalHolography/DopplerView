@@ -474,7 +474,10 @@ class DAGEngine:
             return
 
         if not self._should_run(step, ctx):
-            logger.info(f"[DAG] Skipping (valid cache): '{step_name}'")
+            logger.info(
+                "[DAG] Skipping (valid cache): '%s'; exporting cached outputs",
+                step_name,
+            )
             if callback:
                 callback("step_skipped", step_name)
             step.export(ctx, debug_mode=self.debug_mode)
