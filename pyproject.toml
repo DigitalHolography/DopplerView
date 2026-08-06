@@ -29,7 +29,8 @@ dependencies = [
     "typer",
     "huggingface_hub",
     "tkinterdnd2",
-    "sv-ttk>=2.6.1"
+    "sv-ttk>=2.6.1",
+    "psutil"
 ]
 
 [project.optional-dependencies]
