@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.8.0
+* Add unit tests for DAG engine execution, cache behavior and output worker
+* Ensure DAG determinism
+
 ## 1.7.4
 * GUI
     * Remove top menu bar
