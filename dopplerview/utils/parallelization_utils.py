@@ -2,6 +2,11 @@ import joblib
 import numpy as np
 
 import logging
+from dopplerview.utils.runtime_metrics import (
+    available_cpu_count,
+    emit_metric,
+    process_snapshot,
+)
 logger = logging.getLogger(__name__)
 
 def _process_chunk(chunk, func):
@@ -31,9 +36,22 @@ def run_in_parallel(func, iterable, n_jobs=-1, chunking=True, task_name=None):
     Returns:
         The concatenated results of the function applied to each item in the iterable.
     """
+    requested_n_jobs = n_jobs
     n_jobs = compute_n_jobs(n_jobs)
     if chunking:
         n_jobs = min(n_jobs, len(iterable))
+
+    snapshot = process_snapshot()
+    emit_metric(
+        "parallel_operation",
+        task=task_name or getattr(func, "__name__", "anonymous"),
+        requested_workers=requested_n_jobs,
+        effective_workers=n_jobs,
+        available_cpus=available_cpu_count(),
+        items=len(iterable),
+        chunking=chunking,
+        process_threads=snapshot["process_threads"],
+    )
 
     if task_name is not None:
         logger.info(f"    - Running {task_name} in parallel with {n_jobs} jobs and chunking={chunking}")

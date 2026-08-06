@@ -1,23 +1,9 @@
 from __future__ import annotations
 
-import queue
 import pytest
 
-from dopplerview.input_output.output_manager import OutputManager
-
-
-def bare_output_manager():
-    manager = OutputManager.__new__(OutputManager)
-    manager.running = False
-    manager.output_queue = queue.Queue()
-    manager.cache_queue = queue.Queue()
-    manager.output_worker = None
-    manager.cache_worker = None
-    return manager
-
-
-def test_output_worker_starts_and_stops():
-    manager = bare_output_manager()
+def test_output_worker_starts_and_stops(bare_output_manager_factory):
+    manager = bare_output_manager_factory()
 
     manager.start()
     worker = manager.output_worker
@@ -32,8 +18,8 @@ def test_output_worker_starts_and_stops():
     strict=True,
     reason="close_workers currently leaves stale worker references behind.",
 )
-def test_shutdown_clears_worker_references():
-    manager = bare_output_manager()
+def test_shutdown_clears_worker_references(bare_output_manager_factory):
+    manager = bare_output_manager_factory()
     manager.start()
 
     manager.close_workers()
@@ -46,8 +32,8 @@ def test_shutdown_clears_worker_references():
     strict=True,
     reason="A stopped cache-worker reference prevents cache_async from restarting it.",
 )
-def test_cache_worker_can_restart_after_shutdown():
-    manager = bare_output_manager()
+def test_cache_worker_can_restart_after_shutdown(bare_output_manager_factory):
+    manager = bare_output_manager_factory()
 
     # Avoid HDF5 work: this worker only demonstrates the lifecycle contract.
     def cache_worker():

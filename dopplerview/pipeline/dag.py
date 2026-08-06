@@ -8,6 +8,11 @@ import time
 import logging
 
 from dopplerview.pipeline.step import BaseStep
+from dopplerview.utils.runtime_metrics import (
+    ProcessMemoryMeasurement,
+    available_cpu_count,
+    record_for_context,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -275,15 +280,37 @@ class DAGEngine:
         callback: Optional[Callable] = None,
     ) -> None:
         """Execute a single step, update hashes, and export outputs."""
-        start = time.time()
+        start = time.perf_counter()
+        memory = ProcessMemoryMeasurement().start()
+        status = "failed"
 
         if callback:
             callback("step_running", step.name)
 
-        step.run(ctx)
+        try:
+            step.run(ctx)
+            status = "success"
+        finally:
+            elapsed = time.perf_counter() - start
+            memory_values = memory.stop()
+            record_for_context(
+                ctx,
+                "step",
+                step=step.name,
+                status=status,
+                duration_s=elapsed,
+                available_cpus=available_cpu_count(),
+                **memory_values,
+            )
 
-        elapsed = time.time() - start
-        logger.info(f"[DAG] Finished '{step.name}' in {elapsed:.2f}s")
+        logger.info(
+            "[DAG] Finished '%s' in %.2fs (memory %.0f -> %.0f MB, peak %.0f MB)",
+            step.name,
+            elapsed,
+            memory_values["process_rss_start_mb"],
+            memory_values["process_rss_end_mb"],
+            memory_values["process_peak_rss_mb"],
+        )
 
         if callback:
             callback("step_done", step.name, elapsed)
@@ -332,8 +359,16 @@ class DAGEngine:
         completed = 0
         total = len(steps_to_run)
 
-        for wave in waves:
+        for wave_index, wave in enumerate(waves):
             if len(wave) == 1:
+                record_for_context(
+                    ctx,
+                    "dag_wave",
+                    wave=wave_index,
+                    ready_steps=len(wave),
+                    effective_workers=1,
+                    configured_workers=self.max_workers,
+                )
                 # Single step: run directly, no thread overhead
                 try:
                     self._execute_step_in_run(
@@ -347,6 +382,14 @@ class DAGEngine:
                 # Multiple independent steps: run in parallel
                 futures = {}
                 with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                    record_for_context(
+                        ctx,
+                        "dag_wave",
+                        wave=wave_index,
+                        ready_steps=len(wave),
+                        effective_workers=min(len(wave), executor._max_workers),
+                        configured_workers=self.max_workers,
+                    )
                     for step_name in wave:
                         future = executor.submit(
                             self._execute_step_in_run,

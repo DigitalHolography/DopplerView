@@ -15,6 +15,7 @@ import queue
 import threading
 
 import logging
+from dopplerview.utils.runtime_metrics import emit_metric
 logger = logging.getLogger(__name__)
 
 class OutputManager:
@@ -64,6 +65,12 @@ class OutputManager:
             daemon=True
         )
         self.output_worker.start()
+        emit_metric(
+            "output_workers",
+            action="start",
+            output_queue_depth=self.output_queue.qsize(),
+            cache_queue_depth=self.cache_queue.qsize(),
+        )
 
     def close_workers(self):
         if not self.running:
@@ -79,6 +86,12 @@ class OutputManager:
             self.cache_worker.join()
 
         self.running = False
+        emit_metric(
+            "output_workers",
+            action="stop",
+            output_queue_depth=self.output_queue.qsize(),
+            cache_queue_depth=self.cache_queue.qsize(),
+        )
 
     def _output_worker(self):
         while self.running:
@@ -286,7 +299,14 @@ class OutputManager:
         renderer.render("value", {"value": value}, path, options=options)
 
     def save_async(self, step_name, key, ctx):
-        self.output_queue.put((step_name, key, ctx)) 
+        self.output_queue.put((step_name, key, ctx))
+        emit_metric(
+            "output_queue",
+            action="enqueue",
+            step=step_name,
+            key=key,
+            queue_depth=self.output_queue.qsize(),
+        )
 
     def cache_async(self, ctx, step_fingerprint, step_name):
         """Save the 'produced' cache values to disk, using a worker thread. The h5 file is lazily created when the first value is saved."""
@@ -299,6 +319,12 @@ class OutputManager:
             os.makedirs(self.cache_path.parent, exist_ok=True)
             logger.info(f"[OutputManager] Saving cache to {self.cache_path}")
         self.cache_queue.put((ctx, step_fingerprint, step_name))
+        emit_metric(
+            "cache_queue",
+            action="enqueue",
+            step=step_name,
+            queue_depth=self.cache_queue.qsize(),
+        )
 
     def save(self, step_name, key, ctx):
         if ctx.get(key) is None:

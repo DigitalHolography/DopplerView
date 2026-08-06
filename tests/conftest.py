@@ -4,6 +4,10 @@ from typing import Any
 
 import pytest
 
+from dopplerview.input_output.output_manager import OutputManager
+
+import queue
+
 
 class RecordingOutputManager:
     """Small output-manager double used by DAG tests."""
@@ -46,3 +50,17 @@ class FakeContext:
 @pytest.fixture
 def fake_context_factory():
     return FakeContext
+
+
+@pytest.fixture
+def bare_output_manager_factory():
+    def factory():
+        manager = OutputManager.__new__(OutputManager)
+        manager.running = False
+        manager.output_queue = queue.Queue()
+        manager.cache_queue = queue.Queue()
+        manager.output_worker = None
+        manager.cache_worker = None
+        return manager
+
+    return factory

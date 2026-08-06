@@ -12,6 +12,11 @@ from dopplerview.pipeline.dag import DAGEngine
 from dopplerview.models.manager import ModelManager
 from dopplerview.input_output.output_manager import OutputManager
 from dopplerview.utils import json_utils
+from dopplerview.utils.runtime_metrics import (
+    RuntimeMetrics,
+    process_snapshot,
+    record_for_context,
+)
 
 from dopplerview.pipeline.steps.read_moments import ReadMomentsStep
 from dopplerview.pipeline.steps.preprocess import PreprocessStep
@@ -43,6 +48,7 @@ class Context:
         self.metadata = {
             "step_hashes": {}
         }
+        self.runtime_metrics = RuntimeMetrics()
         self.input_list = []
 
         self.measure_folder = None  # The measure folder containing the HD folder and the DV folder, set when loading input
@@ -363,9 +369,26 @@ class Pipeline:
         self.ctx.create_output_folder()
         self.ctx.start_output_manager()
 
-        start_time = time.time()
-        self.engine.run(self.ctx, targets, callback=callback)
-        elapsed = time.time() - start_time
+        start_time = time.perf_counter()
+        run_start = process_snapshot()
+        status = "failed"
+        try:
+            self.engine.run(self.ctx, targets, callback=callback)
+            status = "success"
+        finally:
+            elapsed = time.perf_counter() - start_time
+            run_end = process_snapshot()
+            record_for_context(
+                self.ctx,
+                "pipeline",
+                status=status,
+                duration_s=elapsed,
+                process_rss_start_mb=run_start["rss_mb"],
+                process_rss_end_mb=run_end["rss_mb"],
+                process_rss_delta_mb=run_end["rss_mb"] - run_start["rss_mb"],
+                process_threads_start=run_start["process_threads"],
+                process_threads_end=run_end["process_threads"],
+            )
         logger.info(f"[Pipeline] Finished execution in {elapsed:.2f}s")
 
         # # If in debug mode, save the entire cache to the H5 file after execution
@@ -376,6 +399,7 @@ class Pipeline:
         return self.ctx
 
     def run_batch(self, targets=None, callback=None):
+        batch_started = time.perf_counter()
         if callback:
             callback("batch_start", len(self.ctx.input_list))
 
@@ -423,5 +447,17 @@ class Pipeline:
 
         if callback:
             callback("batch_done", results)
+
+        succeeded = sum(result["status"] == "success" for result in results)
+        failed = len(results) - succeeded
+        metrics = getattr(self.ctx, "runtime_metrics", None)
+        if metrics is not None:
+            metrics.record(
+                "batch",
+                duration_s=time.perf_counter() - batch_started,
+                inputs=total,
+                succeeded=succeeded,
+                failed=failed,
+            )
 
         return results
