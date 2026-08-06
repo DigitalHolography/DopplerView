@@ -30,7 +30,8 @@ dependencies = [
     "huggingface_hub",
     "tkinterdnd2",
     "sv-ttk>=2.6.1",
-    "psutil"
+    "psutil",
+    "threadpoolctl"
 ]
 
 [project.optional-dependencies]

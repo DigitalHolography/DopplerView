@@ -52,10 +52,13 @@ class BaseStep(ABC):
 
     def _relevant_config(self, ctx):
         """
-        Override in steps if needed.
-        By default use entire config.
+        Override in steps if needed. Execution-only settings never participate
+        in scientific cache identity.
         """
-        return ctx.dopplerview_config
+        config = dict(ctx.dopplerview_config or {})
+        config.pop("Execution", None)
+        config.pop("NumberOfWorkers", None)  # legacy execution setting
+        return config
 
     def _input_signature(self, ctx):
         sig = {}

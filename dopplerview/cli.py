@@ -104,8 +104,11 @@ def main():
 
     targets = args.targets if args.targets else None
 
-    pipeline.load_input(input)
-    pipeline.run_batch(targets=targets)
+    try:
+        pipeline.load_input(input)
+        pipeline.run_batch(targets=targets)
+    finally:
+        pipeline.close()
 
     return 0
 

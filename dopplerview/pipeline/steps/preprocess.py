@@ -1,7 +1,7 @@
 from dopplerview.pipeline.step import BaseStep
 
 from dopplerview.preprocessing import normalization
-from dopplerview.utils import image_utils, parallelization_utils
+from dopplerview.utils import image_utils
 
 import numpy as np
 
@@ -14,31 +14,30 @@ class PreprocessStep(BaseStep):
 
     def _relevant_config(self, ctx):
         return {
-            "NumberOfWorkers": ctx.dopplerview_config.get("NumberOfWorkers", 0.5),
             "FlatFieldCorrection": {
                 "GWRatio": ctx.dopplerview_config.get("FlatFieldCorrection", {}).get("GWRatio", 0.07),
             }
         }
 
-    def normalize(self, gaussian_std, M0, M1, M2, HF_M0, LF_M0, n_jobs=-1):
+    def normalize(self, gaussian_std, M0, M1, M2, HF_M0, LF_M0, ctx):
         # Implement normalization logic based on self.dopplerview_config
         # self.logger.info(self.dopplerview_config)
 
         numx = M0.shape[2]
 
-        M0_ff_video = normalization.flat_field_correction_3d(M0, gaussian_std * numx, parallel=True, n_jobs=n_jobs) # TODO: add parameter for parallelization 
+        M0_ff_video = normalization.flat_field_correction_3d(M0, gaussian_std * numx, parallel=True, executor=ctx.parallel)
 
-        M1_ff_video = normalization.flat_field_correction_3d(M1, gaussian_std * numx, parallel=True, n_jobs=n_jobs) # TODO: add parameter for parallelization 
+        M1_ff_video = normalization.flat_field_correction_3d(M1, gaussian_std * numx, parallel=True, executor=ctx.parallel)
 
-        M2_ff_video = normalization.flat_field_correction_3d(M2, gaussian_std * numx, parallel=True, n_jobs=n_jobs) # TODO: add parameter for parallelization 
+        M2_ff_video = normalization.flat_field_correction_3d(M2, gaussian_std * numx, parallel=True, executor=ctx.parallel)
 
         if HF_M0 is None or LF_M0 is None:
             self.logger.warning("    - HF_M0 or LF_M0 is None. Skipping flat field correction for HF_M0 and LF_M0.")
             HF_M0_ff = None
             LF_M0_ff = None
         else:
-            HF_M0_ff = normalization.flat_field_correction_3d(HF_M0, gaussian_std * numx, parallel=True, n_jobs=n_jobs) # TODO: add parameter for parallelization 
-            LF_M0_ff = normalization.flat_field_correction_3d(LF_M0, gaussian_std * numx, parallel=True, n_jobs=n_jobs) # TODO: add parameter for parallelization 
+            HF_M0_ff = normalization.flat_field_correction_3d(HF_M0, gaussian_std * numx, parallel=True, executor=ctx.parallel)
+            LF_M0_ff = normalization.flat_field_correction_3d(LF_M0, gaussian_std * numx, parallel=True, executor=ctx.parallel)
 
         return M0_ff_video, M1_ff_video, M2_ff_video, HF_M0_ff, LF_M0_ff
     
@@ -64,9 +63,8 @@ class PreprocessStep(BaseStep):
 
         # Step 1: Normalize 
         gaussian_std = ctx.dopplerview_config.get("FlatFieldCorrection", {}).get("GWRatio", 0.07)
-        n_jobs = ctx.get_number_of_workers()
-        self.logger.info(f"    - Applying flat field correction to the moments with gaussian_std: {gaussian_std}, numx: {moment0.shape[2]}, n_jobs: {parallelization_utils.compute_n_jobs(n_jobs)}")
-        M0_ff_video, M1_ff_video, M2_ff_video, HF_M0_ff, LF_M0_ff = self.normalize(gaussian_std, moment0, moment1, moment2, HF_M0, LF_M0, n_jobs=n_jobs)
+        self.logger.info(f"    - Applying flat field correction to the moments with gaussian_std: {gaussian_std}, numx: {moment0.shape[2]}, workers: {ctx.parallel.max_workers}")
+        M0_ff_video, M1_ff_video, M2_ff_video, HF_M0_ff, LF_M0_ff = self.normalize(gaussian_std, moment0, moment1, moment2, HF_M0, LF_M0, ctx)
 
         # # Step 2: Resize
         # self.resize()

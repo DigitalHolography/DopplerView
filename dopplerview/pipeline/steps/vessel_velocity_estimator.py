@@ -3,9 +3,7 @@ import numpy as np
 from skimage.morphology import disk, dilation
 from skimage.restoration import inpaint
 from dopplerview.pipeline.step import BaseStep
-import joblib
 from dopplerview.segmentation.process_masks import elliptical_mask
-from dopplerview.utils.parallelization_utils import run_in_parallel
 from functools import partial
 
 class VesselVelocityEstimatorStep(BaseStep):
@@ -16,7 +14,6 @@ class VesselVelocityEstimatorStep(BaseStep):
     def _relevant_config(self, ctx):
         return {
             "LocalBackgroundDist": ctx.dopplerview_config.get("VelocityEstimation", {}).get("LocalBackgroundDist", 2),
-            "NumberOfWorkers": ctx.dopplerview_config.get("NumberOfWorkers", 0.5)
         }
 
     def run(self, ctx):
@@ -37,12 +34,15 @@ class VesselVelocityEstimatorStep(BaseStep):
         local_background_dist = ctx.dopplerview_config.get("VelocityEstimation", {}).get("LocalBackgroundDist", 2)
         mask = dilation(vessel_mask, disk(local_background_dist)) #TODO add parameter
 
-        n_jobs = ctx.get_number_of_workers()
-
         def _inpaint_frame(frame, mask):
             return inpaint.inpaint_biharmonic(frame, mask)
         
-        fRMSbkg = run_in_parallel(partial(_inpaint_frame, mask=mask), fRMS, n_jobs=n_jobs, chunking=False, task_name="fRMS inpainting")
+        fRMSbkg = ctx.parallel.map(
+            partial(_inpaint_frame, mask=mask),
+            fRMS,
+            chunking=False,
+            task_name="fRMS inpainting",
+        )
 
         # fRMSbkg = np.stack(np.array([inpaint.inpaint_biharmonic(frame, mask) for frame in fRMS]), axis=0)
 

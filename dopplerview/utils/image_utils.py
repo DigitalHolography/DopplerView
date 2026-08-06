@@ -10,7 +10,6 @@ import matplotlib.pyplot as plt
 import cv2
 from skimage.color import lab2rgb
 from skimage.restoration import inpaint
-from dopplerview.utils.parallelization_utils import run_in_parallel
 
 import logging
 logger = logging.getLogger(__name__)
@@ -250,7 +249,7 @@ def inpaint_frame(frame, mask):
 
     return inpainted_frame
 
-def inpaint_stack(stack, mask, n_jobs=-1, dilation_radius=0):
+def inpaint_stack(stack, mask, executor=None, dilation_radius=0):
     """
     Inpaint a stack of frames using biharmonic inpainting.
 
@@ -260,8 +259,8 @@ def inpaint_stack(stack, mask, n_jobs=-1, dilation_radius=0):
         3D array representing the stack of images to be inpainted (T, H, W).
     mask : ndarray
         2D boolean array where True indicates the pixels to be inpainted.
-    n_jobs : int
-        Number of parallel jobs to run.
+    executor : SharedExecutor, optional
+        Central pipeline executor. Without it, frames run sequentially.
     dilation_radius : int
         Radius for dilating the mask before inpainting.
 
@@ -278,9 +277,13 @@ def inpaint_stack(stack, mask, n_jobs=-1, dilation_radius=0):
     def _inpaint_frame(frame):
         return inpaint_frame(frame, mask)
 
-    if n_jobs == 1:
+    if executor is None:
         inpainted_stack = np.array([_inpaint_frame(frame) for frame in stack])
     else:
-        inpainted_stack = np.array(run_in_parallel(_inpaint_frame, stack, n_jobs=n_jobs))
+        inpainted_stack = executor.map(
+            _inpaint_frame,
+            stack,
+            task_name="stack inpainting",
+        )
 
     return inpainted_stack

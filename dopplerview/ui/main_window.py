@@ -596,6 +596,7 @@ class MainWindow(ThemeMixin):
     def _on_close(self) -> None:
         if self.pipeline_worker is not None:
             self._terminate_pipeline_worker()
+        self.pipeline.close()
         if self._ui_log_handler is not None:
             logging.getLogger().removeHandler(self._ui_log_handler)
             self._ui_log_handler.close()
@@ -1085,8 +1086,15 @@ class MainWindow(ThemeMixin):
             return
 
         if worker.is_alive():
-            worker.terminate()
+            if self.pipeline_commands is not None:
+                try:
+                    self.pipeline_commands.put(None)
+                except Exception:
+                    pass
             worker.join(timeout=2)
+            if worker.is_alive():
+                worker.terminate()
+                worker.join(timeout=2)
             if worker.is_alive() and hasattr(worker, "kill"):
                 worker.kill()
                 worker.join(timeout=2)

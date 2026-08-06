@@ -10,9 +10,13 @@ from typing import Any, Dict
 
 from dopplerview.pipeline.dag import DAGEngine
 from dopplerview.pipeline.execution_profile import ExecutionProfile
+from dopplerview.pipeline.execution_policy import ExecutionPolicy
 from dopplerview.models.manager import ModelManager
 from dopplerview.input_output.output_manager import OutputManager
 from dopplerview.utils import json_utils
+from dopplerview.utils.native_threads import configure_native_threads
+from dopplerview.utils.shared_executor import SharedExecutor
+from dopplerview.utils.cancellation import CancellationToken
 from dopplerview.utils.runtime_metrics import (
     RuntimeMetrics,
     process_snapshot,
@@ -58,6 +62,16 @@ class Context:
         self.output_manager = output_manager
         self.debug_mode = debug_mode
         self.execution_profile = ExecutionProfile.resolve(execution_profile)
+        self.execution_policy = ExecutionPolicy.from_config(
+            profile=self.execution_profile
+        )
+        self.cancellation = CancellationToken()
+        self.parallel = SharedExecutor(
+            self.execution_policy.cpu_workers,
+            self.execution_policy.available_cpus,
+            cancellation=self.cancellation,
+        )
+        configure_native_threads(self.execution_policy.native_threads_per_task)
         self.dopplerview_config = None
         self.dopplerview_config_path = None
         self.DV_config_mode = "local"
@@ -102,6 +116,7 @@ class Context:
     def load_dopplerview_config(self, config_path):
         self.dopplerview_config_path = config_path
         self.dopplerview_config = self.load_config(config_path)
+        self.configure_execution_policy()
         logger.info(f"[Pipeline] Using DopplerView config file: {config_path}")
     
     def load_holodoppler_config(self, config_path):
@@ -186,7 +201,11 @@ class Context:
     def get_model(self, model_name):
         if model_name not in self.model_instances:
             spec, path = self.model_manager.resolve(model_name)
-            model = ModelManager.build_model_wrapper(spec, path)
+            model = ModelManager.build_model_wrapper(
+                spec,
+                path,
+                execution_policy=self.execution_policy,
+            )
             self.model_instances[model_name] = model
 
         return self.model_instances[model_name]
@@ -268,9 +287,35 @@ class Context:
             return dict([(key, value) for key, (value, status) in self.__cache.items() if status == 'produced'])
 
     def get_number_of_workers(self, default=0.5):
-        """Resolve an operation's workers without mutating scientific config."""
-        configured = self.dopplerview_config.get("NumberOfWorkers", default)
-        return self.execution_profile.operation_workers(configured)
+        """Compatibility accessor for code not yet using ``ctx.parallel``."""
+        return self.execution_policy.cpu_workers
+
+    def configure_execution_policy(self):
+        policy = ExecutionPolicy.from_config(
+            self.dopplerview_config,
+            profile=self.execution_profile,
+        )
+        if policy == self.execution_policy:
+            return policy
+        old_executor = self.parallel
+        native_policy_changed = (
+            policy.native_threads_per_task
+            != self.execution_policy.native_threads_per_task
+        )
+        self.execution_policy = policy
+        self.parallel = SharedExecutor(
+            policy.cpu_workers,
+            policy.available_cpus,
+            cancellation=self.cancellation,
+        )
+        configure_native_threads(policy.native_threads_per_task)
+        old_executor.shutdown()
+        if native_policy_changed:
+            self.model_instances.clear()
+        return policy
+
+    def close(self):
+        self.parallel.shutdown()
     
     # def export_cache(self, filepath):
     #     cache = {}
@@ -325,7 +370,8 @@ class Pipeline:
     def set_execution_profile(self, profile):
         resolved = ExecutionProfile.resolve(profile)
         self.ctx.execution_profile = resolved
-        self.engine.max_workers = resolved.dag_max_workers
+        policy = self.ctx.configure_execution_policy()
+        self.engine.max_workers = policy.dag_concurrency
 
     def get_step_names(self):
         return self.engine.execution_order
@@ -398,12 +444,13 @@ class Pipeline:
             raise RuntimeError("Configuration not loaded. Please load a configuration file before running the pipeline.")
         
         self.ctx.ensure_config()
+        self.ctx.cancellation.reset()
+        policy = self.ctx.configure_execution_policy()
+        self.engine.max_workers = policy.dag_concurrency
 
         logger.info(
-            "[Pipeline] Execution profile: %s (DAG workers: %s, operation workers: %s)",
-            self.execution_profile.value,
-            self.engine.max_workers if self.engine.max_workers is not None else "automatic",
-            self.ctx.get_number_of_workers(),
+            "[Pipeline] Execution policy: %s",
+            policy.describe(),
         )
 
         self.ctx.create_output_folder()
@@ -515,3 +562,6 @@ class Pipeline:
             )
 
         return results
+
+    def close(self):
+        self.ctx.close()

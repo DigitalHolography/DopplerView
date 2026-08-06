@@ -148,7 +148,7 @@ class ChoroidalAVSegmentationStep(BaseStep):
         connected_arteries = process_masks.connect_components(
             pre_aliased_arteries,
             max_distance=5,
-            n_jobs=ctx.get_number_of_workers(),
+            executor=ctx.parallel,
         )  # Connect disconnected aliased arteries that are close to each other
         large_arteries = opening(connected_arteries, disk(2))
         anti_correlated_vessels = corr_M0 < -0.25

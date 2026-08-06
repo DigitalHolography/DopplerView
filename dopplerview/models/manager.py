@@ -46,11 +46,11 @@ class ModelManager:
         return model_name
     
     @staticmethod
-    def build_model_wrapper(spec, local_path):
+    def build_model_wrapper(spec, local_path, execution_policy=None):
         if spec.format == "pt":
-            return TorchModelWrapper(spec, local_path)
+            return TorchModelWrapper(spec, local_path, execution_policy=execution_policy)
 
         if spec.format == "onnx":
-            return ONNXModelWrapper(spec, local_path)
+            return ONNXModelWrapper(spec, local_path, execution_policy=execution_policy)
 
         raise ValueError(f"Unsupported model format: {spec.format}")

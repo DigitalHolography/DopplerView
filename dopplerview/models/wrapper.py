@@ -109,9 +109,16 @@ class BaseModelWrapper(ABC):
     def _forward(self, x):
         pass
 class TorchModelWrapper(BaseModelWrapper):
-    def __init__(self, spec, model_path, device=None):
+    def __init__(self, spec, model_path, device=None, execution_policy=None):
         import torch
         super().__init__(spec, model_path)
+
+        if execution_policy is not None:
+            torch.set_num_threads(execution_policy.native_threads_per_task)
+            try:
+                torch.set_num_interop_threads(1)
+            except RuntimeError:
+                pass
 
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -153,7 +160,7 @@ class TorchModelWrapper(BaseModelWrapper):
 
 
 class ONNXModelWrapper(BaseModelWrapper):
-    def __init__(self, spec, model_path):
+    def __init__(self, spec, model_path, execution_policy=None):
         import onnxruntime as ort
         super().__init__(spec, model_path)
 
@@ -163,7 +170,15 @@ class ONNXModelWrapper(BaseModelWrapper):
             else ["CPUExecutionProvider"]
         )
 
-        self.session = ort.InferenceSession(self.model_path, providers=providers)
+        session_options = ort.SessionOptions()
+        if execution_policy is not None:
+            session_options.intra_op_num_threads = execution_policy.native_threads_per_task
+            session_options.inter_op_num_threads = 1
+        self.session = ort.InferenceSession(
+            self.model_path,
+            sess_options=session_options,
+            providers=providers,
+        )
         self.input_name = self.session.get_inputs()[0].name
         emit_metric(
             "model_loaded",

@@ -35,6 +35,7 @@ def test_profile_can_be_selected_from_environment(monkeypatch):
 def test_sequential_profile_overrides_workers_without_mutating_config():
     ctx = Context(output_manager=None, execution_profile="sequential_reference")
     ctx.dopplerview_config = {"NumberOfWorkers": 0.75}
+    ctx.configure_execution_policy()
 
     assert ctx.get_number_of_workers() == 1
     assert ctx.dopplerview_config["NumberOfWorkers"] == 0.75
@@ -43,8 +44,9 @@ def test_sequential_profile_overrides_workers_without_mutating_config():
 def test_default_profile_preserves_configured_worker_value():
     ctx = Context(output_manager=None, execution_profile="default")
     ctx.dopplerview_config = {"NumberOfWorkers": -1}
+    ctx.configure_execution_policy()
 
-    assert ctx.get_number_of_workers() == -1
+    assert ctx.get_number_of_workers() == ctx.execution_policy.available_cpus
 
 
 def test_switching_pipeline_profile_updates_dag_limit():
