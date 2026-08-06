@@ -203,6 +203,7 @@ class Context:
             self.load_DV_folder()
 
         self.output_manager.set_DV_folder(self.DV_folder)
+        self.output_manager.begin_run()
         self.output_manager.set_dopplerview_config(self.dopplerview_config)
         self.output_manager.ensure_output_folder()  # Lazily create the output folder when we actually need to output something, to avoid creating empty output folders for runs that don't produce any outputs
         self.output_manager.write_app_versions(self.HD_folder.input_file)
@@ -212,6 +213,17 @@ class Context:
 
     def stop_output_manager(self):
         self.output_manager.close_workers()
+
+    def finish_output_manager(self, success):
+        try:
+            self.output_manager.close_workers()
+        except Exception:
+            self.output_manager.abort_run()
+            raise
+        if success:
+            self.output_manager.commit_run()
+        else:
+            self.output_manager.abort_run()
 
     def set(self, key: str, value: Any):
         with self.lock:
@@ -400,30 +412,44 @@ class Pipeline:
         start_time = time.perf_counter()
         run_start = process_snapshot()
         status = "failed"
+        execution_error = None
         try:
             self.engine.run(self.ctx, targets, callback=callback)
             status = "success"
+        except BaseException as error:
+            execution_error = error
+            raise
         finally:
-            elapsed = time.perf_counter() - start_time
-            run_end = process_snapshot()
-            record_for_context(
-                self.ctx,
-                "pipeline",
-                status=status,
-                duration_s=elapsed,
-                process_rss_start_mb=run_start["rss_mb"],
-                process_rss_end_mb=run_end["rss_mb"],
-                process_rss_delta_mb=run_end["rss_mb"] - run_start["rss_mb"],
-                process_threads_start=run_start["process_threads"],
-                process_threads_end=run_end["process_threads"],
-            )
+            try:
+                elapsed = time.perf_counter() - start_time
+                run_end = process_snapshot()
+                record_for_context(
+                    self.ctx,
+                    "pipeline",
+                    status=status,
+                    duration_s=elapsed,
+                    process_rss_start_mb=run_start["rss_mb"],
+                    process_rss_end_mb=run_end["rss_mb"],
+                    process_rss_delta_mb=run_end["rss_mb"] - run_start["rss_mb"],
+                    process_threads_start=run_start["process_threads"],
+                    process_threads_end=run_end["process_threads"],
+                )
+            finally:
+                try:
+                    self.ctx.finish_output_manager(success=status == "success")
+                except Exception:
+                    if execution_error is None:
+                        raise
+                    logger.exception(
+                        "[Pipeline] Output cleanup also failed; preserving the "
+                        "original execution error"
+                    )
         logger.info(f"[Pipeline] Finished execution in {elapsed:.2f}s")
 
         # # If in debug mode, save the entire cache to the H5 file after execution
         # if self.ctx.debug_mode:
         #     logger.info(f"[Pipeline] Saving cache to H5 file.")
         #     self.ctx.output_manager.save_cache(self.ctx)
-        self.ctx.stop_output_manager()
         return self.ctx
 
     def run_batch(self, targets=None, callback=None):

@@ -61,6 +61,13 @@ def bare_output_manager_factory():
         manager.cache_queue = queue.Queue()
         manager.output_worker = None
         manager.cache_worker = None
+        manager.output_dir = None
+        manager.output_config = {}
+        manager.renderers = {}
+        manager.final_h5_path = None
+        manager.temporary_h5_path = None
+        manager.h5_path = None
+        manager._worker_errors = []
         return manager
 
     return factory

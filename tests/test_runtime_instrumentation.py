@@ -115,10 +115,13 @@ def test_model_prediction_logs_backend_provider_and_phase_timings(caplog):
 
 def test_output_queue_logs_depth(bare_output_manager_factory, caplog):
     manager = bare_output_manager_factory()
+    manager.running = True
+    ctx = SimpleNamespace(get=lambda key: "value", has=lambda key: True)
 
     with caplog.at_level("DEBUG"):
-        manager.save_async("step", "artifact", object())
+        manager.save_async("step", "artifact", ctx)
 
     messages = metric_records(caplog, "output_queue")
     assert len(messages) == 1
     assert "queue_depth=1" in messages[0]
+    manager.close_workers()

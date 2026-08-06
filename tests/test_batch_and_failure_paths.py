@@ -69,24 +69,24 @@ def test_batch_continues_after_one_input_fails():
     assert events[-1][0] == "batch_done"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Pipeline.run does not stop output workers in a finally block yet.",
-)
 def test_pipeline_stops_output_manager_when_engine_fails():
     calls = []
 
     class FailingEngine:
+        max_workers = 1
+
         def run(self, ctx, targets, callback=None):
             raise RuntimeError("step failed")
 
     ctx = SimpleNamespace(
         dopplerview_config={"configured": True},
+        execution_profile=SimpleNamespace(value="default"),
         has=lambda key: key == "input_file",
+        get_number_of_workers=lambda: 1,
         ensure_config=lambda: calls.append("ensure_config"),
         create_output_folder=lambda: calls.append("create_output_folder"),
         start_output_manager=lambda: calls.append("start"),
-        stop_output_manager=lambda: calls.append("stop"),
+        finish_output_manager=lambda success: calls.append(("finish", success)),
     )
     pipeline = Pipeline.__new__(Pipeline)
     pipeline.ctx = ctx
@@ -95,4 +95,32 @@ def test_pipeline_stops_output_manager_when_engine_fails():
     with pytest.raises(RuntimeError, match="step failed"):
         pipeline.run()
 
-    assert calls[-1] == "stop"
+    assert calls[-1] == ("finish", False)
+
+
+def test_pipeline_preserves_execution_error_when_cleanup_also_fails():
+    class FailingEngine:
+        max_workers = 1
+
+        def run(self, ctx, targets, callback=None):
+            raise RuntimeError("step failed")
+
+    def fail_cleanup():
+        raise OSError("cleanup failed")
+
+    ctx = SimpleNamespace(
+        dopplerview_config={"configured": True},
+        execution_profile=SimpleNamespace(value="default"),
+        has=lambda key: key == "input_file",
+        get_number_of_workers=lambda: 1,
+        ensure_config=lambda: None,
+        create_output_folder=lambda: None,
+        start_output_manager=lambda: None,
+        finish_output_manager=lambda success: fail_cleanup(),
+    )
+    pipeline = Pipeline.__new__(Pipeline)
+    pipeline.ctx = ctx
+    pipeline.engine = FailingEngine()
+
+    with pytest.raises(RuntimeError, match="step failed"):
+        pipeline.run()

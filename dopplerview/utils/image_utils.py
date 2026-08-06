@@ -5,6 +5,7 @@ Utils for handling images, such as loading, saving, and preprocessing.
 import numpy as np
 from PIL import Image
 from skimage.measure import regionprops
+from dopplerview.utils.matplotlib_backend import serialized_render
 import matplotlib.pyplot as plt
 import cv2
 from skimage.color import lab2rgb
@@ -63,6 +64,7 @@ def normalize_to_uint8(arr):
     norm = (arr - arr_min) / (arr_max - arr_min + 1e-8)
     return (norm * 255).astype(np.uint8)
 
+@serialized_render
 def save_bounding_box(image, x_center, y_center, diameter_x, diameter_y, output_path):
     plt.figure(figsize=(6, 6))
     if image.ndim == 3 and image.shape[0] == 3:
@@ -94,6 +96,7 @@ def save_bounding_box(image, x_center, y_center, diameter_x, diameter_y, output_
     plt.savefig(output_path)
     plt.close()
 
+@serialized_render
 def save_labeled_branches(label_mask, output_path):
     """
     Display a labeled mask with the label ID written on each branch.

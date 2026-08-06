@@ -71,7 +71,11 @@ class BaseStep(ABC):
     
     def export(self, ctx, debug_mode=False):
         """
-        Export step outputs using the output manager.
+        Export available step outputs using the output manager.
+
+        This is intentionally called for both freshly executed and cache-hit
+        steps. Canonical H5 values and optional diagnostic figures must not
+        depend on whether the computation itself was skipped.
         """
         for key in self.produces:
             if ctx.has(key):
