@@ -38,6 +38,9 @@ ui = [
     "streamlit",
     "tkinterdnd2",
 ]
+test = [
+    "pytest>=8",
+]
 
 [project.scripts]
 dopplerview = "dopplerview.cli:main"
@@ -48,3 +51,8 @@ include = ["dopplerview*"]
 
 [tool.setuptools.package-data]
 dopplerview = ["resources/*.json", "resources/*.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"
