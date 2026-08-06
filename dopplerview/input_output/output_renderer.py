@@ -5,6 +5,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 class OutputRenderer:
+    def required_keys(self, key):
+        return {key}
+
     def render(self, key, ctx, path, options=None):
         raise NotImplementedError
     
@@ -49,6 +52,15 @@ class VideoRenderer(OutputRenderer):
         save_numpy_as_avi(ctx.get(key), path.with_suffix(".avi"))
 
 class OpticDiscRenderer(OutputRenderer):
+    def required_keys(self, key):
+        return {
+            key,
+            "M0_ff_image",
+            "optic_disc_center",
+            "optic_disc_width",
+            "optic_disc_height",
+        }
+
     @serialized_render
     def render(self, key, ctx, path, options=None):
         image = ctx.get("M0_ff_image")

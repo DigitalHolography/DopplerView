@@ -1,6 +1,8 @@
 import json
 import os
 from pathlib import Path
+from types import MappingProxyType
+import uuid
 
 import cv2
 import h5py
@@ -8,6 +10,11 @@ from dopplerview.input_output import h5_file
 from dopplerview._version import __version__
 import dopplerview.utils.json_utils as json_utils
 import dopplerview.input_output.output_renderer as output_renderer
+from dopplerview.input_output.output_payload import (
+    CachePayload,
+    OutputPayload,
+    freeze_value,
+)
 from dopplerview.utils.matplotlib_backend import serialized_render
 import matplotlib.pyplot as plt
 import numpy as np
@@ -51,6 +58,10 @@ class OutputManager:
         self.cache_worker = None
 
         self.output_enabled = output_enabled
+        self.final_h5_path = None
+        self.temporary_h5_path = None
+        self.h5_path = None
+        self._worker_errors = []
 
     def __del__(self):
         try:
@@ -84,9 +95,9 @@ class OutputManager:
         # Stop messages are queued behind pending work, so join() also flushes
         # every item accepted before shutdown. Never poison an unstarted queue.
         if output_worker is not None and output_worker.is_alive():
-            self.output_queue.put((None, None, None))
+            self.output_queue.put(None)
         if cache_worker is not None and cache_worker.is_alive():
-            self.cache_queue.put((None, None, None))
+            self.cache_queue.put(None)
 
         if output_worker is not None and output_worker.is_alive():
             output_worker.join()
@@ -102,28 +113,40 @@ class OutputManager:
             output_queue_depth=self.output_queue.qsize(),
             cache_queue_depth=self.cache_queue.qsize(),
         )
+        if self._worker_errors:
+            error = self._worker_errors[0]
+            self._worker_errors.clear()
+            raise RuntimeError("Asynchronous output persistence failed.") from error
 
     def _output_worker(self):
         while True:
-            step_name, key, ctx = self.output_queue.get()
-            if step_name is None and key is None and ctx is None:
+            payload = self.output_queue.get()
+            if payload is None:
                 self.output_queue.task_done()
                 break
             try:
-                self.save(step_name, key, ctx)
+                self.save(payload)
             except Exception as e:
-                logger.exception(f"Error saving output for step '{step_name}' and key '{key}': {e}")
+                self._worker_errors.append(e)
+                logger.exception(
+                    "Error saving output for step '%s' and key '%s': %s",
+                    payload.step_name,
+                    payload.key,
+                    e,
+                )
             self.output_queue.task_done()
 
     def _cache_worker(self):
         """Worker thread that saves the cache to disk asynchronously. It listens on the cache_queue for contexts to save, and calls save_cache on them.
         """
         while True:
-            ctx, step_fingerprint, step_name = self.cache_queue.get()
-            if ctx is None:
+            payload = self.cache_queue.get()
+            if payload is None:
                 self.cache_queue.task_done()
                 break
             try:
+                step_name = payload.step_name
+                step_fingerprint = payload.fingerprint
                 # We use the step fingerprint to determine if we need to overwrite the existing cache values for this step or not. If the fingerprint is the same as the one already saved in the h5 file, it means that the configuration and the input for this step haven't changed since the last run, so we can keep the existing cache values. If the fingerprint is different, it means that something has changed since the last run, so we need to overwrite the existing cache values with the new ones.
                 overwrite = False
                 # Save the fingerprint of the step, to re-run the step if the configuration and/or the input change in the future
@@ -146,12 +169,16 @@ class OutputManager:
                     if overwrite:    
                         h5["metadata"]["step_hashes"].create_dataset(step_name, data=step_fingerprint, dtype=h5py.string_dtype())
                 # Get the produced values from the context and save them to the h5 file.
-                produced_cache = ctx.get_produced_values()
-                h5_file.write_dict_to_h5(produced_cache, self.cache_path, overwrite=overwrite)
-                ctx.cache_values(produced_cache.keys())
+                h5_file.write_dict_to_h5(payload.values, self.cache_path, overwrite=overwrite)
 
             except Exception as e:
-                logger.exception(f"Error saving cache: {e} for step '{step_name}' with fingerprint '{step_fingerprint}'")
+                self._worker_errors.append(e)
+                logger.exception(
+                    "Error saving cache: %s for step '%s' with fingerprint '%s'",
+                    e,
+                    payload.step_name,
+                    payload.fingerprint,
+                )
             self.cache_queue.task_done()
 
     def load_h5_schema(self, schema_path):
@@ -164,7 +191,7 @@ class OutputManager:
         logger.info(f"[OutputManager] Loading output configuration from {output_config_path}")
         return output_config
 
-    def save_h5(self, key, ctx):
+    def save_h5(self, key, value):
         """Saves a value from the cache to the H5 file based on the provided schema."""
         if key not in self.schema:
             return
@@ -177,7 +204,6 @@ class OutputManager:
             if path in h5:
                 del h5[path]
 
-            value = ctx.get(key)
             h5.create_dataset(path, data=value)
 
     def write_app_versions(self, input_h5_path):
@@ -238,20 +264,55 @@ class OutputManager:
         """
         if self.running:
             raise RuntimeError("Cannot begin a new output run while writers are active.")
+        if getattr(self, "final_h5_path", None) is None:
+            raise RuntimeError("DopplerView folder is not set. Cannot begin output run.")
+        self.abort_run()
+        self._worker_errors.clear()
         self.close_output_folder()
+        temporary_name = (
+            f".{self.final_h5_path.name}.{uuid.uuid4().hex}.tmp"
+        )
+        self.temporary_h5_path = self.final_h5_path.with_name(temporary_name)
+        self.h5_path = self.temporary_h5_path
+        with h5py.File(self.h5_path, "w"):
+            pass
+
+    def commit_run(self):
+        """Atomically publish the completed temporary H5 result."""
+        if self.running:
+            raise RuntimeError("Cannot commit output while writers are active.")
+        temporary = getattr(self, "temporary_h5_path", None)
+        if temporary is None:
+            return
+        os.replace(temporary, self.final_h5_path)
+        self.temporary_h5_path = None
+        self.h5_path = self.final_h5_path
+        logger.info("[OutputManager] Published result H5: %s", self.final_h5_path)
+
+    def abort_run(self):
+        """Discard an unpublished run while preserving the last good result."""
+        temporary = getattr(self, "temporary_h5_path", None)
+        if temporary is not None and Path(temporary).exists():
+            Path(temporary).unlink()
+        self.temporary_h5_path = None
+        if getattr(self, "final_h5_path", None) is not None:
+            self.h5_path = self.final_h5_path
 
     def set_DV_folder(self, DV_folder):
+        self.abort_run()
         self.dopplerview_folder = DV_folder
-        self.h5_path = self.dopplerview_folder.get_h5_path()
-        # Create an empty H5 file if it doesn't exist, and overwrite it if it does (to ensure a clean slate for each run)
-        with h5py.File(self.h5_path, "w") as h5:
-            pass
+        self.final_h5_path = self.dopplerview_folder.get_h5_path()
+        self.h5_path = self.final_h5_path
+        self.temporary_h5_path = None
         cache_dir = Path(os.path.expanduser("~/.cache/dopplerview/cache")) / self.dopplerview_folder.measure_name
         self.cache_path = cache_dir / "cache.h5"
 
     def unset_DV_folder(self):
+        self.abort_run()
         self.close_output_folder()
         self.dopplerview_folder = None
+        self.final_h5_path = None
+        self.temporary_h5_path = None
         self.h5_path = None
         self.cache_path = None
 
@@ -270,8 +331,11 @@ class OutputManager:
     def close_output_folder(self):
         self.output_dir = None
 
-    def output_cache(self, step_name, key, ctx, type=None):
+    def output_cache(self, payload, type=None):
         """Outputs a value from the cache for debugging purposes based on the provided output configuration."""
+        step_name = payload.step_name
+        key = payload.key
+        ctx = payload
         if key not in self.output_config or not ctx.has(key):
             return
         
@@ -321,10 +385,25 @@ class OutputManager:
 
         renderer.render("value", {"value": value}, path, options=options)
 
+    def _build_output_payload(self, step_name, key, ctx):
+        renderer = self.renderers.get(self.output_config.get(key))
+        required_keys = renderer.required_keys(key) if renderer is not None else {key}
+        rendering_values = {
+            required_key: freeze_value(ctx.get(required_key))
+            for required_key in required_keys
+            if required_key != key and ctx.has(required_key)
+        }
+        return OutputPayload(
+            step_name=step_name,
+            key=key,
+            value=freeze_value(ctx.get(key)),
+            rendering_values=MappingProxyType(rendering_values),
+        )
+
     def save_async(self, step_name, key, ctx):
         if not self.running:
             raise RuntimeError("Output manager is not running.")
-        self.output_queue.put((step_name, key, ctx))
+        self.output_queue.put(self._build_output_payload(step_name, key, ctx))
         emit_metric(
             "output_queue",
             action="enqueue",
@@ -346,7 +425,18 @@ class OutputManager:
             self.cache_worker.start()
             os.makedirs(self.cache_path.parent, exist_ok=True)
             logger.info(f"[OutputManager] Saving cache to {self.cache_path}")
-        self.cache_queue.put((ctx, step_fingerprint, step_name))
+        produced_cache = {
+            key: freeze_value(value)
+            for key, value in ctx.get_produced_values().items()
+        }
+        ctx.cache_values(produced_cache.keys())
+        self.cache_queue.put(
+            CachePayload(
+                step_name=step_name,
+                fingerprint=step_fingerprint,
+                values=MappingProxyType(produced_cache),
+            )
+        )
         emit_metric(
             "cache_queue",
             action="enqueue",
@@ -354,13 +444,13 @@ class OutputManager:
             queue_depth=self.cache_queue.qsize(),
         )
 
-    def save(self, step_name, key, ctx):
-        if ctx.get(key) is None:
-            logger.warning(f"Value for key '{key}' is None, skipping save.")
+    def save(self, payload):
+        if payload.value is None:
+            logger.warning(f"Value for key '{payload.key}' is None, skipping save.")
             return
-        self.save_h5(key, ctx)
+        self.save_h5(payload.key, payload.value)
         if self.output_enabled:
-            self.output_cache(step_name, key, ctx)
+            self.output_cache(payload)
 
     def enable_output(self):
         self.output_enabled = True

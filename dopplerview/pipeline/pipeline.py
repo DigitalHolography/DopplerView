@@ -202,8 +202,8 @@ class Context:
         if self.DV_folder is None:
             self.load_DV_folder()
 
-        self.output_manager.begin_run()
         self.output_manager.set_DV_folder(self.DV_folder)
+        self.output_manager.begin_run()
         self.output_manager.set_dopplerview_config(self.dopplerview_config)
         self.output_manager.ensure_output_folder()  # Lazily create the output folder when we actually need to output something, to avoid creating empty output folders for runs that don't produce any outputs
         self.output_manager.write_app_versions(self.HD_folder.input_file)
@@ -213,6 +213,17 @@ class Context:
 
     def stop_output_manager(self):
         self.output_manager.close_workers()
+
+    def finish_output_manager(self, success):
+        try:
+            self.output_manager.close_workers()
+        except Exception:
+            self.output_manager.abort_run()
+            raise
+        if success:
+            self.output_manager.commit_run()
+        else:
+            self.output_manager.abort_run()
 
     def set(self, key: str, value: Any):
         with self.lock:
@@ -425,7 +436,7 @@ class Pipeline:
                 )
             finally:
                 try:
-                    self.ctx.stop_output_manager()
+                    self.ctx.finish_output_manager(success=status == "success")
                 except Exception:
                     if execution_error is None:
                         raise

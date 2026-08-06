@@ -34,14 +34,27 @@ def test_output_worker_can_restart_and_close_is_idempotent(
 def test_close_flushes_accepted_output_work(bare_output_manager_factory):
     manager = bare_output_manager_factory()
     saved = []
-    manager.save = lambda step, key, ctx: saved.append((step, key, ctx))
+    manager.save = lambda payload: saved.append(payload)
     manager.start()
 
-    manager.save_async("first", "a", 1)
-    manager.save_async("second", "b", 2)
+    class Context:
+        def __init__(self, value):
+            self.value = value
+
+        def get(self, key):
+            return self.value
+
+        def has(self, key):
+            return True
+
+    manager.save_async("first", "a", Context(1))
+    manager.save_async("second", "b", Context(2))
     manager.close_workers()
 
-    assert saved == [("first", "a", 1), ("second", "b", 2)]
+    assert [(item.step_name, item.key, item.value) for item in saved] == [
+        ("first", "a", 1),
+        ("second", "b", 2),
+    ]
 
 
 def test_each_run_gets_a_new_debug_output_folder(
@@ -55,6 +68,10 @@ def test_each_run_gets_a_new_debug_output_folder(
     class RunFolder:
         def __init__(self):
             self.index = -1
+            self.measure_name = "measure"
+
+        def get_h5_path(self):
+            return tmp_path / "measure_DV.h5"
 
         def create_output_folder(self):
             self.index += 1
@@ -62,7 +79,7 @@ def test_each_run_gets_a_new_debug_output_folder(
             path.mkdir()
             return path
 
-    manager.dopplerview_folder = RunFolder()
+    manager.set_DV_folder(RunFolder())
 
     manager.begin_run()
     manager.ensure_output_folder()
@@ -95,7 +112,7 @@ def test_cache_worker_can_restart_after_shutdown(
     def cache_worker():
         while True:
             item = manager.cache_queue.get()
-            if item == (None, None, None):
+            if item is None:
                 manager.cache_queue.task_done()
                 return
             manager.cache_queue.task_done()
@@ -104,13 +121,21 @@ def test_cache_worker_can_restart_after_shutdown(
 
     manager._cache_worker = cache_worker
     manager.cache_path = tmp_path / "cache.h5"
+    class Context:
+        def get_produced_values(self):
+            return {}
+
+        def cache_values(self, keys):
+            pass
+
+    ctx = Context()
     manager.start()
-    manager.cache_async(object(), "hash", "step")
+    manager.cache_async(ctx, "hash", "step")
     manager.close_workers()
 
     manager.start()
     try:
-        manager.cache_async(object(), "hash", "step")
+        manager.cache_async(ctx, "hash", "step")
         assert manager.cache_worker.is_alive()
     finally:
         manager.close_workers()
