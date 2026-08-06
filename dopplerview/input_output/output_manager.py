@@ -52,16 +52,20 @@ class OutputManager:
         self.output_enabled = output_enabled
 
     def __del__(self):
-        self.close_workers()
+        try:
+            self.close_workers()
+        except Exception:
+            # Destructors must not surface errors during interpreter shutdown.
+            pass
 
     def start(self):
-        if self.running:
+        if self.running and self.output_worker is not None and self.output_worker.is_alive():
             return
 
         self.running = True
-
         self.output_worker = threading.Thread(
             target=self._output_worker,
+            name="dopplerview-output-writer",
             daemon=True
         )
         self.output_worker.start()
@@ -73,18 +77,23 @@ class OutputManager:
         )
 
     def close_workers(self):
-        if not self.running:
-            return
+        output_worker = getattr(self, "output_worker", None)
+        cache_worker = getattr(self, "cache_worker", None)
 
-        self.output_queue.put((None, None, None))
-        self.cache_queue.put((None, None, None))
+        # Stop messages are queued behind pending work, so join() also flushes
+        # every item accepted before shutdown. Never poison an unstarted queue.
+        if output_worker is not None and output_worker.is_alive():
+            self.output_queue.put((None, None, None))
+        if cache_worker is not None and cache_worker.is_alive():
+            self.cache_queue.put((None, None, None))
 
-        if self.output_worker is not None:
-            self.output_worker.join()
+        if output_worker is not None and output_worker.is_alive():
+            output_worker.join()
+        if cache_worker is not None and cache_worker.is_alive():
+            cache_worker.join()
 
-        if self.cache_worker is not None:
-            self.cache_worker.join()
-
+        self.output_worker = None
+        self.cache_worker = None
         self.running = False
         emit_metric(
             "output_workers",
@@ -94,9 +103,10 @@ class OutputManager:
         )
 
     def _output_worker(self):
-        while self.running:
+        while True:
             step_name, key, ctx = self.output_queue.get()
             if step_name is None and key is None and ctx is None:
+                self.output_queue.task_done()
                 break
             try:
                 self.save(step_name, key, ctx)
@@ -107,9 +117,10 @@ class OutputManager:
     def _cache_worker(self):
         """Worker thread that saves the cache to disk asynchronously. It listens on the cache_queue for contexts to save, and calls save_cache on them.
         """
-        while self.running:
+        while True:
             ctx, step_fingerprint, step_name = self.cache_queue.get()
             if ctx is None:
+                self.cache_queue.task_done()
                 break
             try:
                 # We use the step fingerprint to determine if we need to overwrite the existing cache values for this step or not. If the fingerprint is the same as the one already saved in the h5 file, it means that the configuration and the input for this step haven't changed since the last run, so we can keep the existing cache values. If the fingerprint is different, it means that something has changed since the last run, so we need to overwrite the existing cache values with the new ones.
@@ -299,6 +310,8 @@ class OutputManager:
         renderer.render("value", {"value": value}, path, options=options)
 
     def save_async(self, step_name, key, ctx):
+        if not self.running:
+            raise RuntimeError("Output manager is not running.")
         self.output_queue.put((step_name, key, ctx))
         emit_metric(
             "output_queue",
@@ -310,9 +323,12 @@ class OutputManager:
 
     def cache_async(self, ctx, step_fingerprint, step_name):
         """Save the 'produced' cache values to disk, using a worker thread. The h5 file is lazily created when the first value is saved."""
-        if self.cache_worker is None:
+        if not self.running:
+            raise RuntimeError("Output manager is not running.")
+        if self.cache_worker is None or not self.cache_worker.is_alive():
             self.cache_worker = threading.Thread(
                 target=self._cache_worker,
+                name="dopplerview-cache-writer",
                 daemon=True
             )
             self.cache_worker.start()

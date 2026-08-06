@@ -400,30 +400,44 @@ class Pipeline:
         start_time = time.perf_counter()
         run_start = process_snapshot()
         status = "failed"
+        execution_error = None
         try:
             self.engine.run(self.ctx, targets, callback=callback)
             status = "success"
+        except BaseException as error:
+            execution_error = error
+            raise
         finally:
-            elapsed = time.perf_counter() - start_time
-            run_end = process_snapshot()
-            record_for_context(
-                self.ctx,
-                "pipeline",
-                status=status,
-                duration_s=elapsed,
-                process_rss_start_mb=run_start["rss_mb"],
-                process_rss_end_mb=run_end["rss_mb"],
-                process_rss_delta_mb=run_end["rss_mb"] - run_start["rss_mb"],
-                process_threads_start=run_start["process_threads"],
-                process_threads_end=run_end["process_threads"],
-            )
+            try:
+                elapsed = time.perf_counter() - start_time
+                run_end = process_snapshot()
+                record_for_context(
+                    self.ctx,
+                    "pipeline",
+                    status=status,
+                    duration_s=elapsed,
+                    process_rss_start_mb=run_start["rss_mb"],
+                    process_rss_end_mb=run_end["rss_mb"],
+                    process_rss_delta_mb=run_end["rss_mb"] - run_start["rss_mb"],
+                    process_threads_start=run_start["process_threads"],
+                    process_threads_end=run_end["process_threads"],
+                )
+            finally:
+                try:
+                    self.ctx.stop_output_manager()
+                except Exception:
+                    if execution_error is None:
+                        raise
+                    logger.exception(
+                        "[Pipeline] Output cleanup also failed; preserving the "
+                        "original execution error"
+                    )
         logger.info(f"[Pipeline] Finished execution in {elapsed:.2f}s")
 
         # # If in debug mode, save the entire cache to the H5 file after execution
         # if self.ctx.debug_mode:
         #     logger.info(f"[Pipeline] Saving cache to H5 file.")
         #     self.ctx.output_manager.save_cache(self.ctx)
-        self.ctx.stop_output_manager()
         return self.ctx
 
     def run_batch(self, targets=None, callback=None):
