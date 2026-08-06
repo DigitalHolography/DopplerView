@@ -139,6 +139,7 @@ def pipeline_process_worker(command_queue, queue_out):
             selected_models = run_spec.get("selected_models", {})
             config_mode = run_spec.get("config_mode", "default")
             output_enabled = bool(run_spec.get("output_enabled", False))
+            execution_profile = run_spec.get("execution_profile")
 
             if pipeline is None:
                 output_manager = OutputManager(
@@ -146,11 +147,16 @@ def pipeline_process_worker(command_queue, queue_out):
                     output_config_path,
                     output_enabled=output_enabled,
                 )
-                pipeline = Pipeline(output_manager=output_manager)
+                pipeline = Pipeline(
+                    output_manager=output_manager,
+                    execution_profile=execution_profile,
+                )
             elif output_enabled:
                 pipeline.ctx.output_manager.enable_output()
             else:
                 pipeline.ctx.output_manager.disable_output()
+
+            pipeline.set_execution_profile(execution_profile)
 
             pipeline.load_model_registry(models_config_path)
             if dopplerview_config_path and Path(dopplerview_config_path).exists():

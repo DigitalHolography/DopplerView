@@ -324,7 +324,7 @@ def get_all_points_in_radius(mask, center, radius):
     
     return points_in_radius
 
-def connect_components(mask, max_distance=5):
+def connect_components(mask, max_distance=5, n_jobs=-1):
     """
     Connect components in a binary mask that are within a certain distance of each other.
 
@@ -358,7 +358,7 @@ def connect_components(mask, max_distance=5):
         return mask
     
     f = partial(connect_neighbours, mask=mask_cpy, labeled_mask=labeled_mask, max_distance=max_distance)
-    masks = run_in_parallel(f, props, n_jobs=-1, chunking=False)
+    masks = run_in_parallel(f, props, n_jobs=n_jobs, chunking=False)
 
     return np.logical_or.reduce(masks)
 

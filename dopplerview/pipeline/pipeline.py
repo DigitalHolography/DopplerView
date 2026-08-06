@@ -9,9 +9,15 @@ import json
 from typing import Any, Dict
 
 from dopplerview.pipeline.dag import DAGEngine
+from dopplerview.pipeline.execution_profile import ExecutionProfile
 from dopplerview.models.manager import ModelManager
 from dopplerview.input_output.output_manager import OutputManager
 from dopplerview.utils import json_utils
+from dopplerview.utils.runtime_metrics import (
+    RuntimeMetrics,
+    process_snapshot,
+    record_for_context,
+)
 
 from dopplerview.pipeline.steps.read_moments import ReadMomentsStep
 from dopplerview.pipeline.steps.preprocess import PreprocessStep
@@ -36,13 +42,14 @@ class Context:
         - services (models, output, etc.)
     """
 
-    def __init__(self, output_manager, debug_mode=False):
+    def __init__(self, output_manager, debug_mode=False, execution_profile=None):
         self.model_registry_path = None
         self.model_manager = None
         self.model_instances = {}
         self.metadata = {
             "step_hashes": {}
         }
+        self.runtime_metrics = RuntimeMetrics()
         self.input_list = []
 
         self.measure_folder = None  # The measure folder containing the HD folder and the DV folder, set when loading input
@@ -50,6 +57,7 @@ class Context:
         self.DV_folder = None       # The DopplerView folder containing the output and cache, set when running the pipeline
         self.output_manager = output_manager
         self.debug_mode = debug_mode
+        self.execution_profile = ExecutionProfile.resolve(execution_profile)
         self.dopplerview_config = None
         self.dopplerview_config_path = None
         self.DV_config_mode = "local"
@@ -246,6 +254,11 @@ class Context:
     def get_produced_values(self):
         with self.lock:
             return dict([(key, value) for key, (value, status) in self.__cache.items() if status == 'produced'])
+
+    def get_number_of_workers(self, default=0.5):
+        """Resolve an operation's workers without mutating scientific config."""
+        configured = self.dopplerview_config.get("NumberOfWorkers", default)
+        return self.execution_profile.operation_workers(configured)
     
     # def export_cache(self, filepath):
     #     cache = {}
@@ -257,7 +270,7 @@ class Context:
     #     h5_file.write_dict_to_h5(cache, filepath, overwrite=False)
 
 class Pipeline:
-    def __init__(self, output_manager, debug_mode=False):
+    def __init__(self, output_manager, debug_mode=False, execution_profile=None):
         """
         Initializes the pipeline with the given model registry and configuration.
         Args:
@@ -268,11 +281,12 @@ class Pipeline:
         """
         self.ctx = Context(
             output_manager=output_manager,
-            debug_mode=debug_mode
+            debug_mode=debug_mode,
+            execution_profile=execution_profile,
         )
 
         # Register steps
-        self.steps = {
+        self.steps = [
             ReadMomentsStep(),
             PreprocessStep(),
             EyeLateralityClassificationStep(),
@@ -284,9 +298,22 @@ class Pipeline:
             ChoroidalAVSegmentationStep(),
             VesselVelocityEstimatorStep(),
             ArterialWaveformAnalysisStep(),
-        }
+        ]
 
-        self.engine = DAGEngine(self.steps, debug_mode=debug_mode)
+        self.engine = DAGEngine(
+            self.steps,
+            debug_mode=debug_mode,
+            max_workers=self.ctx.execution_profile.dag_max_workers,
+        )
+
+    @property
+    def execution_profile(self):
+        return self.ctx.execution_profile
+
+    def set_execution_profile(self, profile):
+        resolved = ExecutionProfile.resolve(profile)
+        self.ctx.execution_profile = resolved
+        self.engine.max_workers = resolved.dag_max_workers
 
     def get_step_names(self):
         return self.engine.execution_order
@@ -360,12 +387,36 @@ class Pipeline:
         
         self.ctx.ensure_config()
 
+        logger.info(
+            "[Pipeline] Execution profile: %s (DAG workers: %s, operation workers: %s)",
+            self.execution_profile.value,
+            self.engine.max_workers if self.engine.max_workers is not None else "automatic",
+            self.ctx.get_number_of_workers(),
+        )
+
         self.ctx.create_output_folder()
         self.ctx.start_output_manager()
 
-        start_time = time.time()
-        self.engine.run(self.ctx, targets, callback=callback)
-        elapsed = time.time() - start_time
+        start_time = time.perf_counter()
+        run_start = process_snapshot()
+        status = "failed"
+        try:
+            self.engine.run(self.ctx, targets, callback=callback)
+            status = "success"
+        finally:
+            elapsed = time.perf_counter() - start_time
+            run_end = process_snapshot()
+            record_for_context(
+                self.ctx,
+                "pipeline",
+                status=status,
+                duration_s=elapsed,
+                process_rss_start_mb=run_start["rss_mb"],
+                process_rss_end_mb=run_end["rss_mb"],
+                process_rss_delta_mb=run_end["rss_mb"] - run_start["rss_mb"],
+                process_threads_start=run_start["process_threads"],
+                process_threads_end=run_end["process_threads"],
+            )
         logger.info(f"[Pipeline] Finished execution in {elapsed:.2f}s")
 
         # # If in debug mode, save the entire cache to the H5 file after execution
@@ -376,6 +427,7 @@ class Pipeline:
         return self.ctx
 
     def run_batch(self, targets=None, callback=None):
+        batch_started = time.perf_counter()
         if callback:
             callback("batch_start", len(self.ctx.input_list))
 
@@ -423,5 +475,17 @@ class Pipeline:
 
         if callback:
             callback("batch_done", results)
+
+        succeeded = sum(result["status"] == "success" for result in results)
+        failed = len(results) - succeeded
+        metrics = getattr(self.ctx, "runtime_metrics", None)
+        if metrics is not None:
+            metrics.record(
+                "batch",
+                duration_s=time.perf_counter() - batch_started,
+                inputs=total,
+                succeeded=succeeded,
+                failed=failed,
+            )
 
         return results

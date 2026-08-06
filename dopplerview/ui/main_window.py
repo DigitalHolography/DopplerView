@@ -1043,6 +1043,7 @@ class MainWindow(ThemeMixin):
             "config_mode": self.config_mode_var.get(),
             "selected_models": dict(self.selected_models),
             "output_enabled": self.enable_debug_output,
+            "execution_profile": self.pipeline.execution_profile.value,
         }
 
     def run_pipelines(self, steps=None):
