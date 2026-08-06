@@ -286,7 +286,7 @@ class Pipeline:
         )
 
         # Register steps
-        self.steps = {
+        self.steps = [
             ReadMomentsStep(),
             PreprocessStep(),
             EyeLateralityClassificationStep(),
@@ -298,7 +298,7 @@ class Pipeline:
             ChoroidalAVSegmentationStep(),
             VesselVelocityEstimatorStep(),
             ArterialWaveformAnalysisStep(),
-        }
+        ]
 
         self.engine = DAGEngine(
             self.steps,

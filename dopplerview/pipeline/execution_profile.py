@@ -33,9 +33,10 @@ class ExecutionProfile(str, Enum):
 
     @property
     def dag_max_workers(self):
-        if self is self.SEQUENTIAL_REFERENCE:
-            return 1
-        return None
+        # DAG concurrency is temporarily disabled while shared state and output
+        # semantics are hardened. The reference profile additionally constrains
+        # parallel operations inside steps through operation_workers().
+        return 1
 
     def operation_workers(self, configured_workers):
         if self is self.SEQUENTIAL_REFERENCE:

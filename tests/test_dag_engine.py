@@ -56,16 +56,34 @@ def test_rejects_duplicate_output_producers():
         DAGEngine([first, second])
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Duplicate names are overwritten before DAGEngine validates them.",
-)
 def test_rejects_duplicate_step_names():
     first = make_step("duplicate", produces={"first"})
     second = make_step("duplicate", produces={"second"})
 
     with pytest.raises(ValueError, match="Duplicate step names"):
         DAGEngine([first, second])
+
+
+def test_registration_order_breaks_dependency_ties_deterministically():
+    first_root = make_step("first_root", {"input"}, {"first"})
+    second_root = make_step("second_root", {"input"}, {"second"})
+    second_child = make_step("second_child", {"second"}, {"second_result"})
+    first_child = make_step("first_child", {"first"}, {"first_result"})
+
+    engine = DAGEngine([first_root, second_root, second_child, first_child])
+
+    assert engine.execution_order == [
+        "first_root",
+        "second_root",
+        "second_child",
+        "first_child",
+    ]
+
+
+def test_default_dag_concurrency_is_one():
+    step = make_step("only", produces={"output"})
+
+    assert DAGEngine([step]).max_workers == 1
 
 
 def test_independent_steps_in_a_wave_overlap(fake_context_factory):

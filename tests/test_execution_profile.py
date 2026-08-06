@@ -49,7 +49,7 @@ def test_default_profile_preserves_configured_worker_value():
 
 def test_switching_pipeline_profile_updates_dag_limit():
     pipeline = Pipeline(output_manager=None, execution_profile="default")
-    assert pipeline.engine.max_workers is None
+    assert pipeline.engine.max_workers == 1
 
     pipeline.set_execution_profile("sequential_reference")
 

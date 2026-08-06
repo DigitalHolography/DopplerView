@@ -30,13 +30,19 @@ class DAGEngine:
         self,
         steps: Iterable[BaseStep],
         debug_mode: bool = False,
-        max_workers: Optional[int] = None,
+        max_workers: Optional[int] = 1,
     ):
-        self.steps: Dict[str, BaseStep] = {s.name: s for s in steps}
+        registered_steps = list(steps)
+        self._validate_unique_names(registered_steps)
+        self.steps: Dict[str, BaseStep] = {
+            step.name: step for step in registered_steps
+        }
+        self._registration_index = {
+            step.name: index for index, step in enumerate(registered_steps)
+        }
         self.debug_mode = debug_mode
-        self.max_workers = max_workers  # None → ThreadPoolExecutor picks a default
+        self.max_workers = max_workers
 
-        self._validate_unique_names()
         self.graph: Dict[str, Set[str]] = self._build_dependency_graph()
         self.reverse_graph: Dict[str, Set[str]] = self._build_reverse_graph()
         self.execution_order: List[str] = self._topological_sort()
@@ -50,11 +56,25 @@ class DAGEngine:
     # Graph construction
     # ------------------------------------------------------------------
 
-    def _validate_unique_names(self) -> None:
-        if not self.steps:
+    @staticmethod
+    def _validate_unique_names(steps: List[BaseStep]) -> None:
+        if not steps:
             raise ValueError("No steps registered in DAG.")
-        if len(set(self.steps)) != len(self.steps):
-            raise ValueError("Duplicate step names detected.")
+        names = [step.name for step in steps]
+        seen = set()
+        duplicates = []
+        for name in names:
+            if name in seen and name not in duplicates:
+                duplicates.append(name)
+            seen.add(name)
+        if duplicates:
+            raise ValueError(
+                "Duplicate step names detected: " + ", ".join(duplicates)
+            )
+
+    def _ordered(self, names: Iterable[str]) -> List[str]:
+        """Use registration order as the deterministic graph tie-breaker."""
+        return sorted(names, key=self._registration_index.__getitem__)
 
     def _build_dependency_graph(self) -> Dict[str, Set[str]]:
         """
@@ -100,16 +120,21 @@ class DAGEngine:
             for node in consumers:
                 in_degree[node] += 1
 
-        queue = deque(name for name, deg in in_degree.items() if deg == 0)
+        queue = deque(
+            self._ordered(name for name, degree in in_degree.items() if degree == 0)
+        )
         order: List[str] = []
 
         while queue:
             node = queue.popleft()
             order.append(node)
-            for neighbor in self.graph[node]:
+            newly_ready = []
+            for neighbor in self._ordered(self.graph[node]):
                 in_degree[neighbor] -= 1
                 if in_degree[neighbor] == 0:
-                    queue.append(neighbor)
+                    newly_ready.append(neighbor)
+            queue.extend(newly_ready)
+            queue = deque(self._ordered(queue))
 
         if len(order) != len(self.steps):
             raise RuntimeError("Cycle detected in pipeline DAG.")
@@ -153,7 +178,7 @@ class DAGEngine:
         visited: Set[str] = set()
 
         def dfs(node: str) -> None:
-            for child in self.graph.get(node, set()):
+            for child in self._ordered(self.graph.get(node, set())):
                 if child not in visited:
                     visited.add(child)
                     dfs(child)
@@ -351,10 +376,22 @@ class DAGEngine:
         steps_to_run = self._steps_to_run
         waves = self.build_execution_waves(steps_to_run)
 
-        logger.info(
-            f"[DAG] Execution plan: {len(waves)} wave(s), "
-            f"{len(steps_to_run)} step(s) — {[list(w) for w in waves]}"
-        )
+        if self.max_workers == 1:
+            logger.info(
+                "[DAG] Serial execution plan: %d step(s) — %s "
+                "(dependency graph: %d level(s))",
+                len(steps_to_run),
+                steps_to_run,
+                len(waves),
+            )
+        else:
+            logger.info(
+                "[DAG] Parallel execution plan: %d dependency wave(s), "
+                "%d step(s) — %s",
+                len(waves),
+                len(steps_to_run),
+                waves,
+            )
 
         completed = 0
         total = len(steps_to_run)
