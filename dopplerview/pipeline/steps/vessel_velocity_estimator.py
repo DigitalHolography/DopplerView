@@ -37,7 +37,7 @@ class VesselVelocityEstimatorStep(BaseStep):
         local_background_dist = ctx.dopplerview_config.get("VelocityEstimation", {}).get("LocalBackgroundDist", 2)
         mask = dilation(vessel_mask, disk(local_background_dist)) #TODO add parameter
 
-        n_jobs = ctx.dopplerview_config.get("NumberOfWorkers", 0.5)
+        n_jobs = ctx.get_number_of_workers()
 
         def _inpaint_frame(frame, mask):
             return inpaint.inpaint_biharmonic(frame, mask)

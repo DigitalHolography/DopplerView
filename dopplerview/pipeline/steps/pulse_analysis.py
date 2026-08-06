@@ -63,7 +63,7 @@ class PreArteryMaskStep(BaseStep):
             self.logger.info(f"    - Median heartbeat period: {beat_period_time:.2f} seconds ({beat_period_frames} frames) -> {bpm:.2f} bpm.")
             corrected_signals = np.zeros_like(signals_n)
             func = partial(pulse_analysis.correct_signal_with_heartbeat, beat_period=beat_period_frames, k=5)
-            corrected_signals = run_in_parallel(func, signals_n, n_jobs=ctx.dopplerview_config.get("NumberOfWorkers", 0.5), chunking=False, task_name="branch signal correction")
+            corrected_signals = run_in_parallel(func, signals_n, n_jobs=ctx.get_number_of_workers(), chunking=False, task_name="branch signal correction")
             ctx.set("corrected_signals", corrected_signals)
 
             for i in range(1, labeled_vessels.max() + 1):

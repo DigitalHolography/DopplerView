@@ -120,6 +120,9 @@ dopplerview /path/to/measure.holo --config config.json
 *  `-d, --debug`           Enable debug mode. In this mode, steps outputs are read from the cache.h5 (C:\\Users\\*user_name*\\.cache\\dopplerview\\cache\\*measure_name*\\cache.h5), and   
                         only targeted steps are re-run. This is useful for debugging specific       
                         steps without having to re-run the entire pipeline.
+*  `--execution-profile {default,sequential_reference}`
+                        Execution policy. The sequential reference profile forces DAG and
+                        internal operation worker counts to one for performance baselines.
 
 ### Example
 
@@ -127,6 +130,15 @@ dopplerview /path/to/measure.holo --config config.json
 dopplerview ./data/patient_01 \
     --config ./configs/default.json \
 ```
+
+For a sequential performance reference:
+
+```bash
+dopplerview ./data/patient_01 --execution-profile sequential_reference
+```
+
+The same profile can be applied to either the CLI or GUI process with the
+`DOPPLERVIEW_EXECUTION_PROFILE=sequential_reference` environment variable.
 ---
 
 # Project Structure

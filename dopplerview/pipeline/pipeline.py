@@ -9,6 +9,7 @@ import json
 from typing import Any, Dict
 
 from dopplerview.pipeline.dag import DAGEngine
+from dopplerview.pipeline.execution_profile import ExecutionProfile
 from dopplerview.models.manager import ModelManager
 from dopplerview.input_output.output_manager import OutputManager
 from dopplerview.utils import json_utils
@@ -41,7 +42,7 @@ class Context:
         - services (models, output, etc.)
     """
 
-    def __init__(self, output_manager, debug_mode=False):
+    def __init__(self, output_manager, debug_mode=False, execution_profile=None):
         self.model_registry_path = None
         self.model_manager = None
         self.model_instances = {}
@@ -56,6 +57,7 @@ class Context:
         self.DV_folder = None       # The DopplerView folder containing the output and cache, set when running the pipeline
         self.output_manager = output_manager
         self.debug_mode = debug_mode
+        self.execution_profile = ExecutionProfile.resolve(execution_profile)
         self.dopplerview_config = None
         self.dopplerview_config_path = None
         self.DV_config_mode = "local"
@@ -252,6 +254,11 @@ class Context:
     def get_produced_values(self):
         with self.lock:
             return dict([(key, value) for key, (value, status) in self.__cache.items() if status == 'produced'])
+
+    def get_number_of_workers(self, default=0.5):
+        """Resolve an operation's workers without mutating scientific config."""
+        configured = self.dopplerview_config.get("NumberOfWorkers", default)
+        return self.execution_profile.operation_workers(configured)
     
     # def export_cache(self, filepath):
     #     cache = {}
@@ -263,7 +270,7 @@ class Context:
     #     h5_file.write_dict_to_h5(cache, filepath, overwrite=False)
 
 class Pipeline:
-    def __init__(self, output_manager, debug_mode=False):
+    def __init__(self, output_manager, debug_mode=False, execution_profile=None):
         """
         Initializes the pipeline with the given model registry and configuration.
         Args:
@@ -274,7 +281,8 @@ class Pipeline:
         """
         self.ctx = Context(
             output_manager=output_manager,
-            debug_mode=debug_mode
+            debug_mode=debug_mode,
+            execution_profile=execution_profile,
         )
 
         # Register steps
@@ -292,7 +300,20 @@ class Pipeline:
             ArterialWaveformAnalysisStep(),
         }
 
-        self.engine = DAGEngine(self.steps, debug_mode=debug_mode)
+        self.engine = DAGEngine(
+            self.steps,
+            debug_mode=debug_mode,
+            max_workers=self.ctx.execution_profile.dag_max_workers,
+        )
+
+    @property
+    def execution_profile(self):
+        return self.ctx.execution_profile
+
+    def set_execution_profile(self, profile):
+        resolved = ExecutionProfile.resolve(profile)
+        self.ctx.execution_profile = resolved
+        self.engine.max_workers = resolved.dag_max_workers
 
     def get_step_names(self):
         return self.engine.execution_order
@@ -365,6 +386,13 @@ class Pipeline:
             raise RuntimeError("Configuration not loaded. Please load a configuration file before running the pipeline.")
         
         self.ctx.ensure_config()
+
+        logger.info(
+            "[Pipeline] Execution profile: %s (DAG workers: %s, operation workers: %s)",
+            self.execution_profile.value,
+            self.engine.max_workers if self.engine.max_workers is not None else "automatic",
+            self.ctx.get_number_of_workers(),
+        )
 
         self.ctx.create_output_folder()
         self.ctx.start_output_manager()

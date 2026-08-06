@@ -64,7 +64,7 @@ class PreprocessStep(BaseStep):
 
         # Step 1: Normalize 
         gaussian_std = ctx.dopplerview_config.get("FlatFieldCorrection", {}).get("GWRatio", 0.07)
-        n_jobs = ctx.dopplerview_config.get("NumberOfWorkers", 0.5)
+        n_jobs = ctx.get_number_of_workers()
         self.logger.info(f"    - Applying flat field correction to the moments with gaussian_std: {gaussian_std}, numx: {moment0.shape[2]}, n_jobs: {parallelization_utils.compute_n_jobs(n_jobs)}")
         M0_ff_video, M1_ff_video, M2_ff_video, HF_M0_ff, LF_M0_ff = self.normalize(gaussian_std, moment0, moment1, moment2, HF_M0, LF_M0, n_jobs=n_jobs)
 

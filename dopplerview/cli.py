@@ -62,6 +62,15 @@ def main():
         action='store_true',
         help='Enable debug mode. In this mode, steps outputs are read from the .h5, and only targeted steps are re-run. This is useful for debugging specific steps without having to re-run the entire pipeline.'
     )
+    parser.add_argument(
+        '--execution-profile',
+        choices=['default', 'sequential_reference'],
+        default=None,
+        help=(
+            'Execution policy. sequential_reference forces DAG and internal '
+            'operations to one worker for reproducible performance baselines.'
+        ),
+    )
     
     args = parser.parse_args()
     
@@ -77,7 +86,11 @@ def main():
     schema_path = user_config.ensure_config_file("h5_schema.json")
     output_config_path = user_config.ensure_config_file("output_config.json")
     output_manager = OutputManager(schema_path=schema_path, output_config_path=output_config_path)
-    pipeline = Pipeline(output_manager=output_manager, debug_mode=debug)
+    pipeline = Pipeline(
+        output_manager=output_manager,
+        debug_mode=debug,
+        execution_profile=args.execution_profile,
+    )
 
     if args.params:
         pipeline.load_dopplerview_config(args.params)
