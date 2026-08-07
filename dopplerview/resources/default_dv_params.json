@@ -3,7 +3,10 @@
     "GWRatio": 0.07,
     "Border": 0.15
   },
-  "NumberOfWorkers": 0.5,
+  "Execution": {
+    "NumberOfWorkers": 0.5,
+    "DagConcurrency": 1
+  },
   "Mask": {
     "ForcedMasks": -1,
     "VesselSegmentationMethod": "AI",

@@ -81,9 +81,14 @@ def test_pipeline_stops_output_manager_when_engine_fails():
     ctx = SimpleNamespace(
         dopplerview_config={"configured": True},
         execution_profile=SimpleNamespace(value="default"),
+        cancellation=SimpleNamespace(reset=lambda: None),
         has=lambda key: key == "input_file",
         get_number_of_workers=lambda: 1,
         ensure_config=lambda: calls.append("ensure_config"),
+        configure_execution_policy=lambda: SimpleNamespace(
+            dag_concurrency=1,
+            describe=lambda: "test policy",
+        ),
         create_output_folder=lambda: calls.append("create_output_folder"),
         start_output_manager=lambda: calls.append("start"),
         finish_output_manager=lambda success: calls.append(("finish", success)),
@@ -111,9 +116,14 @@ def test_pipeline_preserves_execution_error_when_cleanup_also_fails():
     ctx = SimpleNamespace(
         dopplerview_config={"configured": True},
         execution_profile=SimpleNamespace(value="default"),
+        cancellation=SimpleNamespace(reset=lambda: None),
         has=lambda key: key == "input_file",
         get_number_of_workers=lambda: 1,
         ensure_config=lambda: None,
+        configure_execution_policy=lambda: SimpleNamespace(
+            dag_concurrency=1,
+            describe=lambda: "test policy",
+        ),
         create_output_folder=lambda: None,
         start_output_manager=lambda: None,
         finish_output_manager=lambda success: fail_cleanup(),

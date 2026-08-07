@@ -1,7 +1,6 @@
 from dopplerview.pipeline.step import BaseStep, NestedStep
 from dopplerview.segmentation import process_masks, pulse_analysis, signal_processing
 import dopplerview.utils.image_utils as image_utils
-from dopplerview.utils.parallelization_utils import run_in_parallel
 from functools import partial
 
 import numpy as np
@@ -25,7 +24,6 @@ class PreArteryMaskStep(BaseStep):
         return {
             "sampling_freq": ctx.holodoppler_config.get("sampling_freq", 37037),
             "batch_stride": ctx.holodoppler_config.get("batch_stride", 256),
-            "NumberOfWorkers": ctx.dopplerview_config.get("NumberOfWorkers", 0.5),
             "PreMaskMethod": ctx.dopplerview_config.get("Mask").get("PreMaskMethod", "clustering"),
             "CorrectBranchSignals": ctx.dopplerview_config.get("Mask").get("CorrectBranchSignals", True),
             }
@@ -63,7 +61,11 @@ class PreArteryMaskStep(BaseStep):
             self.logger.info(f"    - Median heartbeat period: {beat_period_time:.2f} seconds ({beat_period_frames} frames) -> {bpm:.2f} bpm.")
             corrected_signals = np.zeros_like(signals_n)
             func = partial(pulse_analysis.correct_signal_with_heartbeat, beat_period=beat_period_frames, k=5)
-            corrected_signals = run_in_parallel(func, signals_n, n_jobs=ctx.get_number_of_workers(), chunking=False, task_name="branch signal correction")
+            corrected_signals = ctx.parallel.map(
+                func,
+                signals_n,
+                task_name="branch signal correction",
+            )
             ctx.set("corrected_signals", corrected_signals)
 
             for i in range(1, labeled_vessels.max() + 1):

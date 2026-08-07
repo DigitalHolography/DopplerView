@@ -127,6 +127,8 @@ def pipeline_process_worker(command_queue, queue_out):
     while True:
         run_spec = command_queue.get()
         if run_spec is None:
+            if pipeline is not None:
+                pipeline.close()
             return
 
         try:

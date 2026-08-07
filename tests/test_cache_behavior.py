@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dopplerview.pipeline.dag import DAGEngine
+from dopplerview.pipeline.step import BaseStep
 
 from test_dag_engine import make_step
 
@@ -100,3 +101,22 @@ def test_cached_upstream_step_exports_outputs_when_skipped(fake_context_factory)
 
     assert ("step_skipped", ("source",)) in events
     assert ("source", "cached_image") in ctx.output_manager.saved
+
+
+def test_execution_policy_does_not_change_default_step_fingerprint(
+    fake_context_factory,
+):
+    class DefaultConfigStep(BaseStep):
+        name = "default_config"
+        requires = set()
+        produces = set()
+
+    step = DefaultConfigStep()
+    ctx = fake_context_factory(config={"Threshold": 3, "Execution": {"NumberOfWorkers": 1}})
+    first = step.config_fingerprint(ctx)
+    ctx.dopplerview_config["Execution"] = {
+        "NumberOfWorkers": -1,
+        "DagConcurrency": 4,
+    }
+
+    assert step.config_fingerprint(ctx) == first

@@ -147,6 +147,21 @@ Execution uses:
 * Topological sorting
 * Deterministic step order
 * Automatic dependency resolution
+* A machine-aware shared executor for internally parallel operations
+
+Contributors must not create thread or process pools inside a step. Apply a
+function to independent frames, branches, or regions through the context:
+
+```python
+results = ctx.parallel.map(
+    process_item,
+    items,
+    task_name="item processing",
+)
+```
+
+The runtime resolves adaptive worker settings and enforces one global capacity
+across simultaneous operations.
 
 ---
 

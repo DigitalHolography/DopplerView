@@ -6,8 +6,8 @@ import numpy as np
 
 from dopplerview.models.wrapper import BaseModelWrapper
 from dopplerview.pipeline.dag import DAGEngine
-from dopplerview.utils.parallelization_utils import run_in_parallel
 from dopplerview.utils.runtime_metrics import RuntimeMetrics
+from dopplerview.utils.shared_executor import SharedExecutor
 
 from test_dag_engine import make_step
 
@@ -67,14 +67,18 @@ def test_failed_step_still_records_measurement(fake_context_factory):
 
 
 def test_parallel_operation_logs_requested_and_effective_workers(caplog):
-    with caplog.at_level("DEBUG"):
-        result = run_in_parallel(
-            lambda value: value * 2,
-            np.arange(4),
-            n_jobs=0.5,
-            chunking=False,
-            task_name="doubling",
-        )
+    executor = SharedExecutor(max_workers=2, available_cpus=4)
+    try:
+        with caplog.at_level("DEBUG"):
+            result = executor.map(
+                lambda value: value * 2,
+                np.arange(4),
+                n_jobs=0.5,
+                chunking=False,
+                task_name="doubling",
+            )
+    finally:
+        executor.shutdown()
 
     np.testing.assert_array_equal(result, [0, 2, 4, 6])
     messages = metric_records(caplog, "parallel_operation")

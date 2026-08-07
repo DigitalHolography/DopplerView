@@ -3,13 +3,8 @@ Normalization of moments to correct for illumination variations and enhance cont
 """
 
 import numpy as np
-
-import numpy as np
 from scipy.ndimage import gaussian_filter
 from functools import partial
-
-from dopplerview.utils.parallelization_utils import run_in_parallel
-
 
 def _flatfield(data, gw):
     blurred = gaussian_filter(
@@ -27,7 +22,8 @@ def flat_field_correction_3d(
     border_amount=0.15,
     n_jobs=-1,
     parallel=True,
-    chunking=True
+    chunking=True,
+    executor=None,
 ):
     """
     Parallel version of flat field correction.
@@ -63,8 +59,16 @@ def flat_field_correction_3d(
     func = partial(_flatfield, gw=gw)
 
     if parallel:
+        if executor is None:
+            raise ValueError("Parallel flat-field correction requires an executor.")
         # Use parallel processing to apply flat field correction to each frame
-        volume_corr = run_in_parallel(func, volume, n_jobs=n_jobs, chunking=chunking)
+        volume_corr = executor.map(
+            func,
+            volume,
+            n_jobs=n_jobs,
+            chunking=chunking,
+            task_name="flat-field correction",
+        )
     else:
         # flat field correction without parallelization
         volume_corr = _flatfield(volume, (0,gw,gw))
