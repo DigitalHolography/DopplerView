@@ -1,5 +1,6 @@
 from pathlib import Path
 import hashlib
+from copy import deepcopy
 import os
 import threading
 import traceback
@@ -67,6 +68,8 @@ class Context:
         )
         configure_native_threads(self.execution_policy.native_threads_per_task)
         self.dopplerview_config = None
+        self._base_dopplerview_config = None
+        self.execution_overrides = {}
         self.dopplerview_config_path = None
         self.DV_config_mode = "local"
         self.holodoppler_config = None
@@ -110,9 +113,29 @@ class Context:
     
     def load_dopplerview_config(self, config_path):
         self.dopplerview_config_path = config_path
-        self.dopplerview_config = self.load_config(config_path)
+        self._base_dopplerview_config = self.load_config(config_path)
+        self._apply_execution_overrides()
         self.configure_execution_policy()
         logger.info(f"[Pipeline] Using DopplerView config file: {config_path}")
+
+    def set_execution_overrides(self, settings=None):
+        allowed = {"NumberOfWorkers", "DagConcurrency"}
+        settings = dict(settings or {})
+        unknown = set(settings) - allowed
+        if unknown:
+            raise ValueError(
+                "Unknown execution setting(s): " + ", ".join(sorted(unknown))
+            )
+        self.execution_overrides = settings
+        if self._base_dopplerview_config is not None:
+            self._apply_execution_overrides()
+            self.configure_execution_policy()
+
+    def _apply_execution_overrides(self):
+        self.dopplerview_config = deepcopy(self._base_dopplerview_config)
+        if self.execution_overrides:
+            execution = self.dopplerview_config.setdefault("Execution", {})
+            execution.update(self.execution_overrides)
     
     def load_holodoppler_config(self, config_path):
         self.holodoppler_config = self.load_config(config_path)
@@ -448,6 +471,9 @@ class Pipeline:
 
     def set_config_mode(self, mode):
         self.ctx.set_config_mode(mode)
+
+    def set_execution_overrides(self, settings=None):
+        self.ctx.set_execution_overrides(settings)
 
     def run(self, targets=None, callback=None):
         if not self.ctx.has("input_file"):

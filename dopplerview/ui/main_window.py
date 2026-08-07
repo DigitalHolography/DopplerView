@@ -18,6 +18,8 @@ from dopplerview.input_output import read_folder
 from dopplerview.models.registry import ModelRegistryConfig
 from dopplerview.pipeline.definition import PipelineDefinition
 from dopplerview.pipeline.execution_profile import ExecutionProfile
+from dopplerview.utils.parallelization_utils import compute_n_jobs
+from dopplerview.utils.runtime_metrics import available_cpu_count
 
 from dopplerview.ui.image_utils import np_to_tk, resize_preview_to_fit
 from dopplerview.ui.theme import ThemeMixin
@@ -97,6 +99,11 @@ class MainWindow(ThemeMixin):
         self._logs_visible = False
         self._height_before_logs: int | None = None
         self.config_mode_var = tk.StringVar(value="default")
+        self.available_cpus = available_cpu_count()
+        self.number_workers_var = tk.IntVar(
+            value=compute_n_jobs(0.5, cpu_count=self.available_cpus)
+        )
+        self.dag_concurrency_var = tk.StringVar(value="Use config")
         self.enable_debug_output = False
 
         self._apply_theme()
@@ -653,6 +660,48 @@ class MainWindow(ThemeMixin):
         config_panel.grid(row=0, column=1, padx=5, pady=5, sticky="nsew")
         config_panel.grid_columnconfigure(0, weight=1)
 
+        execution_frame = ttk.LabelFrame(
+            parent,
+            text="Execution",
+            padding=10,
+        )
+        execution_frame.grid(row=1, column=1, padx=5, pady=5, sticky="nsew")
+        execution_frame.grid_columnconfigure(0, weight=1)
+
+        ttk.Label(execution_frame, text="Number of workers").grid(
+            row=0, column=0, sticky="w"
+        )
+        workers_spinbox = ttk.Spinbox(
+            execution_frame,
+            textvariable=self.number_workers_var,
+            from_=1,
+            to=self.available_cpus,
+            increment=1,
+        )
+        workers_spinbox.grid(row=1, column=0, sticky="ew", pady=(2, 7))
+        ttk.Label(
+            execution_frame,
+            text=f"Worker count for this machine (1–{self.available_cpus}).",
+            style="Muted.TLabel",
+            wraplength=280,
+        ).grid(row=2, column=0, sticky="w", pady=(0, 9))
+
+        ttk.Label(execution_frame, text="DAG concurrency").grid(
+            row=3, column=0, sticky="w"
+        )
+        dag_combo = ttk.Combobox(
+            execution_frame,
+            textvariable=self.dag_concurrency_var,
+            values=("Use config", "auto", "1", "2"),
+        )
+        dag_combo.grid(row=4, column=0, sticky="ew", pady=(2, 7))
+        ttk.Label(
+            execution_frame,
+            text="auto allows up to two ready steps; 1 forces serial execution.",
+            style="Muted.TLabel",
+            wraplength=280,
+        ).grid(row=5, column=0, sticky="w")
+
         # --- Radio buttons ---
         radio_frame = ttk.Frame(config_panel)
         radio_frame.grid(row=0, column=0, sticky="ew", pady=(0, 5))
@@ -770,8 +819,8 @@ class MainWindow(ThemeMixin):
 
         self.config_window = tk.Toplevel(self.root)
         self.config_window.title("DopplerView Configuration")
-        self.config_window.geometry("720x440")
-        self.config_window.minsize(640, 380)
+        self.config_window.geometry("760x560")
+        self.config_window.minsize(680, 500)
         self.config_window.transient(self.root)
         self.config_window.configure(bg=self._bg_color)
 
@@ -1048,6 +1097,20 @@ class MainWindow(ThemeMixin):
 
     def _make_pipeline_run_spec(self, steps=None):
         """Create a picklable description of the run for the child process."""
+        execution_settings = {}
+        number_workers = self._parse_exact_worker_count(
+            self.number_workers_var.get(),
+            self.available_cpus,
+        )
+        dag_concurrency = self._parse_execution_setting(
+            "DAG concurrency",
+            self.dag_concurrency_var.get(),
+            allow_auto=True,
+        )
+        execution_settings["NumberOfWorkers"] = number_workers
+        if dag_concurrency is not None:
+            execution_settings["DagConcurrency"] = dag_concurrency
+
         return {
             "steps": steps,
             "input_list": [str(p) for p in self.input_list],
@@ -1059,9 +1122,54 @@ class MainWindow(ThemeMixin):
             "selected_models": dict(self.selected_models),
             "output_enabled": self.enable_debug_output,
             "execution_profile": self.execution_profile.value,
+            "execution_settings": execution_settings,
         }
 
+    @staticmethod
+    def _parse_execution_setting(label, raw_value, allow_auto):
+        value = str(raw_value).strip()
+        normalized = value.lower().replace("_", " ")
+        if normalized in ("", "use config", "config"):
+            return None
+        if allow_auto and normalized in ("auto", "automatic"):
+            return "auto"
+        try:
+            numeric = float(value)
+        except ValueError as error:
+            raise ValueError(
+                f"{label} must be a worker count, CPU fraction, -1/-2"
+                + (", or auto." if allow_auto else ".")
+            ) from error
+        if numeric == 0:
+            raise ValueError(f"{label} cannot be zero.")
+        if (numeric < 0 or numeric >= 1) and not numeric.is_integer():
+            raise ValueError(
+                f"{label} must use an integer count or a fraction between 0 and 1."
+            )
+        return int(numeric) if numeric.is_integer() else numeric
+
+    @staticmethod
+    def _parse_exact_worker_count(raw_value, maximum):
+        try:
+            numeric = float(raw_value)
+        except (TypeError, ValueError) as error:
+            raise ValueError("Number of workers must be an integer.") from error
+        if not numeric.is_integer():
+            raise ValueError("Number of workers must be an integer.")
+        workers = int(numeric)
+        if not 1 <= workers <= maximum:
+            raise ValueError(
+                f"Number of workers must be between 1 and {maximum}."
+            )
+        return workers
+
     def run_pipelines(self, steps=None):
+        try:
+            run_spec = self._make_pipeline_run_spec(steps)
+        except ValueError as error:
+            messagebox.showerror("Invalid execution setting", str(error), parent=self.root)
+            return
+
         self.btn_run.config(state="disabled")
         self.btn_run_minimal.config(state="disabled")
         self.progress["value"] = 0
@@ -1069,8 +1177,6 @@ class MainWindow(ThemeMixin):
         self.progress_minimal["value"] = 0
         self.status_var.set("Starting pipeline…")
         logger.info("Starting pipeline for %d input(s)", len(self.input_list))
-
-        run_spec = self._make_pipeline_run_spec(steps)
 
         if self.pipeline_worker is None or not self.pipeline_worker.is_alive():
             self.queue = self.mp_context.Queue()

@@ -19,17 +19,17 @@ class PreprocessStep(BaseStep):
             }
         }
 
-    def normalize(self, gaussian_std, M0, M1, M2, HF_M0, LF_M0, ctx):
+    def normalize(self, gaussian_std, border_amount, M0, M1, M2, HF_M0, LF_M0, ctx):
         # Implement normalization logic based on self.dopplerview_config
         # self.logger.info(self.dopplerview_config)
 
         numx = M0.shape[2]
 
-        M0_ff_video = normalization.flat_field_correction_3d(M0, gaussian_std * numx, parallel=True, executor=ctx.parallel)
+        M0_ff_video = normalization.flat_field_correction_3d(M0, gaussian_std * numx, border_amount, parallel=True, executor=ctx.parallel)
 
-        M1_ff_video = normalization.flat_field_correction_3d(M1, gaussian_std * numx, parallel=True, executor=ctx.parallel)
+        M1_ff_video = normalization.flat_field_correction_3d(M1, gaussian_std * numx, border_amount, parallel=True, executor=ctx.parallel)
 
-        M2_ff_video = normalization.flat_field_correction_3d(M2, gaussian_std * numx, parallel=True, executor=ctx.parallel)
+        M2_ff_video = normalization.flat_field_correction_3d(M2, gaussian_std * numx, border_amount, parallel=True, executor=ctx.parallel)
 
         if HF_M0 is None or LF_M0 is None:
             self.logger.warning("    - HF_M0 or LF_M0 is None. Skipping flat field correction for HF_M0 and LF_M0.")
@@ -63,8 +63,9 @@ class PreprocessStep(BaseStep):
 
         # Step 1: Normalize 
         gaussian_std = ctx.dopplerview_config.get("FlatFieldCorrection", {}).get("GWRatio", 0.07)
-        self.logger.info(f"    - Applying flat field correction to the moments with gaussian_std: {gaussian_std}, numx: {moment0.shape[2]}, workers: {ctx.parallel.max_workers}")
-        M0_ff_video, M1_ff_video, M2_ff_video, HF_M0_ff, LF_M0_ff = self.normalize(gaussian_std, moment0, moment1, moment2, HF_M0, LF_M0, ctx)
+        border_amount = ctx.dopplerview_config.get("FlatFieldCorrection", {}).get("Border", 0.15)
+        self.logger.info(f"    - Applying flat field correction to the moments with gaussian_std: {gaussian_std}, border_amount: {border_amount}, numx: {moment0.shape[2]}, workers: {ctx.parallel.max_workers}")
+        M0_ff_video, M1_ff_video, M2_ff_video, HF_M0_ff, LF_M0_ff = self.normalize(gaussian_std, border_amount, moment0, moment1, moment2, HF_M0, LF_M0, ctx)
 
         # # Step 2: Resize
         # self.resize()
