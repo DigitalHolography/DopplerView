@@ -25,6 +25,11 @@ def _run_indexed_chunk(function, indexed_items, cancellation):
 
 
 class SharedExecutor:
+    """
+    A single executor shared by all parallel operations in the pipeline.
+    This is a workaround for the fact that some parallelization libraries (e.g. OpenCV) do not play well with multiple concurrent executors in the same process.
+    The executor is bounded to a maximum number of workers, which can be configured by the user. The executor can be used to run parallel operations in a thread-safe manner, and it will respect the cancellation token if provided.
+    """
     def __init__(
         self,
         max_workers: int,
