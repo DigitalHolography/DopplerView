@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
+from typing import Optional
 
 from dopplerview.pipeline.execution_profile import ExecutionProfile
 from dopplerview.utils.parallelization_utils import compute_n_jobs
@@ -19,7 +20,7 @@ class ExecutionPolicy:
     available_cpus: int
     cpu_workers: int
     dag_concurrency: int
-    native_threads_per_task: int
+    native_threads_per_task: Optional[int]
 
     @classmethod
     def from_config(cls, config=None, profile=None) -> "ExecutionPolicy":
@@ -39,10 +40,17 @@ class ExecutionPolicy:
         if profile is ExecutionProfile.SEQUENTIAL_REFERENCE:
             dag_concurrency = 1
 
-        native_threads = max(
-            1,
-            int(execution.get("NativeThreadsPerTask", 1)),
+        # Native runtimes are automatic by default. The Override suffix is
+        # intentional: early Phase-4 configurations persisted a value of 1 in
+        # users' copied config files, which severely throttled CPU inference.
+        configured_native_threads = execution.get(
+            "NativeThreadsPerTaskOverride",
+            "auto",
         )
+        if configured_native_threads in (None, "auto", "automatic", 0, -1):
+            native_threads = None
+        else:
+            native_threads = max(1, int(configured_native_threads))
         if profile is ExecutionProfile.SEQUENTIAL_REFERENCE:
             native_threads = 1
 
@@ -58,5 +66,6 @@ class ExecutionPolicy:
         return (
             f"profile={self.profile.value}, available CPUs={self.available_cpus}, "
             f"shared workers={self.cpu_workers}, DAG concurrency={self.dag_concurrency}, "
-            f"native threads/task={self.native_threads_per_task}"
+            "native threads/task="
+            f"{self.native_threads_per_task or 'automatic'}"
         )

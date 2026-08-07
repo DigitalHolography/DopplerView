@@ -5,8 +5,7 @@
   },
   "Execution": {
     "NumberOfWorkers": 0.5,
-    "DagConcurrency": 1,
-    "NativeThreadsPerTask": 1
+    "DagConcurrency": 1
   },
   "Mask": {
     "ForcedMasks": -1,

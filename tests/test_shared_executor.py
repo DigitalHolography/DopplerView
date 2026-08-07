@@ -32,7 +32,7 @@ def test_execution_policy_reads_execution_section(monkeypatch):
             "Execution": {
                 "NumberOfWorkers": 0.5,
                 "DagConcurrency": 2,
-                "NativeThreadsPerTask": 1,
+                "NativeThreadsPerTaskOverride": 1,
             }
         },
         profile="default",
@@ -57,6 +57,34 @@ def test_legacy_worker_setting_remains_supported(monkeypatch):
     assert policy.cpu_workers == 2
 
 
+def test_default_policy_leaves_native_runtime_parallelism_automatic(monkeypatch):
+    monkeypatch.setattr(
+        "dopplerview.pipeline.execution_policy.available_cpu_count",
+        lambda: 8,
+    )
+
+    policy = ExecutionPolicy.from_config({}, profile="default")
+
+    assert policy.native_threads_per_task is None
+    assert "native threads/task=automatic" in policy.describe()
+
+
+def test_legacy_phase_four_native_limit_does_not_throttle_default_profile(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "dopplerview.pipeline.execution_policy.available_cpu_count",
+        lambda: 8,
+    )
+
+    policy = ExecutionPolicy.from_config(
+        {"Execution": {"NativeThreadsPerTask": 1}},
+        profile="default",
+    )
+
+    assert policy.native_threads_per_task is None
+
+
 def test_sequential_reference_overrides_all_concurrency(monkeypatch):
     monkeypatch.setattr(
         "dopplerview.pipeline.execution_policy.available_cpu_count",
@@ -68,7 +96,7 @@ def test_sequential_reference_overrides_all_concurrency(monkeypatch):
             "Execution": {
                 "NumberOfWorkers": -1,
                 "DagConcurrency": 4,
-                "NativeThreadsPerTask": 4,
+                "NativeThreadsPerTaskOverride": 4,
             }
         },
         profile=ExecutionProfile.SEQUENTIAL_REFERENCE,

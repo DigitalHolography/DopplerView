@@ -184,8 +184,7 @@ Runtime parallelism is configured separately from scientific parameters:
 ```json
 "Execution": {
   "NumberOfWorkers": 0.5,
-  "DagConcurrency": 1,
-  "NativeThreadsPerTask": 1
+  "DagConcurrency": 1
 }
 ```
 
@@ -193,6 +192,10 @@ Runtime parallelism is configured separately from scientific parameters:
 all but one, or a fraction such as `0.5`. All internally parallel steps share
 one bounded executor, so their combined Python worker count cannot exceed this
 resolved capacity. Execution settings do not invalidate scientific caches.
+Native libraries and inference runtimes select a machine-appropriate thread
+count automatically. Advanced diagnostics can force a fixed value with
+`NativeThreadsPerTaskOverride`; the sequential reference profile always uses
+one native thread.
 
 See `WORKFLOW.md` for details on how configuration impacts execution.
 

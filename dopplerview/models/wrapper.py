@@ -113,7 +113,10 @@ class TorchModelWrapper(BaseModelWrapper):
         import torch
         super().__init__(spec, model_path)
 
-        if execution_policy is not None:
+        if (
+            execution_policy is not None
+            and execution_policy.native_threads_per_task is not None
+        ):
             torch.set_num_threads(execution_policy.native_threads_per_task)
             try:
                 torch.set_num_interop_threads(1)
@@ -171,7 +174,10 @@ class ONNXModelWrapper(BaseModelWrapper):
         )
 
         session_options = ort.SessionOptions()
-        if execution_policy is not None:
+        if (
+            execution_policy is not None
+            and execution_policy.native_threads_per_task is not None
+        ):
             session_options.intra_op_num_threads = execution_policy.native_threads_per_task
             session_options.inter_op_num_threads = 1
         self.session = ort.InferenceSession(
