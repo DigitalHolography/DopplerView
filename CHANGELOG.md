@@ -5,8 +5,8 @@
 * Ensure DAG determinism
 * Correct matplotlib backend issue in GUI
 * Save outputs even for cached steps
-* Refactorize OutputManager
 * Introduce a shared model executor following an execution policy, to ensure that parallelization libraries (OpenCV, scipy), models and concurrent DAG steps don't over-use threads.
+* Refactorize OutputManager, Pipeline and cache system
 
 ## 1.7.4
 * GUI

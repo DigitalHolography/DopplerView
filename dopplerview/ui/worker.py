@@ -118,7 +118,7 @@ def pipeline_process_worker(command_queue, queue_out):
     The Tk process must remain UI-only.  This isolates native crashes/hangs from
     OpenCV, ONNXRuntime, PyTorch, h5py, etc. from Tkinter's event loop. Keeping
     this process alive between runs also keeps the Pipeline context and its
-    runtime cache alive, just as the pre-multiprocessing GUI did.
+    runtime cache alive.
     """
     _configure_child_process_logging(queue_out)
 

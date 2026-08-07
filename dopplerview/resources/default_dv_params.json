@@ -5,7 +5,7 @@
   },
   "Execution": {
     "NumberOfWorkers": 0.5,
-    "DagConcurrency": 1
+    "DagConcurrency": "auto"
   },
   "Mask": {
     "ForcedMasks": -1,

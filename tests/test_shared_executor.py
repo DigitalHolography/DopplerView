@@ -66,10 +66,49 @@ def test_default_policy_leaves_native_runtime_parallelism_automatic(monkeypatch)
     policy = ExecutionPolicy.from_config({}, profile="default")
 
     assert policy.native_threads_per_task is None
+    assert policy.dag_concurrency == 2
     assert "native threads/task=automatic" in policy.describe()
 
 
-def test_legacy_phase_four_native_limit_does_not_throttle_default_profile(
+@pytest.mark.parametrize(
+    ("configured", "expected"),
+    [(0.25, 2), (-1, 8), (-2, 7), (3, 3), (99, 8)],
+)
+def test_dag_concurrency_is_machine_aware_and_bounded(
+    monkeypatch,
+    configured,
+    expected,
+):
+    monkeypatch.setattr(
+        "dopplerview.pipeline.execution_policy.available_cpu_count",
+        lambda: 8,
+    )
+
+    policy = ExecutionPolicy.from_config(
+        {"Execution": {"DagConcurrency": configured}},
+        profile="default",
+    )
+
+    assert policy.dag_concurrency == expected
+
+
+def test_single_worker_dag_setting_explicitly_disables_concurrency(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "dopplerview.pipeline.execution_policy.available_cpu_count",
+        lambda: 8,
+    )
+
+    policy = ExecutionPolicy.from_config(
+        {"Execution": {"DagConcurrency": 1}},
+        profile="default",
+    )
+
+    assert policy.dag_concurrency == 1
+
+
+def test_legacy_native_limit_does_not_throttle_default_profile(
     monkeypatch,
 ):
     monkeypatch.setattr(

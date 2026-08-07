@@ -69,33 +69,11 @@ It will create a tag with the new version and push it.
 
 # Contributing to DopplerView
 
-## 1. Architecture Overview
+DopplerView is built around a Pipeline with declared steps scheduled by a DAGEngine, using a Model registry and a shared Context. For more information, see [`WORKFLOW.md`](WORKFLOW.md).
 
-DopplerView is built around three core components:
+## 1. The Execution Model
 
-1. **Model Registry + Model Manager**
-2. **Pipeline (DAG-based execution engine)**
-3. **Context (runtime data container)**
-
-Execution flow:
-
-```
-CLI / GUI
-    ↓
-Pipeline
-    ↓
-DAGEngine
-    ↓
-Steps
-    ↓
-Context (shared state)
-```
-
----
-
-## 2. The Execution Model
-
-### 2.1 Context
+### 1.1 Context
 
 `Context` is the central execution container.
 
@@ -124,9 +102,11 @@ No hidden side effects.
 
 ---
 
-### 2.2 DAG-Based Pipeline
+### 1.2 DAG-Based Pipeline
 
-The pipeline is executed by `DAGEngine`.
+`PipelineDefinition` validates registered steps and exposes deterministic graph
+metadata without allocating models, executors, caches, or I/O services. The
+runtime pipeline passes that definition to `DAGEngine` for execution.
 
 Each step declares:
 
@@ -163,9 +143,14 @@ results = ctx.parallel.map(
 The runtime resolves adaptive worker settings and enforces one global capacity
 across simultaneous operations.
 
+Independent DAG branches may also overlap. This is centrally bounded by the
+execution policy (two steps by default), so a step contributor does not create
+or configure DAG threads. If concurrent steps both use `ctx.parallel`, their
+internal work still shares the same global executor capacity.
+
 ---
 
-### 2.3 Caching & Fingerprinting
+### 1.3 Caching & Fingerprinting
 
 Each step implements:
 
@@ -176,7 +161,10 @@ fingerprint(ctx)
 Default behavior hashes:
 
 * Relevant config
-* All required inputs
+* Fingerprints of all required upstream artifacts
+* The selected model's stable registry identity
+* Source-file identity for external inputs
+* The fingerprint schema and DopplerView version
 
 If:
 
@@ -196,9 +184,9 @@ This guarantees:
 
 ---
 
-## 3. Adding a New Pipeline Step
+## 2. Adding a New Pipeline Step
 
-### 3.1 Create the Step Class
+### 2.1 Create the Step Class
 
 Steps must inherit from:
 
@@ -226,7 +214,7 @@ class MyNewStep(BaseStep):
 
 ---
 
-### 3.2 Rules for Steps
+### 2.2 Rules for Steps
 
 #### 1. Unique name
 
@@ -284,12 +272,20 @@ produces = ["segmentation"]
 
 ---
 
-### 3.3 Optional: Custom Fingerprinting
+### 2.3 Optional: Custom Fingerprinting
 
 By default, fingerprint hashes:
 
-* Entire config
-* All required inputs
+* Scientific configuration (execution policy is excluded)
+* All declared `requires` through their upstream artifact identities
+* A model identity automatically when the step name is a model task
+
+If a step uses an additional model task, declare it without adding scheduling
+or I/O code:
+
+```python
+model_tasks = {"auxiliary_model_task"}
+```
 
 If your step only depends on part of config:
 
@@ -304,17 +300,17 @@ This prevents unnecessary invalidation.
 
 ---
 
-### 3.4 Registering the Step in the Pipeline
+### 2.4 Registering the Step in the Pipeline
 
 After creating your step:
 
-Open `pipeline.py`:
+Open `pipeline/definition.py` and edit `PipelineDefinition.default()`:
 
 ```python
-self.steps = {
+return cls([
     PreprocessStep(),
     ...
-}
+])
 ```
 
 Add:
@@ -325,14 +321,14 @@ MyNewStep(),
 
 That’s it.
 
-DAGEngine will:
+`PipelineDefinition` will:
 
 * Automatically compute dependencies
 * Automatically insert it in correct order
 
 ---
 
-### 3.5 Nested Steps
+### 2.5 Nested Steps
 
 If your logic contains multiple atomic operations, use:
 
@@ -353,7 +349,7 @@ Use them to group logically related operations.
 
 ---
 
-## 4. Model Registry
+## 3. Model Registry
 
 Models are defined in a YAML file loaded by:
 
@@ -377,9 +373,9 @@ iternet5_vesselness:
 
 ---
 
-## 5. Adding a New Model
+## 4. Adding a New Model
 
-### 5.1 Step 1 — Upload Model
+### 4.1 Step 1 — Upload Model
 
 Upload model weights to:
 
@@ -393,7 +389,7 @@ hf_hub_download(...)
 
 ---
 
-### 5.2 Step 2 — Add YAML Entry
+### 4.2 Step 2 — Add YAML Entry
 
 In the registry YAML file, add:
 
@@ -413,7 +409,7 @@ If your model needs new format, input normalization method, input channels or ou
 
 ---
 
-### 5.3 Step 3 — That’s It
+### 4.3 Step 3 — That’s It
 
 No code modification required.
 
@@ -425,7 +421,7 @@ The registry automatically:
 
 ---
 
-## 6. Model Selection & Task Binding
+## 5. Model Selection & Task Binding
 
 Each task has a default model:
 
@@ -455,7 +451,7 @@ Models are:
 
 ---
 
-## 7. Model Formats
+## 6. Model Formats
 
 Supported formats:
 
@@ -472,7 +468,7 @@ ModelManager.build_model_wrapper()
 
 ---
 
-## 8. Partial Pipeline Execution
+## 7. Partial Pipeline Execution
 
 You can run only part of the pipeline:
 
@@ -487,7 +483,7 @@ DAGEngine will:
 
 ---
 
-## 9. Output Management
+## 8. Output Management
 
 `Context.create_output_folder()` initializes:
 
@@ -518,7 +514,7 @@ Keep I/O isolated from core logic when possible.
 
 ---
 
-## 10. Design Principles
+## 9. Design Principles
 
 When contributing, respect:
 
@@ -554,8 +550,7 @@ Fingerprinting must remain stable.
 
 1. Create new step
 2. Add it to pipeline
-3. Run full pipeline once
-4. Modify config
+3. Run full pipeline once 3. Modify config
 5. Ensure correct invalidation behavior
 6. Test partial execution
 7. Validate output determinism

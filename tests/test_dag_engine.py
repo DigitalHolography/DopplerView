@@ -114,6 +114,31 @@ def test_independent_steps_in_a_wave_overlap(fake_context_factory):
     assert max(left_start, right_start) < min(left_end, right_end)
 
 
+def test_parallel_wave_never_exceeds_dag_worker_bound(fake_context_factory):
+    active = 0
+    maximum_active = 0
+    lock = threading.Lock()
+
+    def action(_ctx):
+        nonlocal active, maximum_active
+        with lock:
+            active += 1
+            maximum_active = max(maximum_active, active)
+        time.sleep(0.015)
+        with lock:
+            active -= 1
+
+    steps = [
+        make_step(f"branch_{index}", {"input"}, {f"value_{index}"}, action)
+        for index in range(6)
+    ]
+    engine = DAGEngine(steps, max_workers=2)
+
+    engine.run(fake_context_factory({"input": "source"}))
+
+    assert maximum_active == 2
+
+
 def test_failure_stops_dependent_execution(fake_context_factory):
     events = []
 

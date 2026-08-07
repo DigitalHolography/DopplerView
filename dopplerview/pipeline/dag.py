@@ -2,12 +2,13 @@
 
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Callable, Dict, Iterable, List, Optional, Set
+from typing import Callable, Dict, Iterable, List, Optional, Set, Union
 import threading
 import time
 import logging
 
 from dopplerview.pipeline.step import BaseStep
+from dopplerview.pipeline.definition import PipelineDefinition
 from dopplerview.utils.runtime_metrics import (
     ProcessMemoryMeasurement,
     available_cpu_count,
@@ -28,24 +29,24 @@ class DAGEngine:
 
     def __init__(
         self,
-        steps: Iterable[BaseStep],
+        steps: Union[Iterable[BaseStep], PipelineDefinition],
         debug_mode: bool = False,
         max_workers: Optional[int] = 1,
     ):
-        registered_steps = list(steps)
-        self._validate_unique_names(registered_steps)
-        self.steps: Dict[str, BaseStep] = {
-            step.name: step for step in registered_steps
-        }
+        self.definition = (
+            steps if isinstance(steps, PipelineDefinition) else PipelineDefinition(steps)
+        )
+        registered_steps = list(self.definition.steps)
+        self.steps: Dict[str, BaseStep] = dict(self.definition.steps_by_name)
         self._registration_index = {
             step.name: index for index, step in enumerate(registered_steps)
         }
         self.debug_mode = debug_mode
         self.max_workers = max_workers
 
-        self.graph: Dict[str, Set[str]] = self._build_dependency_graph()
-        self.reverse_graph: Dict[str, Set[str]] = self._build_reverse_graph()
-        self.execution_order: List[str] = self._topological_sort()
+        self.graph = self.definition.graph
+        self.reverse_graph = self.definition.reverse_graph
+        self.execution_order = self.definition.execution_order
 
         # Mutable state reset between run() calls
         self._invalidated: Set[str] = set()
@@ -222,7 +223,7 @@ class DAGEngine:
             self._mark_invalidated(step.name)
             return True
         
-        new_hash = step.config_fingerprint(ctx) 
+        new_hash = step.fingerprint(ctx)
         old_hash = ctx.metadata["step_hashes"].get(step.name)
         if old_hash != new_hash:
             if self.debug_mode:
@@ -305,6 +306,7 @@ class DAGEngine:
         callback: Optional[Callable] = None,
     ) -> None:
         """Execute a single step, update hashes, and export outputs."""
+        step_fingerprint = step.fingerprint(ctx)
         start = time.perf_counter()
         memory = ProcessMemoryMeasurement().start()
         status = "failed"
@@ -340,8 +342,31 @@ class DAGEngine:
         if callback:
             callback("step_done", step.name, elapsed)
 
-        step.export(ctx, debug_mode=self.debug_mode)
-        ctx.metadata["step_hashes"][step.name] = step.config_fingerprint(ctx)
+        self._record_step_fingerprint(ctx, step, step_fingerprint)
+        step.export(
+            ctx,
+            debug_mode=self.debug_mode,
+            fingerprint=step_fingerprint,
+        )
+
+    @staticmethod
+    def _record_step_fingerprint(ctx, step, step_fingerprint):
+        record_step_fingerprint = getattr(ctx, "record_step_fingerprint", None)
+        if record_step_fingerprint is not None:
+            record_step_fingerprint(
+                step.name,
+                step.produces,
+                step_fingerprint,
+            )
+            return
+        ctx.metadata.setdefault("step_hashes", {})[step.name] = step_fingerprint
+        set_artifact_fingerprints = getattr(ctx, "set_artifact_fingerprints", None)
+        if set_artifact_fingerprints is not None:
+            set_artifact_fingerprints(
+                step.name,
+                step.produces,
+                step_fingerprint,
+            )
 
     # ------------------------------------------------------------------
     # Public run interface
@@ -418,23 +443,29 @@ class DAGEngine:
             else:
                 # Multiple independent steps: run in parallel
                 futures = {}
-                with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                effective_workers = min(len(wave), self.max_workers)
+                with ThreadPoolExecutor(max_workers=effective_workers) as executor:
                     record_for_context(
                         ctx,
                         "dag_wave",
                         wave=wave_index,
                         ready_steps=len(wave),
-                        effective_workers=min(len(wave), executor._max_workers),
+                        effective_workers=effective_workers,
                         configured_workers=self.max_workers,
                     )
-                    for step_name in wave:
+                    for offset, step_name in enumerate(wave):
                         future = executor.submit(
                             self._execute_step_in_run,
-                            ctx, step_name, completed, total, callback,
+                            ctx,
+                            step_name,
+                            completed + offset,
+                            total,
+                            callback,
                         )
                         futures[future] = step_name
 
                     for future in as_completed(futures):
+                        step_name = futures[future]
                         try:
                             future.result()
 
@@ -442,6 +473,9 @@ class DAGEngine:
                             logger.exception(
                                 f"[DAG] Step '{step_name}' failed"
                             )
+                            for pending in futures:
+                                if pending is not future:
+                                    pending.cancel()
                             raise
 
                         completed += 1
@@ -480,7 +514,13 @@ class DAGEngine:
             )
             if callback:
                 callback("step_skipped", step_name)
-            step.export(ctx, debug_mode=self.debug_mode)
+            step_fingerprint = step.fingerprint(ctx)
+            self._record_step_fingerprint(ctx, step, step_fingerprint)
+            step.export(
+                ctx,
+                debug_mode=self.debug_mode,
+                fingerprint=step_fingerprint,
+            )
             return
 
         logger.info(f"[DAG] Running step: '{step_name}'")

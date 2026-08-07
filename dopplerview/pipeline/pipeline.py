@@ -1,4 +1,5 @@
 from pathlib import Path
+import hashlib
 import os
 import threading
 import traceback
@@ -9,6 +10,7 @@ import json
 from typing import Any, Dict
 
 from dopplerview.pipeline.dag import DAGEngine
+from dopplerview.pipeline.definition import PipelineDefinition
 from dopplerview.pipeline.execution_profile import ExecutionProfile
 from dopplerview.pipeline.execution_policy import ExecutionPolicy
 from dopplerview.models.manager import ModelManager
@@ -23,16 +25,7 @@ from dopplerview.utils.runtime_metrics import (
     record_for_context,
 )
 
-from dopplerview.pipeline.steps.read_moments import ReadMomentsStep
-from dopplerview.pipeline.steps.preprocess import PreprocessStep
-from dopplerview.pipeline.steps.optic_disc import OpticDiscSegmentationStep
-from dopplerview.pipeline.steps.eye_laterality_classification import EyeLateralityClassificationStep
-from dopplerview.pipeline.steps.vessel_segmentation import RetinalVesselSegmentationStep, ChoroidalVesselSegmentationStep
-from dopplerview.pipeline.steps.pulse_analysis import PulseAnalysisStep
-from dopplerview.pipeline.steps.av_segmentation import ChoroidalAVSegmentationStep, RetinalAVSegmentationStep
 from dopplerview.input_output.read_folder import DopplerViewFolder, HolodopplerFolder
-from dopplerview.pipeline.steps.vessel_velocity_estimator import VesselVelocityEstimatorStep
-from dopplerview.pipeline.steps.arterial_waveform_analysis import ArterialWaveformAnalysisStep
 
 import logging
 logger = logging.getLogger(__name__)
@@ -51,7 +44,8 @@ class Context:
         self.model_manager = None
         self.model_instances = {}
         self.metadata = {
-            "step_hashes": {}
+            "step_hashes": {},
+            "artifact_fingerprints": {},
         }
         self.runtime_metrics = RuntimeMetrics()
         self.input_list = []
@@ -82,6 +76,7 @@ class Context:
 
         self.lock = threading.RLock()
         self.cache_lock = threading.Lock()
+        self.model_lock = threading.Lock()
 
     def _init_cache(self, initial_data: Dict[str, Any] = None):
         with self.lock:
@@ -199,14 +194,15 @@ class Context:
         self.model_manager.change_task_model(task_name, model_name)
 
     def get_model(self, model_name):
-        if model_name not in self.model_instances:
-            spec, path = self.model_manager.resolve(model_name)
-            model = ModelManager.build_model_wrapper(
-                spec,
-                path,
-                execution_policy=self.execution_policy,
-            )
-            self.model_instances[model_name] = model
+        with self.model_lock:
+            if model_name not in self.model_instances:
+                spec, path = self.model_manager.resolve(model_name)
+                model = ModelManager.build_model_wrapper(
+                    spec,
+                    path,
+                    execution_policy=self.execution_policy,
+                )
+                self.model_instances[model_name] = model
 
         return self.model_instances[model_name]
     
@@ -216,6 +212,33 @@ class Context:
     def get_current_model_for_task(self, task_name):
         model_name = self.model_manager.get_current_model_name_for_task(task_name)
         return self.get_model(model_name)
+
+    def get_model_identity(self, model_name):
+        """Return registry identity without downloading or loading the model."""
+        return self.model_manager.get_identity(model_name)
+
+    def get_artifact_fingerprint(self, key):
+        with self.lock:
+            return self.metadata.setdefault("artifact_fingerprints", {}).get(key)
+
+    def set_artifact_fingerprints(self, step_name, keys, step_fingerprint):
+        with self.lock:
+            identities = self.metadata.setdefault("artifact_fingerprints", {})
+            for key in keys:
+                payload = f"{step_name}:{key}:{step_fingerprint}"
+                identities[key] = hashlib.sha256(payload.encode()).hexdigest()
+
+    def record_step_fingerprint(self, step_name, keys, step_fingerprint):
+        """Atomically publish step and produced-artifact identities."""
+        with self.lock:
+            self.metadata.setdefault("step_hashes", {})[
+                step_name
+            ] = step_fingerprint
+            self.set_artifact_fingerprints(
+                step_name,
+                keys,
+                step_fingerprint,
+            )
     
     def create_output_folder(self):
         if self.DV_folder is None:
@@ -247,6 +270,7 @@ class Context:
     def set(self, key: str, value: Any):
         with self.lock:
             self.__cache[key] = (value, 'produced')
+            self.metadata.setdefault("artifact_fingerprints", {}).pop(key, None)
 
     def get(self, key: str):
         with self.lock:
@@ -269,6 +293,7 @@ class Context:
     def clear(self):
         with self.lock:
             self.__cache.clear()
+            self.metadata["artifact_fingerprints"] = {}
 
     def is_empty(self):
         return self.__cache == {}
@@ -327,7 +352,13 @@ class Context:
     #     h5_file.write_dict_to_h5(cache, filepath, overwrite=False)
 
 class Pipeline:
-    def __init__(self, output_manager, debug_mode=False, execution_profile=None):
+    def __init__(
+        self,
+        output_manager,
+        debug_mode=False,
+        execution_profile=None,
+        definition=None,
+    ):
         """
         Initializes the pipeline with the given model registry and configuration.
         Args:
@@ -342,25 +373,13 @@ class Pipeline:
             execution_profile=execution_profile,
         )
 
-        # Register steps
-        self.steps = [
-            ReadMomentsStep(),
-            PreprocessStep(),
-            EyeLateralityClassificationStep(),
-            OpticDiscSegmentationStep(),
-            RetinalVesselSegmentationStep(),
-            ChoroidalVesselSegmentationStep(),
-            PulseAnalysisStep(),
-            RetinalAVSegmentationStep(),
-            ChoroidalAVSegmentationStep(),
-            VesselVelocityEstimatorStep(),
-            ArterialWaveformAnalysisStep(),
-        ]
+        self.definition = definition or PipelineDefinition.default()
+        self.steps = list(self.definition.steps)
 
         self.engine = DAGEngine(
-            self.steps,
+            self.definition,
             debug_mode=debug_mode,
-            max_workers=self.ctx.execution_profile.dag_max_workers,
+            max_workers=self.ctx.execution_policy.dag_concurrency,
         )
 
     @property
@@ -374,7 +393,7 @@ class Pipeline:
         self.engine.max_workers = policy.dag_concurrency
 
     def get_step_names(self):
-        return self.engine.execution_order
+        return self.definition.execution_order
     
     def is_cached(self, step_name):
         if self.ctx.is_empty():
@@ -383,17 +402,10 @@ class Pipeline:
         return self.engine._should_run(step, self.ctx) == False
     
     def resolve_execution_graph(self, targets=None):
-        if targets == []:
-            return []
-
-        if targets is None:
-            return self.engine.execution_order
-
-        required_steps = self.engine._resolve_required_steps(targets)
-        return required_steps
+        return self.definition.resolve_execution_graph(targets)
     
     def get_downstream_steps(self, step_name):
-        return self.engine._collect_downstream(step_name)
+        return self.definition.get_downstream_steps(step_name)
 
     def load_dopplerview_config(self, config_path):
         self.ctx.load_dopplerview_config(config_path)
