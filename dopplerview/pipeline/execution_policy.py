@@ -41,8 +41,8 @@ class ExecutionPolicy:
             dag_concurrency = 1
 
         # Native runtimes are automatic by default. The Override suffix is
-        # intentional: early Phase-4 configurations persisted a value of 1 in
-        # users' copied config files, which severely throttled CPU inference.
+        # intentional: early configurations persisted a value of 1 in
+        # users' copied config files, which severely throttled deep models CPU inference.
         configured_native_threads = execution.get(
             "NativeThreadsPerTaskOverride",
             "auto",

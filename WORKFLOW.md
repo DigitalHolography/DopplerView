@@ -54,17 +54,20 @@ Supported formats:
 
 ---
 
-## 1. High-Level Architecture
+## 1. Architecture Overview
 
-DopplerView is built around a modular, deterministic pipeline designed for:
+DopplerView is built around four core components:
 
-* Reproducibility
-* Partial recomputation
-* Clear dependency management
-* Model version traceability
-* Separation of concerns
+1. **Model Registry + Model Manager**
+2. **PipelineDefinition (static steps and DAG topology)**
+3. **Pipeline + DAGEngine (runtime execution)**
+4. **Context (runtime data container)**
 
 Execution flow:
+
+The GUI main process reads `PipelineDefinition` for step selection and sends a
+picklable run specification to its child worker. Only the CLI or child worker
+constructs the runtime pipeline shown below.
 
 ```
 CLI / GUI
@@ -124,7 +127,7 @@ class ExampleStep(BaseStep):
 
 ### 2.2 Dependency Resolution
 
-During initialization:
+During `PipelineDefinition` initialization:
 
 1. All steps are registered.
 2. The engine maps:
@@ -145,10 +148,10 @@ If a cycle is detected, execution fails immediately.
 
 ## 3. Execution Engine
 
-The `DAGEngine` is responsible for:
+`PipelineDefinition` owns static validation, dependency resolution, and
+deterministic topology. `DAGEngine` consumes that definition and owns runtime
+behavior:
 
-* Dependency resolution
-* Topological sorting
 * Selective execution
 * Cache validation
 * Downstream invalidation

@@ -9,6 +9,7 @@ import json
 from typing import Any, Dict
 
 from dopplerview.pipeline.dag import DAGEngine
+from dopplerview.pipeline.definition import PipelineDefinition
 from dopplerview.pipeline.execution_profile import ExecutionProfile
 from dopplerview.pipeline.execution_policy import ExecutionPolicy
 from dopplerview.models.manager import ModelManager
@@ -23,16 +24,7 @@ from dopplerview.utils.runtime_metrics import (
     record_for_context,
 )
 
-from dopplerview.pipeline.steps.read_moments import ReadMomentsStep
-from dopplerview.pipeline.steps.preprocess import PreprocessStep
-from dopplerview.pipeline.steps.optic_disc import OpticDiscSegmentationStep
-from dopplerview.pipeline.steps.eye_laterality_classification import EyeLateralityClassificationStep
-from dopplerview.pipeline.steps.vessel_segmentation import RetinalVesselSegmentationStep, ChoroidalVesselSegmentationStep
-from dopplerview.pipeline.steps.pulse_analysis import PulseAnalysisStep
-from dopplerview.pipeline.steps.av_segmentation import ChoroidalAVSegmentationStep, RetinalAVSegmentationStep
 from dopplerview.input_output.read_folder import DopplerViewFolder, HolodopplerFolder
-from dopplerview.pipeline.steps.vessel_velocity_estimator import VesselVelocityEstimatorStep
-from dopplerview.pipeline.steps.arterial_waveform_analysis import ArterialWaveformAnalysisStep
 
 import logging
 logger = logging.getLogger(__name__)
@@ -327,7 +319,13 @@ class Context:
     #     h5_file.write_dict_to_h5(cache, filepath, overwrite=False)
 
 class Pipeline:
-    def __init__(self, output_manager, debug_mode=False, execution_profile=None):
+    def __init__(
+        self,
+        output_manager,
+        debug_mode=False,
+        execution_profile=None,
+        definition=None,
+    ):
         """
         Initializes the pipeline with the given model registry and configuration.
         Args:
@@ -342,23 +340,11 @@ class Pipeline:
             execution_profile=execution_profile,
         )
 
-        # Register steps
-        self.steps = [
-            ReadMomentsStep(),
-            PreprocessStep(),
-            EyeLateralityClassificationStep(),
-            OpticDiscSegmentationStep(),
-            RetinalVesselSegmentationStep(),
-            ChoroidalVesselSegmentationStep(),
-            PulseAnalysisStep(),
-            RetinalAVSegmentationStep(),
-            ChoroidalAVSegmentationStep(),
-            VesselVelocityEstimatorStep(),
-            ArterialWaveformAnalysisStep(),
-        ]
+        self.definition = definition or PipelineDefinition.default()
+        self.steps = list(self.definition.steps)
 
         self.engine = DAGEngine(
-            self.steps,
+            self.definition,
             debug_mode=debug_mode,
             max_workers=self.ctx.execution_profile.dag_max_workers,
         )
@@ -374,7 +360,7 @@ class Pipeline:
         self.engine.max_workers = policy.dag_concurrency
 
     def get_step_names(self):
-        return self.engine.execution_order
+        return self.definition.execution_order
     
     def is_cached(self, step_name):
         if self.ctx.is_empty():
@@ -383,17 +369,10 @@ class Pipeline:
         return self.engine._should_run(step, self.ctx) == False
     
     def resolve_execution_graph(self, targets=None):
-        if targets == []:
-            return []
-
-        if targets is None:
-            return self.engine.execution_order
-
-        required_steps = self.engine._resolve_required_steps(targets)
-        return required_steps
+        return self.definition.resolve_execution_graph(targets)
     
     def get_downstream_steps(self, step_name):
-        return self.engine._collect_downstream(step_name)
+        return self.definition.get_downstream_steps(step_name)
 
     def load_dopplerview_config(self, config_path):
         self.ctx.load_dopplerview_config(config_path)

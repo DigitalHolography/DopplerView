@@ -2,12 +2,13 @@
 
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Callable, Dict, Iterable, List, Optional, Set
+from typing import Callable, Dict, Iterable, List, Optional, Set, Union
 import threading
 import time
 import logging
 
 from dopplerview.pipeline.step import BaseStep
+from dopplerview.pipeline.definition import PipelineDefinition
 from dopplerview.utils.runtime_metrics import (
     ProcessMemoryMeasurement,
     available_cpu_count,
@@ -28,24 +29,24 @@ class DAGEngine:
 
     def __init__(
         self,
-        steps: Iterable[BaseStep],
+        steps: Union[Iterable[BaseStep], PipelineDefinition],
         debug_mode: bool = False,
         max_workers: Optional[int] = 1,
     ):
-        registered_steps = list(steps)
-        self._validate_unique_names(registered_steps)
-        self.steps: Dict[str, BaseStep] = {
-            step.name: step for step in registered_steps
-        }
+        self.definition = (
+            steps if isinstance(steps, PipelineDefinition) else PipelineDefinition(steps)
+        )
+        registered_steps = list(self.definition.steps)
+        self.steps: Dict[str, BaseStep] = dict(self.definition.steps_by_name)
         self._registration_index = {
             step.name: index for index, step in enumerate(registered_steps)
         }
         self.debug_mode = debug_mode
         self.max_workers = max_workers
 
-        self.graph: Dict[str, Set[str]] = self._build_dependency_graph()
-        self.reverse_graph: Dict[str, Set[str]] = self._build_reverse_graph()
-        self.execution_order: List[str] = self._topological_sort()
+        self.graph = self.definition.graph
+        self.reverse_graph = self.definition.reverse_graph
+        self.execution_order = self.definition.execution_order
 
         # Mutable state reset between run() calls
         self._invalidated: Set[str] = set()
