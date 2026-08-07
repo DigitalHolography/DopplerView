@@ -184,7 +184,7 @@ Runtime parallelism is configured separately from scientific parameters:
 ```json
 "Execution": {
   "NumberOfWorkers": 0.5,
-  "DagConcurrency": 1
+  "DagConcurrency": "auto"
 }
 ```
 
@@ -192,6 +192,10 @@ Runtime parallelism is configured separately from scientific parameters:
 all but one, or a fraction such as `0.5`. All internally parallel steps share
 one bounded executor, so their combined Python worker count cannot exceed this
 resolved capacity. Execution settings do not invalidate scientific caches.
+Independent DAG branches run concurrently with an automatic bound of two
+steps. `DagConcurrency` can be set to a fixed count, `-1`,
+`-2`, or a CPU fraction; the resolved value is capped at the CPUs available to
+the process. Setting it to `1` explicitly selects serial DAG execution.
 Native libraries and inference runtimes select a machine-appropriate thread
 count automatically. Advanced diagnostics can force a fixed value with
 `NativeThreadsPerTaskOverride`; the sequential reference profile always uses

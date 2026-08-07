@@ -50,6 +50,10 @@ class FakeContext:
                 payload.encode()
             ).hexdigest()
 
+    def record_step_fingerprint(self, step_name, keys, step_fingerprint):
+        self.metadata["step_hashes"][step_name] = step_fingerprint
+        self.set_artifact_fingerprints(step_name, keys, step_fingerprint)
+
     def has(self, key) -> bool:
         return key in self.values
 

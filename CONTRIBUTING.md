@@ -143,6 +143,11 @@ results = ctx.parallel.map(
 The runtime resolves adaptive worker settings and enforces one global capacity
 across simultaneous operations.
 
+Independent DAG branches may also overlap. This is centrally bounded by the
+execution policy (two steps by default), so a step contributor does not create
+or configure DAG threads. If concurrent steps both use `ctx.parallel`, their
+internal work still shares the same global executor capacity.
+
 ---
 
 ### 1.3 Caching & Fingerprinting

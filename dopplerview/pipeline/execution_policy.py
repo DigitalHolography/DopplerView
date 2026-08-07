@@ -36,7 +36,19 @@ class ExecutionPolicy:
         configured_workers = profile.operation_workers(configured_workers)
         workers = compute_n_jobs(configured_workers, cpu_count=cpus)
 
-        dag_concurrency = max(1, int(execution.get("DagConcurrency", 1)))
+        # The default allows the independent branches present in the current
+        # DAG to overlap without scaling step-level concurrency with every CPU.
+        configured_dag_concurrency = execution.get(
+            "DagConcurrency",
+            "auto",
+        )
+        if configured_dag_concurrency in (None, "auto", "automatic"):
+            dag_concurrency = min(2, cpus)
+        else:
+            dag_concurrency = min(
+                cpus,
+                compute_n_jobs(configured_dag_concurrency, cpu_count=cpus),
+            )
         if profile is ExecutionProfile.SEQUENTIAL_REFERENCE:
             dag_concurrency = 1
 

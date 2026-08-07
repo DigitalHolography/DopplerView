@@ -76,6 +76,7 @@ class Context:
 
         self.lock = threading.RLock()
         self.cache_lock = threading.Lock()
+        self.model_lock = threading.Lock()
 
     def _init_cache(self, initial_data: Dict[str, Any] = None):
         with self.lock:
@@ -193,14 +194,15 @@ class Context:
         self.model_manager.change_task_model(task_name, model_name)
 
     def get_model(self, model_name):
-        if model_name not in self.model_instances:
-            spec, path = self.model_manager.resolve(model_name)
-            model = ModelManager.build_model_wrapper(
-                spec,
-                path,
-                execution_policy=self.execution_policy,
-            )
-            self.model_instances[model_name] = model
+        with self.model_lock:
+            if model_name not in self.model_instances:
+                spec, path = self.model_manager.resolve(model_name)
+                model = ModelManager.build_model_wrapper(
+                    spec,
+                    path,
+                    execution_policy=self.execution_policy,
+                )
+                self.model_instances[model_name] = model
 
         return self.model_instances[model_name]
     
@@ -216,13 +218,27 @@ class Context:
         return self.model_manager.get_identity(model_name)
 
     def get_artifact_fingerprint(self, key):
-        return self.metadata.setdefault("artifact_fingerprints", {}).get(key)
+        with self.lock:
+            return self.metadata.setdefault("artifact_fingerprints", {}).get(key)
 
     def set_artifact_fingerprints(self, step_name, keys, step_fingerprint):
-        identities = self.metadata.setdefault("artifact_fingerprints", {})
-        for key in keys:
-            payload = f"{step_name}:{key}:{step_fingerprint}"
-            identities[key] = hashlib.sha256(payload.encode()).hexdigest()
+        with self.lock:
+            identities = self.metadata.setdefault("artifact_fingerprints", {})
+            for key in keys:
+                payload = f"{step_name}:{key}:{step_fingerprint}"
+                identities[key] = hashlib.sha256(payload.encode()).hexdigest()
+
+    def record_step_fingerprint(self, step_name, keys, step_fingerprint):
+        """Atomically publish step and produced-artifact identities."""
+        with self.lock:
+            self.metadata.setdefault("step_hashes", {})[
+                step_name
+            ] = step_fingerprint
+            self.set_artifact_fingerprints(
+                step_name,
+                keys,
+                step_fingerprint,
+            )
     
     def create_output_folder(self):
         if self.DV_folder is None:
@@ -363,7 +379,7 @@ class Pipeline:
         self.engine = DAGEngine(
             self.definition,
             debug_mode=debug_mode,
-            max_workers=self.ctx.execution_profile.dag_max_workers,
+            max_workers=self.ctx.execution_policy.dag_concurrency,
         )
 
     @property

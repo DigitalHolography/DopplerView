@@ -351,6 +351,14 @@ class DAGEngine:
 
     @staticmethod
     def _record_step_fingerprint(ctx, step, step_fingerprint):
+        record_step_fingerprint = getattr(ctx, "record_step_fingerprint", None)
+        if record_step_fingerprint is not None:
+            record_step_fingerprint(
+                step.name,
+                step.produces,
+                step_fingerprint,
+            )
+            return
         ctx.metadata.setdefault("step_hashes", {})[step.name] = step_fingerprint
         set_artifact_fingerprints = getattr(ctx, "set_artifact_fingerprints", None)
         if set_artifact_fingerprints is not None:
@@ -435,23 +443,29 @@ class DAGEngine:
             else:
                 # Multiple independent steps: run in parallel
                 futures = {}
-                with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                effective_workers = min(len(wave), self.max_workers)
+                with ThreadPoolExecutor(max_workers=effective_workers) as executor:
                     record_for_context(
                         ctx,
                         "dag_wave",
                         wave=wave_index,
                         ready_steps=len(wave),
-                        effective_workers=min(len(wave), executor._max_workers),
+                        effective_workers=effective_workers,
                         configured_workers=self.max_workers,
                     )
-                    for step_name in wave:
+                    for offset, step_name in enumerate(wave):
                         future = executor.submit(
                             self._execute_step_in_run,
-                            ctx, step_name, completed, total, callback,
+                            ctx,
+                            step_name,
+                            completed + offset,
+                            total,
+                            callback,
                         )
                         futures[future] = step_name
 
                     for future in as_completed(futures):
+                        step_name = futures[future]
                         try:
                             future.result()
 
@@ -459,6 +473,9 @@ class DAGEngine:
                             logger.exception(
                                 f"[DAG] Step '{step_name}' failed"
                             )
+                            for pending in futures:
+                                if pending is not future:
+                                    pending.cancel()
                             raise
 
                         completed += 1

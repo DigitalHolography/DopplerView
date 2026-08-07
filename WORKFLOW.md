@@ -181,8 +181,14 @@ pipeline.run(targets=["av_segmentation"])
 The engine:
 
 1. Resolves the minimal required subgraph.
-2. Executes only necessary upstream steps.
-3. Preserves global topological order.
+2. Groups ready, independent steps into deterministic dependency waves.
+3. Runs each wave with the centralized bounded DAG concurrency policy.
+4. Executes only necessary upstream steps while preserving dependency order.
+
+The default policy permits at most two independent steps at once. A
+machine-aware `DagConcurrency` setting can be used for profiling, while the
+`sequential_reference` profile always forces one. Internally parallel work
+from concurrent steps shares the single bounded context executor.
 
 This enables:
 
