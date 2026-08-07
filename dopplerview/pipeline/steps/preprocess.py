@@ -16,6 +16,7 @@ class PreprocessStep(BaseStep):
         return {
             "FlatFieldCorrection": {
                 "GWRatio": ctx.dopplerview_config.get("FlatFieldCorrection", {}).get("GWRatio", 0.07),
+                "Border": ctx.dopplerview_config.get("FlatFieldCorrection", {}).get("Border", 0.15)
             }
         }
 
