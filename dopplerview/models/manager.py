@@ -24,6 +24,28 @@ class ModelManager:
         )
 
         return spec, Path(local_path)
+
+    def get_identity(self, model_name: str):
+        """Return stable scientific identity without consulting Hugging Face.
+
+        Local cache paths, snapshot links, timestamps and download metadata are
+        deliberately excluded: they can change while the selected model is
+        scientifically identical and would turn every debug run into a miss.
+        """
+        spec = self.registry.get(model_name)
+        return {
+            "name": spec.name,
+            "task": spec.task,
+            "repository": spec.hf_repo,
+            "filename": spec.filename,
+            "format": spec.format,
+            "revision": spec.revision,
+            "input_norm": spec.input_norm,
+            "output_activation": spec.output_activation,
+            "input_channels": spec.input_channels,
+            "input_shape": spec.input_shape,
+            "output_shape": spec.output_shape,
+        }
     
     def change_task_model(self, task_name: str, model_name: str):
         if task_name not in self.model_tasks:

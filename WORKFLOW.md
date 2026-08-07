@@ -16,7 +16,9 @@ For instructions on extending the system, see [`CONTRIBUTING.md`](CONTRIBUTING.m
 Each pipeline step computes a unique fingerprint based on:
 
 * Relevant configuration
-* Input data
+* Upstream artifact identities
+* Selected model registry identity and configured revision
+* External source-file identity
 
 If configuration or inputs change, only the necessary steps are recomputed.
 
@@ -240,22 +242,33 @@ Each step has a deterministic fingerprint.
 The fingerprint depends on:
 
 * Relevant configuration
-* Input data signatures
+* Required upstream artifact fingerprints
+* Stable model registry identity
+* External input identity
+* Fingerprint schema and application version
 
 By default:
 
-* The entire configuration is hashed.
-* All required inputs are hashed.
-* NumPy arrays are hashed via raw bytes.
+* Execution-only configuration is excluded.
+* Produced artifacts inherit an identity from their producer step and key.
+* Downstream steps consume those identities instead of repeatedly hashing large arrays.
+* A direct NumPy input without producer metadata falls back to dtype-, shape-, and content hashing.
+* Large source files use resolved path, size, and nanosecond modification time.
 
 Fingerprint formula (conceptually):
 
 ```
 fingerprint = hash(
     relevant_config +
-    hashed_inputs
+    upstream_artifact_fingerprints +
+    model_identity +
+    external_input_identity +
+    schema_and_app_version
 )
 ```
+
+Configuration-only hashes written by older versions intentionally fail the
+new schema comparison, causing a one-time safe cache rebuild.
 
 ---
 

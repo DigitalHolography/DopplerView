@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+import hashlib
 
 import pytest
 
@@ -29,7 +30,7 @@ class FakeContext:
     def __init__(self, initial: dict[str, Any] | None = None, config=None) -> None:
         self.values = dict(initial or {})
         self.dopplerview_config = dict(config or {})
-        self.metadata = {"step_hashes": {}}
+        self.metadata = {"step_hashes": {}, "artifact_fingerprints": {}}
         self.output_manager = RecordingOutputManager()
 
     def get(self, key):
@@ -37,6 +38,17 @@ class FakeContext:
 
     def set(self, key, value) -> None:
         self.values[key] = value
+        self.metadata["artifact_fingerprints"].pop(key, None)
+
+    def get_artifact_fingerprint(self, key):
+        return self.metadata["artifact_fingerprints"].get(key)
+
+    def set_artifact_fingerprints(self, step_name, keys, step_fingerprint):
+        for key in keys:
+            payload = f"{step_name}:{key}:{step_fingerprint}"
+            self.metadata["artifact_fingerprints"][key] = hashlib.sha256(
+                payload.encode()
+            ).hexdigest()
 
     def has(self, key) -> bool:
         return key in self.values

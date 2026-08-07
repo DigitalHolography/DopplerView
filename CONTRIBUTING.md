@@ -156,7 +156,10 @@ fingerprint(ctx)
 Default behavior hashes:
 
 * Relevant config
-* All required inputs
+* Fingerprints of all required upstream artifacts
+* The selected model's stable registry identity
+* Source-file identity for external inputs
+* The fingerprint schema and DopplerView version
 
 If:
 
@@ -268,8 +271,16 @@ produces = ["segmentation"]
 
 By default, fingerprint hashes:
 
-* Entire config
-* All required inputs
+* Scientific configuration (execution policy is excluded)
+* All declared `requires` through their upstream artifact identities
+* A model identity automatically when the step name is a model task
+
+If a step uses an additional model task, declare it without adding scheduling
+or I/O code:
+
+```python
+model_tasks = {"auxiliary_model_task"}
+```
 
 If your step only depends on part of config:
 

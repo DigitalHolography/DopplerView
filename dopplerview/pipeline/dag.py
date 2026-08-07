@@ -223,7 +223,7 @@ class DAGEngine:
             self._mark_invalidated(step.name)
             return True
         
-        new_hash = step.config_fingerprint(ctx) 
+        new_hash = step.fingerprint(ctx)
         old_hash = ctx.metadata["step_hashes"].get(step.name)
         if old_hash != new_hash:
             if self.debug_mode:
@@ -306,6 +306,7 @@ class DAGEngine:
         callback: Optional[Callable] = None,
     ) -> None:
         """Execute a single step, update hashes, and export outputs."""
+        step_fingerprint = step.fingerprint(ctx)
         start = time.perf_counter()
         memory = ProcessMemoryMeasurement().start()
         status = "failed"
@@ -341,8 +342,23 @@ class DAGEngine:
         if callback:
             callback("step_done", step.name, elapsed)
 
-        step.export(ctx, debug_mode=self.debug_mode)
-        ctx.metadata["step_hashes"][step.name] = step.config_fingerprint(ctx)
+        self._record_step_fingerprint(ctx, step, step_fingerprint)
+        step.export(
+            ctx,
+            debug_mode=self.debug_mode,
+            fingerprint=step_fingerprint,
+        )
+
+    @staticmethod
+    def _record_step_fingerprint(ctx, step, step_fingerprint):
+        ctx.metadata.setdefault("step_hashes", {})[step.name] = step_fingerprint
+        set_artifact_fingerprints = getattr(ctx, "set_artifact_fingerprints", None)
+        if set_artifact_fingerprints is not None:
+            set_artifact_fingerprints(
+                step.name,
+                step.produces,
+                step_fingerprint,
+            )
 
     # ------------------------------------------------------------------
     # Public run interface
@@ -481,7 +497,13 @@ class DAGEngine:
             )
             if callback:
                 callback("step_skipped", step_name)
-            step.export(ctx, debug_mode=self.debug_mode)
+            step_fingerprint = step.fingerprint(ctx)
+            self._record_step_fingerprint(ctx, step, step_fingerprint)
+            step.export(
+                ctx,
+                debug_mode=self.debug_mode,
+                fingerprint=step_fingerprint,
+            )
             return
 
         logger.info(f"[DAG] Running step: '{step_name}'")

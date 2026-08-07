@@ -9,6 +9,7 @@ class OpticDiscSegmentationStep(BaseStep):
     requires = {"M0_ff_image", "M1_ff_image"}
     produces = {"optic_disc_mask", "optic_disc_center", "optic_disc_width", "optic_disc_height"}
     name = "optic_disc_segmentation"
+    model_tasks = {"optic_disc_detection"}
 
     def _relevant_config(self, ctx):
         params = ctx.dopplerview_config["Mask"]

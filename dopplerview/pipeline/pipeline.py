@@ -1,4 +1,5 @@
 from pathlib import Path
+import hashlib
 import os
 import threading
 import traceback
@@ -43,7 +44,8 @@ class Context:
         self.model_manager = None
         self.model_instances = {}
         self.metadata = {
-            "step_hashes": {}
+            "step_hashes": {},
+            "artifact_fingerprints": {},
         }
         self.runtime_metrics = RuntimeMetrics()
         self.input_list = []
@@ -208,6 +210,19 @@ class Context:
     def get_current_model_for_task(self, task_name):
         model_name = self.model_manager.get_current_model_name_for_task(task_name)
         return self.get_model(model_name)
+
+    def get_model_identity(self, model_name):
+        """Return registry identity without downloading or loading the model."""
+        return self.model_manager.get_identity(model_name)
+
+    def get_artifact_fingerprint(self, key):
+        return self.metadata.setdefault("artifact_fingerprints", {}).get(key)
+
+    def set_artifact_fingerprints(self, step_name, keys, step_fingerprint):
+        identities = self.metadata.setdefault("artifact_fingerprints", {})
+        for key in keys:
+            payload = f"{step_name}:{key}:{step_fingerprint}"
+            identities[key] = hashlib.sha256(payload.encode()).hexdigest()
     
     def create_output_folder(self):
         if self.DV_folder is None:
@@ -239,6 +254,7 @@ class Context:
     def set(self, key: str, value: Any):
         with self.lock:
             self.__cache[key] = (value, 'produced')
+            self.metadata.setdefault("artifact_fingerprints", {}).pop(key, None)
 
     def get(self, key: str):
         with self.lock:
@@ -261,6 +277,7 @@ class Context:
     def clear(self):
         with self.lock:
             self.__cache.clear()
+            self.metadata["artifact_fingerprints"] = {}
 
     def is_empty(self):
         return self.__cache == {}
