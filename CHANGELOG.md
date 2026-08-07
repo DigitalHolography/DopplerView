@@ -7,6 +7,8 @@
 * Save outputs even for cached steps
 * Introduce a shared model executor following an execution policy, to ensure that parallelization libraries (OpenCV, scipy), models and concurrent DAG steps don't over-use threads.
 * Refactorize OutputManager, Pipeline and cache system
+* GUI
+    * Number of workers and max number of concurrent steps can now be modified in the GUI
 
 ## 1.7.4
 * GUI

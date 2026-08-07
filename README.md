@@ -201,6 +201,13 @@ count automatically. Advanced diagnostics can force a fixed value with
 `NativeThreadsPerTaskOverride`; the sequential reference profile always uses
 one native thread.
 
+The GUI exposes **Number of workers** and **DAG concurrency** under **Settings**.
+The worker control selects an exact integer from 1 to the current machine's
+available CPU capacity; portable values such as `-1` and `0.5` remain available
+in JSON configuration files. GUI values are runtime-only overrides, are
+reapplied after local per-measure configuration is loaded, and do not modify
+the configuration file or scientific cache identity.
+
 See `WORKFLOW.md` for details on how configuration impacts execution.
 
 ---
