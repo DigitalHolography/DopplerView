@@ -24,6 +24,12 @@ def _run_indexed_chunk(function, indexed_items, cancellation):
     return results
 
 
+def _run_indexed_chunk_into(function, indexed_items, output, cancellation):
+    for index, item in indexed_items:
+        cancellation.check()
+        output[index] = function(item)
+
+
 class SharedExecutor:
     """
     A single executor shared by all parallel operations in the pipeline.
@@ -117,6 +123,69 @@ class SharedExecutor:
             for index, result in future.result():
                 ordered_results[index] = result
         return np.stack(ordered_results, axis=0)
+
+    def map_into(
+        self,
+        function: Callable,
+        iterable: Iterable,
+        output: np.ndarray,
+        *,
+        n_jobs=-1,
+        task_name=None,
+    ):
+        """Map directly into a caller-owned array without a final stack copy."""
+        if self._closed:
+            raise RuntimeError("Shared executor is closed.")
+        self.cancellation.check()
+
+        items = list(iterable)
+        if len(items) != len(output):
+            raise ValueError("Output length must match the mapped iterable length.")
+        if not items:
+            return output
+
+        effective_workers = min(self.resolve_workers(n_jobs), len(items))
+        snapshot = process_snapshot()
+        emit_metric(
+            "parallel_operation",
+            task=task_name or getattr(function, "__name__", "anonymous"),
+            requested_workers=n_jobs,
+            effective_workers=effective_workers,
+            shared_capacity=self.max_workers,
+            available_cpus=self.available_cpus,
+            items=len(items),
+            chunking=True,
+            output_preallocated=True,
+            process_threads=snapshot["process_threads"],
+        )
+        if task_name is not None:
+            logger.info(
+                "    - Running %s with %d shared worker(s)",
+                task_name,
+                effective_workers,
+            )
+
+        indexed = list(enumerate(items))
+        if effective_workers == 1:
+            _run_indexed_chunk_into(
+                function, indexed, output, self.cancellation
+            )
+            return output
+
+        index_chunks = np.array_split(np.arange(len(indexed)), effective_workers)
+        futures = [
+            self._executor.submit(
+                _run_indexed_chunk_into,
+                function,
+                [indexed[index] for index in indices],
+                output,
+                self.cancellation,
+            )
+            for indices in index_chunks
+        ]
+        for future in futures:
+            future.result()
+        return output
 
     def shutdown(self, wait=True):
         if self._closed:
