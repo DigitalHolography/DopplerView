@@ -514,6 +514,42 @@ Keep I/O isolated from core logic when possible.
 
 ---
 
+## 9. Tests
+
+The testsuite can be found in the *tests* folder. It consists only in unit tests, mostly for DAG engine execution, cache behavior and output worker.
+
+In the root folder, run :
+```bash
+python -m pytest
+```
+
+## 10. Benchmarks
+
+DopplerView can be run sequentially or with parallel steps, allowing to compare performance and ensure DAG determinism. 
+
+For a sequential performance reference:
+
+```bash
+dopplerview ./data/patient_01 --execution-profile sequential_reference
+```
+
+To collect a comparable sequential/default baseline with raw per-step timing
+and peak-RSS metrics, run both profiles against the same representative input:
+
+```bash
+python scripts/benchmark_pipeline.py ./data/patient_01.holo --repetitions 3 --output pipeline_baseline.json
+```
+
+The runner creates a fresh pipeline for every sample and alternates profile
+order between repetitions. Optional diagnostic PNG rendering is disabled so it
+does not distort the compute baseline; pass `--diagnostic-images` to measure the
+full diagnostic-output workload instead. The normal HDF5 output is still
+written, so benchmark a disposable copy of patient data when outputs must be
+preserved unchanged.
+
+The same profile can be applied to either the CLI or GUI process with the
+`DOPPLERVIEW_EXECUTION_PROFILE=sequential_reference` environment variable.
+
 ## 9. Design Principles
 
 When contributing, respect:
@@ -550,10 +586,12 @@ Fingerprinting must remain stable.
 
 1. Create new step
 2. Add it to pipeline
-3. Run full pipeline once 3. Modify config
+3. Modify output_config.json, h5_schema.json and default_DV_params.json if needed
+4. Run the full pipeline once, in CLI and GUI
 5. Ensure correct invalidation behavior
 6. Test partial execution
 7. Validate output determinism
+8. Run the testsuite
 
 ---
 
