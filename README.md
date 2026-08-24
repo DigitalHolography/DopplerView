@@ -120,6 +120,9 @@ dopplerview /path/to/measure.holo --config config.json
 *  `-d, --debug`           Enable debug mode. In this mode, steps outputs are read from the cache.h5 (C:\\Users\\*user_name*\\.cache\\dopplerview\\cache\\*measure_name*\\cache.h5), and   
                         only targeted steps are re-run. This is useful for debugging specific       
                         steps without having to re-run the entire pipeline.
+*  `--execution-profile {default,sequential_reference}`
+                        Execution policy. The sequential reference profile forces DAG and
+                        internal operation worker counts to one for performance baselines.
 
 ### Example
 
@@ -127,6 +130,29 @@ dopplerview /path/to/measure.holo --config config.json
 dopplerview ./data/patient_01 \
     --config ./configs/default.json \
 ```
+
+For a sequential performance reference:
+
+```bash
+dopplerview ./data/patient_01 --execution-profile sequential_reference
+```
+
+To collect a comparable sequential/default baseline with raw per-step timing
+and peak-RSS metrics, run both profiles against the same representative input:
+
+```bash
+python scripts/benchmark_pipeline.py ./data/patient_01.holo --repetitions 3 --output pipeline_baseline.json
+```
+
+The runner creates a fresh pipeline for every sample and alternates profile
+order between repetitions. Optional diagnostic PNG rendering is disabled so it
+does not distort the compute baseline; pass `--diagnostic-images` to measure the
+full diagnostic-output workload instead. The normal HDF5 output is still
+written, so benchmark a disposable copy of patient data when outputs must be
+preserved unchanged.
+
+The same profile can be applied to either the CLI or GUI process with the
+`DOPPLERVIEW_EXECUTION_PROFILE=sequential_reference` environment variable.
 ---
 
 # Project Structure
@@ -166,6 +192,35 @@ It controls:
 * Runtime options
 
 Fingerprinting ensures that changing configuration only recomputes affected steps.
+
+Runtime parallelism is configured separately from scientific parameters:
+
+```json
+"Execution": {
+  "NumberOfWorkers": 0.5,
+  "DagConcurrency": "auto"
+}
+```
+
+`NumberOfWorkers` accepts a fixed count, `-1` for all available CPUs, `-2` for
+all but one, or a fraction such as `0.5`. All internally parallel steps share
+one bounded executor, so their combined Python worker count cannot exceed this
+resolved capacity. Execution settings do not invalidate scientific caches.
+Independent DAG branches run concurrently with an automatic bound of two
+steps. `DagConcurrency` can be set to a fixed count, `-1`,
+`-2`, or a CPU fraction; the resolved value is capped at the CPUs available to
+the process. Setting it to `1` explicitly selects serial DAG execution.
+Native libraries and inference runtimes select a machine-appropriate thread
+count automatically. Advanced diagnostics can force a fixed value with
+`NativeThreadsPerTaskOverride`; the sequential reference profile always uses
+one native thread.
+
+The GUI exposes **Number of workers** and **DAG concurrency** under **Settings**.
+The worker control selects an exact integer from 1 to the current machine's
+available CPU capacity; portable values such as `-1` and `0.5` remain available
+in JSON configuration files. GUI values are runtime-only overrides, are
+reapplied after local per-measure configuration is loaded, and do not modify
+the configuration file or scientific cache identity.
 
 See `WORKFLOW.md` for details on how configuration impacts execution.
 

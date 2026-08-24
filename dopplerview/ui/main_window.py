@@ -14,7 +14,12 @@ import cv2
 from dopplerview._version import __version__ as app_version
 from dopplerview.input_output import log_config, user_config
 from dopplerview.input_output.output_manager import OutputManager
-from dopplerview.pipeline.pipeline import Pipeline
+from dopplerview.input_output import read_folder
+from dopplerview.models.registry import ModelRegistryConfig
+from dopplerview.pipeline.definition import PipelineDefinition
+from dopplerview.pipeline.execution_profile import ExecutionProfile
+from dopplerview.utils.parallelization_utils import compute_n_jobs
+from dopplerview.utils.runtime_metrics import available_cpu_count
 
 from dopplerview.ui.image_utils import np_to_tk, resize_preview_to_fit
 from dopplerview.ui.theme import ThemeMixin
@@ -60,14 +65,16 @@ class MainWindow(ThemeMixin):
         output_config_path = user_config.ensure_config_file("output_config.json")
         self.register_config_file(output_config_path, "output_config")
         self.output_manager = OutputManager(h5_schema_path, output_config_path, output_enabled=False)
-        self.pipeline = Pipeline(output_manager=self.output_manager)
+        self.pipeline_definition = PipelineDefinition.default()
+        self.input_list = []
+        self.execution_profile = ExecutionProfile.DEFAULT
 
         models_config = user_config.ensure_config_file("models.yaml")
-        self.pipeline.load_model_registry(models_config)
+        self.models_config_path = Path(models_config)
+        self.model_registry = ModelRegistryConfig(self.models_config_path)
         self.register_config_file(models_config, "models_config")
 
         config_path = user_config.ensure_config_file("default_DV_params.json")
-        # self.pipeline.load_dopplerview_config(config_path)
         self.config_path = tk.StringVar(value=str(config_path))
         self.status_var = tk.StringVar(value="Ready")
         self.register_config_file(config_path, "dopplerview_config")
@@ -92,6 +99,11 @@ class MainWindow(ThemeMixin):
         self._logs_visible = False
         self._height_before_logs: int | None = None
         self.config_mode_var = tk.StringVar(value="default")
+        self.available_cpus = available_cpu_count()
+        self.number_workers_var = tk.IntVar(
+            value=compute_n_jobs(0.5, cpu_count=self.available_cpus)
+        )
+        self.dag_concurrency_var = tk.StringVar(value="Use config")
         self.enable_debug_output = False
 
         self._apply_theme()
@@ -379,7 +391,7 @@ class MainWindow(ThemeMixin):
 
         self.step_vars = {}
         self.step_checkboxes = {}
-        steps = self.pipeline.get_step_names()
+        steps = self.pipeline_definition.execution_order
         optional_steps = {
             "retinal_vessel_velocity_estimator",
             "arterial_waveform_analysis",
@@ -648,6 +660,48 @@ class MainWindow(ThemeMixin):
         config_panel.grid(row=0, column=1, padx=5, pady=5, sticky="nsew")
         config_panel.grid_columnconfigure(0, weight=1)
 
+        execution_frame = ttk.LabelFrame(
+            parent,
+            text="Execution",
+            padding=10,
+        )
+        execution_frame.grid(row=1, column=1, padx=5, pady=5, sticky="nsew")
+        execution_frame.grid_columnconfigure(0, weight=1)
+
+        ttk.Label(execution_frame, text="Number of workers").grid(
+            row=0, column=0, sticky="w"
+        )
+        workers_spinbox = ttk.Spinbox(
+            execution_frame,
+            textvariable=self.number_workers_var,
+            from_=1,
+            to=self.available_cpus,
+            increment=1,
+        )
+        workers_spinbox.grid(row=1, column=0, sticky="ew", pady=(2, 7))
+        ttk.Label(
+            execution_frame,
+            text=f"Worker count for this machine (1–{self.available_cpus}).",
+            style="Muted.TLabel",
+            wraplength=280,
+        ).grid(row=2, column=0, sticky="w", pady=(0, 9))
+
+        ttk.Label(execution_frame, text="DAG concurrency").grid(
+            row=3, column=0, sticky="w"
+        )
+        dag_combo = ttk.Combobox(
+            execution_frame,
+            textvariable=self.dag_concurrency_var,
+            values=("Use config", "auto", "1", "2"),
+        )
+        dag_combo.grid(row=4, column=0, sticky="ew", pady=(2, 7))
+        ttk.Label(
+            execution_frame,
+            text="auto allows up to two ready steps; 1 forces serial execution.",
+            style="Muted.TLabel",
+            wraplength=280,
+        ).grid(row=5, column=0, sticky="w")
+
         # --- Radio buttons ---
         radio_frame = ttk.Frame(config_panel)
         radio_frame.grid(row=0, column=0, sticky="ew", pady=(0, 5))
@@ -698,16 +752,13 @@ class MainWindow(ThemeMixin):
             command=self.modify_output_config
         ).grid(row=4, column=0, sticky="ew", pady=5)
 
-        ctx = self.pipeline.ctx
-        mm = ctx.model_manager
-
         def create_model_selector(parent_widget, label_text, task_name, r):
             ttk.Label(
                 parent_widget,
                 text=label_text,
             ).grid(row=r, column=0, sticky="w")
 
-            values = mm.get_model_name_list_for_task(task_name)
+            values = self.model_registry.list_models_for_task(task_name)
             var = tk.StringVar(value=values[0] if values else "")
 
             combo = ttk.Combobox(
@@ -721,14 +772,12 @@ class MainWindow(ThemeMixin):
             def on_change(event=None):
                 model_name = var.get()
                 self.selected_models[task_name] = model_name
-                ctx.change_model_for_task(task_name, model_name)
                 self._invalidate_step_colors(task_name)
 
             combo.bind("<<ComboboxSelected>>", on_change)
 
             if values:
                 self.selected_models[task_name] = var.get()
-                ctx.change_model_for_task(task_name, var.get())
 
             return r + 2
 
@@ -770,8 +819,8 @@ class MainWindow(ThemeMixin):
 
         self.config_window = tk.Toplevel(self.root)
         self.config_window.title("DopplerView Configuration")
-        self.config_window.geometry("720x440")
-        self.config_window.minsize(640, 380)
+        self.config_window.geometry("760x560")
+        self.config_window.minsize(680, 500)
         self.config_window.transient(self.root)
         self.config_window.configure(bg=self._bg_color)
 
@@ -797,19 +846,17 @@ class MainWindow(ThemeMixin):
         self.check_config_updates()
 
     def on_step_toggle(self, step):
-        pipeline = self.pipeline
-
         selected = self.get_selected_steps()
 
         if self.step_vars[step].get():
             # ADD step → recompute full dependency closure
-            resolved = pipeline.resolve_execution_graph(selected)
+            resolved = self.pipeline_definition.resolve_execution_graph(selected)
 
-            for s in pipeline.get_step_names():
+            for s in self.pipeline_definition.execution_order:
                 self.step_vars[s].set(s in resolved)
         else:
             # REMOVE step + downstream
-            downstream = pipeline.get_downstream_steps(step)
+            downstream = self.pipeline_definition.get_downstream_steps(step)
 
             for s in downstream:
                 self.step_vars[s].set(False)
@@ -839,7 +886,7 @@ class MainWindow(ThemeMixin):
         cb.configure(style=style)
 
     def _invalidate_step_colors(self, step):
-        affected = {step, *self.pipeline.get_downstream_steps(step)}
+        affected = {step, *self.pipeline_definition.get_downstream_steps(step)}
         self._validated_steps.difference_update(affected)
         self.update_step_display()
 
@@ -865,7 +912,7 @@ class MainWindow(ThemeMixin):
         self.progress["value"] = 0
         self.progress_minimal["value"] = 0
         self.progress_batch["value"] = 0
-        self.pipeline.ctx.clear_input_list()
+        self.input_list.clear()
         self._validated_steps.clear()
 
         if isinstance(folders, str):
@@ -873,11 +920,8 @@ class MainWindow(ThemeMixin):
         else:
             folder_list = [Path(f) for f in folders]
 
-        self.pipeline.load_input_list_from_list(folder_list)
-        # self.pipeline
-        # if folder_list[0].suffix == ".holo":
-        #     self.pipeline.ctx.load_input_folder(folder_list[0])  # load first by default, pipeline will handle the rest in batch mode
-        # self.config_path.set(self.pipeline.ctx.dopplerview_config_path)
+        for path in folder_list:
+            self._add_input_path(path)
         self.update_step_display()
 
         self.btn_run.config(state="enabled")
@@ -885,28 +929,51 @@ class MainWindow(ThemeMixin):
 
         self.refresh_input_listbox()
 
-        n_inputs = len(self.pipeline.ctx.input_list)
+        n_inputs = len(self.input_list)
         if n_inputs == 0:
             self.status_var.set("Ready")
         else:
             self.status_var.set(f"Loaded {n_inputs} input file(s)")
+
+    def _add_input_path(self, path):
+        """Resolve a UI selection without constructing an execution context."""
+        path = Path(path)
+        if not path.exists():
+            raise FileNotFoundError(f"Input path not found: {path}")
+        if path.is_dir():
+            holo_files = read_folder.search_holo_files(path)
+            if not holo_files:
+                raise FileNotFoundError(f"No .holo file found in {path}")
+            self.input_list.extend(holo_files)
+            return
+        if path.suffix.lower() == ".txt":
+            with path.open("r") as handle:
+                for line in handle:
+                    candidate = Path(line.strip())
+                    if candidate.is_dir() or (
+                        candidate.suffix.lower() == ".holo" and candidate.is_file()
+                    ):
+                        self.input_list.append(candidate)
+            return
+        if path.suffix.lower() == ".holo" and path.is_file():
+            self.input_list.append(path)
 
     def refresh_input_listbox(self):
         # Advanced UI list
         if hasattr(self, "input_listbox"):
             self.input_listbox.delete(0, tk.END)
 
-            for path in self.pipeline.ctx.input_list:
+            for path in self.input_list:
                 self.input_listbox.insert(tk.END, str(path))
 
         # Minimal UI list
         if hasattr(self, "minimal_input_listbox"):
             self.minimal_input_listbox.delete(0, tk.END)
 
-            for path in self.pipeline.ctx.input_list:
+            for path in self.input_list:
                 self.minimal_input_listbox.insert(tk.END, str(path))
 
-        input_list = list(self.pipeline.ctx.input_list)
+        input_list = list(self.input_list)
         if hasattr(self, "minimal_file_count_var"):
             count = len(input_list)
             if count:
@@ -931,17 +998,17 @@ class MainWindow(ThemeMixin):
     def load_dopplerview_config(self):
         file_path = filedialog.askopenfilename(filetypes=[("JSON files", "*.json")], defaultextension=".json")
         if file_path:
-            self.pipeline.load_dopplerview_config(file_path)
             self.config_path.set(file_path)
 
     def reload_config(self, path):
         config_type = self._config.get(path)
 
         if config_type == "dopplerview_config":
-            self.pipeline.load_dopplerview_config(path)
+            self.config_path.set(str(path))
 
         elif config_type == "models_config":
-            self.pipeline.load_model_registry(path)
+            self.models_config_path = Path(path)
+            self.model_registry = ModelRegistryConfig(self.models_config_path)
             if hasattr(self, "config_container") and self.config_container.winfo_exists():
                 for child in self.config_container.winfo_children():
                     child.destroy()
@@ -981,10 +1048,13 @@ class MainWindow(ThemeMixin):
             subprocess.run(["xdg-open", path])  # Linux
 
     def modify_models_registry(self):
-        self.open_with_default_app(self.pipeline.ctx.model_registry_path)
+        self.open_with_default_app(self.models_config_path)
 
     def modify_dopplerview_config(self):
-        self.open_with_default_app(self.pipeline.ctx.dopplerview_config_path)
+        path = self.config_path.get()
+        if path == "No config loaded":
+            raise FileNotFoundError("No DopplerView configuration is currently selected")
+        self.open_with_default_app(path)
 
     def modify_h5_schema(self):
         self.open_with_default_app(self.output_manager.schema_path)
@@ -994,16 +1064,10 @@ class MainWindow(ThemeMixin):
 
     def update_config_mode(self):
         mode = self.config_mode_var.get()
-        self.pipeline.set_config_mode(mode)
         if mode == "local":
-            if self.pipeline.ctx.DV_folder is not None:
-                config_path = self.pipeline.ctx.DV_folder.dopplerview_config
-                self.pipeline.load_dopplerview_config(config_path)
-            else:
-                config_path = "No config loaded"
+            config_path = "No config loaded"
         else:
             config_path = user_config.ensure_config_file("default_DV_params.json")
-            self.pipeline.load_dopplerview_config(config_path)
 
         self.config_path.set(config_path)
     
@@ -1033,28 +1097,86 @@ class MainWindow(ThemeMixin):
 
     def _make_pipeline_run_spec(self, steps=None):
         """Create a picklable description of the run for the child process."""
+        execution_settings = {}
+        number_workers = self._parse_exact_worker_count(
+            self.number_workers_var.get(),
+            self.available_cpus,
+        )
+        dag_concurrency = self._parse_execution_setting(
+            "DAG concurrency",
+            self.dag_concurrency_var.get(),
+            allow_auto=True,
+        )
+        execution_settings["NumberOfWorkers"] = number_workers
+        if dag_concurrency is not None:
+            execution_settings["DagConcurrency"] = dag_concurrency
+
         return {
             "steps": steps,
-            "input_list": [str(p) for p in self.pipeline.ctx.input_list],
+            "input_list": [str(p) for p in self.input_list],
             "h5_schema_path": str(self.output_manager.schema_path),
             "output_config_path": str(self.output_manager.output_config_path),
-            "models_config_path": str(self.pipeline.ctx.model_registry_path),
+            "models_config_path": str(self.models_config_path),
             "dopplerview_config_path": str(self.config_path.get()),
             "config_mode": self.config_mode_var.get(),
             "selected_models": dict(self.selected_models),
             "output_enabled": self.enable_debug_output,
+            "execution_profile": self.execution_profile.value,
+            "execution_settings": execution_settings,
         }
 
+    @staticmethod
+    def _parse_execution_setting(label, raw_value, allow_auto):
+        value = str(raw_value).strip()
+        normalized = value.lower().replace("_", " ")
+        if normalized in ("", "use config", "config"):
+            return None
+        if allow_auto and normalized in ("auto", "automatic"):
+            return "auto"
+        try:
+            numeric = float(value)
+        except ValueError as error:
+            raise ValueError(
+                f"{label} must be a worker count, CPU fraction, -1/-2"
+                + (", or auto." if allow_auto else ".")
+            ) from error
+        if numeric == 0:
+            raise ValueError(f"{label} cannot be zero.")
+        if (numeric < 0 or numeric >= 1) and not numeric.is_integer():
+            raise ValueError(
+                f"{label} must use an integer count or a fraction between 0 and 1."
+            )
+        return int(numeric) if numeric.is_integer() else numeric
+
+    @staticmethod
+    def _parse_exact_worker_count(raw_value, maximum):
+        try:
+            numeric = float(raw_value)
+        except (TypeError, ValueError) as error:
+            raise ValueError("Number of workers must be an integer.") from error
+        if not numeric.is_integer():
+            raise ValueError("Number of workers must be an integer.")
+        workers = int(numeric)
+        if not 1 <= workers <= maximum:
+            raise ValueError(
+                f"Number of workers must be between 1 and {maximum}."
+            )
+        return workers
+
     def run_pipelines(self, steps=None):
+        try:
+            run_spec = self._make_pipeline_run_spec(steps)
+        except ValueError as error:
+            messagebox.showerror("Invalid execution setting", str(error), parent=self.root)
+            return
+
         self.btn_run.config(state="disabled")
         self.btn_run_minimal.config(state="disabled")
         self.progress["value"] = 0
         self.progress_batch["value"] = 0
         self.progress_minimal["value"] = 0
         self.status_var.set("Starting pipeline…")
-        logger.info("Starting pipeline for %d input(s)", len(self.pipeline.ctx.input_list))
-
-        run_spec = self._make_pipeline_run_spec(steps)
+        logger.info("Starting pipeline for %d input(s)", len(self.input_list))
 
         if self.pipeline_worker is None or not self.pipeline_worker.is_alive():
             self.queue = self.mp_context.Queue()
@@ -1084,8 +1206,15 @@ class MainWindow(ThemeMixin):
             return
 
         if worker.is_alive():
-            worker.terminate()
+            if self.pipeline_commands is not None:
+                try:
+                    self.pipeline_commands.put(None)
+                except Exception:
+                    pass
             worker.join(timeout=2)
+            if worker.is_alive():
+                worker.terminate()
+                worker.join(timeout=2)
             if worker.is_alive() and hasattr(worker, "kill"):
                 worker.kill()
                 worker.join(timeout=2)
@@ -1185,7 +1314,7 @@ class MainWindow(ThemeMixin):
                     self.measure_index = i
 
                     try:
-                        measure_name = Path(self.pipeline.ctx.input_list[i]).stem
+                        measure_name = Path(self.input_list[i]).stem
                     except Exception:
                         measure_name = "unknown input"
                     self.status_var.set(f"Processing {i + 1} / {total}: {measure_name}")
@@ -1215,7 +1344,7 @@ class MainWindow(ThemeMixin):
                     step_name, i, total = data
                     self._validated_steps.discard(step_name)
                     step_ratio = i / total if total else 0
-                    input_count = max(1, len(self.pipeline.ctx.input_list))
+                    input_count = max(1, len(self.input_list))
                     measure_ratio = self.measure_index / input_count
                     self.progress["value"] = step_ratio * 100
                     self.progress_minimal["value"] = measure_ratio * 100 + step_ratio * 100 / input_count

@@ -7,7 +7,6 @@ from skimage.morphology import closing, skeletonize, disk
 from skimage.measure import label, regionprops
 from skimage.segmentation import watershed, find_boundaries
 from scipy.ndimage import distance_transform_edt, binary_dilation, convolve
-from dopplerview.utils.parallelization_utils import run_in_parallel
 
 import logging
 logger = logging.getLogger(__name__)
@@ -324,7 +323,7 @@ def get_all_points_in_radius(mask, center, radius):
     
     return points_in_radius
 
-def connect_components(mask, max_distance=5):
+def connect_components(mask, max_distance=5, executor=None):
     """
     Connect components in a binary mask that are within a certain distance of each other.
 
@@ -358,7 +357,15 @@ def connect_components(mask, max_distance=5):
         return mask
     
     f = partial(connect_neighbours, mask=mask_cpy, labeled_mask=labeled_mask, max_distance=max_distance)
-    masks = run_in_parallel(f, props, n_jobs=-1, chunking=False)
+    if executor is None:
+        masks = np.stack([f(prop) for prop in props], axis=0)
+    else:
+        masks = executor.map(
+            f,
+            props,
+            chunking=False,
+            task_name="component connection",
+        )
 
     return np.logical_or.reduce(masks)
 
@@ -386,6 +393,6 @@ def keep_connected_components(mask, anchor, negative=False):
 def remove_small_vessels(labeled_vessels, min_size=10):
     unique_labels, counts = np.unique(labeled_vessels, return_counts=True)
     small_labels = unique_labels[counts < min_size]
-    for label in small_labels:
-        labeled_vessels[labeled_vessels == label] = 0
+    if small_labels.size:
+        labeled_vessels[np.isin(labeled_vessels, small_labels)] = 0
     return labeled_vessels

@@ -1,4 +1,6 @@
 from pathlib import Path
+import hashlib
+from copy import deepcopy
 import os
 import threading
 import traceback
@@ -9,20 +11,22 @@ import json
 from typing import Any, Dict
 
 from dopplerview.pipeline.dag import DAGEngine
+from dopplerview.pipeline.definition import PipelineDefinition
+from dopplerview.pipeline.execution_profile import ExecutionProfile
+from dopplerview.pipeline.execution_policy import ExecutionPolicy
 from dopplerview.models.manager import ModelManager
 from dopplerview.input_output.output_manager import OutputManager
 from dopplerview.utils import json_utils
+from dopplerview.utils.native_threads import configure_native_threads
+from dopplerview.utils.shared_executor import SharedExecutor
+from dopplerview.utils.cancellation import CancellationToken
+from dopplerview.utils.runtime_metrics import (
+    RuntimeMetrics,
+    process_snapshot,
+    record_for_context,
+)
 
-from dopplerview.pipeline.steps.read_moments import ReadMomentsStep
-from dopplerview.pipeline.steps.preprocess import PreprocessStep
-from dopplerview.pipeline.steps.optic_disc import OpticDiscSegmentationStep
-from dopplerview.pipeline.steps.eye_laterality_classification import EyeLateralityClassificationStep
-from dopplerview.pipeline.steps.vessel_segmentation import RetinalVesselSegmentationStep, ChoroidalVesselSegmentationStep
-from dopplerview.pipeline.steps.pulse_analysis import PulseAnalysisStep
-from dopplerview.pipeline.steps.av_segmentation import ChoroidalAVSegmentationStep, RetinalAVSegmentationStep
 from dopplerview.input_output.read_folder import DopplerViewFolder, HolodopplerFolder
-from dopplerview.pipeline.steps.vessel_velocity_estimator import VesselVelocityEstimatorStep
-from dopplerview.pipeline.steps.arterial_waveform_analysis import ArterialWaveformAnalysisStep
 
 import logging
 logger = logging.getLogger(__name__)
@@ -36,13 +40,15 @@ class Context:
         - services (models, output, etc.)
     """
 
-    def __init__(self, output_manager, debug_mode=False):
+    def __init__(self, output_manager, debug_mode=False, execution_profile=None):
         self.model_registry_path = None
         self.model_manager = None
         self.model_instances = {}
         self.metadata = {
-            "step_hashes": {}
+            "step_hashes": {},
+            "artifact_fingerprints": {},
         }
+        self.runtime_metrics = RuntimeMetrics()
         self.input_list = []
 
         self.measure_folder = None  # The measure folder containing the HD folder and the DV folder, set when loading input
@@ -50,7 +56,20 @@ class Context:
         self.DV_folder = None       # The DopplerView folder containing the output and cache, set when running the pipeline
         self.output_manager = output_manager
         self.debug_mode = debug_mode
+        self.execution_profile = ExecutionProfile.resolve(execution_profile)
+        self.execution_policy = ExecutionPolicy.from_config(
+            profile=self.execution_profile
+        )
+        self.cancellation = CancellationToken()
+        self.parallel = SharedExecutor(
+            self.execution_policy.cpu_workers,
+            self.execution_policy.available_cpus,
+            cancellation=self.cancellation,
+        )
+        configure_native_threads(self.execution_policy.native_threads_per_task)
         self.dopplerview_config = None
+        self._base_dopplerview_config = None
+        self.execution_overrides = {}
         self.dopplerview_config_path = None
         self.DV_config_mode = "local"
         self.holodoppler_config = None
@@ -60,6 +79,7 @@ class Context:
 
         self.lock = threading.RLock()
         self.cache_lock = threading.Lock()
+        self.model_lock = threading.Lock()
 
     def _init_cache(self, initial_data: Dict[str, Any] = None):
         with self.lock:
@@ -93,8 +113,29 @@ class Context:
     
     def load_dopplerview_config(self, config_path):
         self.dopplerview_config_path = config_path
-        self.dopplerview_config = self.load_config(config_path)
+        self._base_dopplerview_config = self.load_config(config_path)
+        self._apply_execution_overrides()
+        self.configure_execution_policy()
         logger.info(f"[Pipeline] Using DopplerView config file: {config_path}")
+
+    def set_execution_overrides(self, settings=None):
+        allowed = {"NumberOfWorkers", "DagConcurrency"}
+        settings = dict(settings or {})
+        unknown = set(settings) - allowed
+        if unknown:
+            raise ValueError(
+                "Unknown execution setting(s): " + ", ".join(sorted(unknown))
+            )
+        self.execution_overrides = settings
+        if self._base_dopplerview_config is not None:
+            self._apply_execution_overrides()
+            self.configure_execution_policy()
+
+    def _apply_execution_overrides(self):
+        self.dopplerview_config = deepcopy(self._base_dopplerview_config)
+        if self.execution_overrides:
+            execution = self.dopplerview_config.setdefault("Execution", {})
+            execution.update(self.execution_overrides)
     
     def load_holodoppler_config(self, config_path):
         self.holodoppler_config = self.load_config(config_path)
@@ -176,10 +217,15 @@ class Context:
         self.model_manager.change_task_model(task_name, model_name)
 
     def get_model(self, model_name):
-        if model_name not in self.model_instances:
-            spec, path = self.model_manager.resolve(model_name)
-            model = ModelManager.build_model_wrapper(spec, path)
-            self.model_instances[model_name] = model
+        with self.model_lock:
+            if model_name not in self.model_instances:
+                spec, path = self.model_manager.resolve(model_name)
+                model = ModelManager.build_model_wrapper(
+                    spec,
+                    path,
+                    execution_policy=self.execution_policy,
+                )
+                self.model_instances[model_name] = model
 
         return self.model_instances[model_name]
     
@@ -189,12 +235,40 @@ class Context:
     def get_current_model_for_task(self, task_name):
         model_name = self.model_manager.get_current_model_name_for_task(task_name)
         return self.get_model(model_name)
+
+    def get_model_identity(self, model_name):
+        """Return registry identity without downloading or loading the model."""
+        return self.model_manager.get_identity(model_name)
+
+    def get_artifact_fingerprint(self, key):
+        with self.lock:
+            return self.metadata.setdefault("artifact_fingerprints", {}).get(key)
+
+    def set_artifact_fingerprints(self, step_name, keys, step_fingerprint):
+        with self.lock:
+            identities = self.metadata.setdefault("artifact_fingerprints", {})
+            for key in keys:
+                payload = f"{step_name}:{key}:{step_fingerprint}"
+                identities[key] = hashlib.sha256(payload.encode()).hexdigest()
+
+    def record_step_fingerprint(self, step_name, keys, step_fingerprint):
+        """Atomically publish step and produced-artifact identities."""
+        with self.lock:
+            self.metadata.setdefault("step_hashes", {})[
+                step_name
+            ] = step_fingerprint
+            self.set_artifact_fingerprints(
+                step_name,
+                keys,
+                step_fingerprint,
+            )
     
     def create_output_folder(self):
         if self.DV_folder is None:
             self.load_DV_folder()
 
         self.output_manager.set_DV_folder(self.DV_folder)
+        self.output_manager.begin_run()
         self.output_manager.set_dopplerview_config(self.dopplerview_config)
         self.output_manager.ensure_output_folder()  # Lazily create the output folder when we actually need to output something, to avoid creating empty output folders for runs that don't produce any outputs
         self.output_manager.write_app_versions(self.HD_folder.input_file)
@@ -205,9 +279,21 @@ class Context:
     def stop_output_manager(self):
         self.output_manager.close_workers()
 
+    def finish_output_manager(self, success):
+        try:
+            self.output_manager.close_workers()
+        except Exception:
+            self.output_manager.abort_run()
+            raise
+        if success:
+            self.output_manager.commit_run()
+        else:
+            self.output_manager.abort_run()
+
     def set(self, key: str, value: Any):
         with self.lock:
             self.__cache[key] = (value, 'produced')
+            self.metadata.setdefault("artifact_fingerprints", {}).pop(key, None)
 
     def get(self, key: str):
         with self.lock:
@@ -230,6 +316,7 @@ class Context:
     def clear(self):
         with self.lock:
             self.__cache.clear()
+            self.metadata["artifact_fingerprints"] = {}
 
     def is_empty(self):
         return self.__cache == {}
@@ -246,6 +333,37 @@ class Context:
     def get_produced_values(self):
         with self.lock:
             return dict([(key, value) for key, (value, status) in self.__cache.items() if status == 'produced'])
+
+    def get_number_of_workers(self, default=0.5):
+        """Compatibility accessor for code not yet using ``ctx.parallel``."""
+        return self.execution_policy.cpu_workers
+
+    def configure_execution_policy(self):
+        policy = ExecutionPolicy.from_config(
+            self.dopplerview_config,
+            profile=self.execution_profile,
+        )
+        if policy == self.execution_policy:
+            return policy
+        old_executor = self.parallel
+        native_policy_changed = (
+            policy.native_threads_per_task
+            != self.execution_policy.native_threads_per_task
+        )
+        self.execution_policy = policy
+        self.parallel = SharedExecutor(
+            policy.cpu_workers,
+            policy.available_cpus,
+            cancellation=self.cancellation,
+        )
+        configure_native_threads(policy.native_threads_per_task)
+        old_executor.shutdown()
+        if native_policy_changed:
+            self.model_instances.clear()
+        return policy
+
+    def close(self):
+        self.parallel.shutdown()
     
     # def export_cache(self, filepath):
     #     cache = {}
@@ -257,7 +375,13 @@ class Context:
     #     h5_file.write_dict_to_h5(cache, filepath, overwrite=False)
 
 class Pipeline:
-    def __init__(self, output_manager, debug_mode=False):
+    def __init__(
+        self,
+        output_manager,
+        debug_mode=False,
+        execution_profile=None,
+        definition=None,
+    ):
         """
         Initializes the pipeline with the given model registry and configuration.
         Args:
@@ -268,28 +392,31 @@ class Pipeline:
         """
         self.ctx = Context(
             output_manager=output_manager,
-            debug_mode=debug_mode
+            debug_mode=debug_mode,
+            execution_profile=execution_profile,
         )
 
-        # Register steps
-        self.steps = {
-            ReadMomentsStep(),
-            PreprocessStep(),
-            EyeLateralityClassificationStep(),
-            OpticDiscSegmentationStep(),
-            RetinalVesselSegmentationStep(),
-            ChoroidalVesselSegmentationStep(),
-            PulseAnalysisStep(),
-            RetinalAVSegmentationStep(),
-            ChoroidalAVSegmentationStep(),
-            VesselVelocityEstimatorStep(),
-            ArterialWaveformAnalysisStep(),
-        }
+        self.definition = definition or PipelineDefinition.default()
+        self.steps = list(self.definition.steps)
 
-        self.engine = DAGEngine(self.steps, debug_mode=debug_mode)
+        self.engine = DAGEngine(
+            self.definition,
+            debug_mode=debug_mode,
+            max_workers=self.ctx.execution_policy.dag_concurrency,
+        )
+
+    @property
+    def execution_profile(self):
+        return self.ctx.execution_profile
+
+    def set_execution_profile(self, profile):
+        resolved = ExecutionProfile.resolve(profile)
+        self.ctx.execution_profile = resolved
+        policy = self.ctx.configure_execution_policy()
+        self.engine.max_workers = policy.dag_concurrency
 
     def get_step_names(self):
-        return self.engine.execution_order
+        return self.definition.execution_order
     
     def is_cached(self, step_name):
         if self.ctx.is_empty():
@@ -298,17 +425,10 @@ class Pipeline:
         return self.engine._should_run(step, self.ctx) == False
     
     def resolve_execution_graph(self, targets=None):
-        if targets == []:
-            return []
-
-        if targets is None:
-            return self.engine.execution_order
-
-        required_steps = self.engine._resolve_required_steps(targets)
-        return required_steps
+        return self.definition.resolve_execution_graph(targets)
     
     def get_downstream_steps(self, step_name):
-        return self.engine._collect_downstream(step_name)
+        return self.definition.get_downstream_steps(step_name)
 
     def load_dopplerview_config(self, config_path):
         self.ctx.load_dopplerview_config(config_path)
@@ -352,6 +472,9 @@ class Pipeline:
     def set_config_mode(self, mode):
         self.ctx.set_config_mode(mode)
 
+    def set_execution_overrides(self, settings=None):
+        self.ctx.set_execution_overrides(settings)
+
     def run(self, targets=None, callback=None):
         if not self.ctx.has("input_file"):
             raise RuntimeError("Input path not set. Please load input folder before running the pipeline.")
@@ -359,23 +482,63 @@ class Pipeline:
             raise RuntimeError("Configuration not loaded. Please load a configuration file before running the pipeline.")
         
         self.ctx.ensure_config()
+        self.ctx.cancellation.reset()
+        policy = self.ctx.configure_execution_policy()
+        self.engine.max_workers = policy.dag_concurrency
+
+        logger.info(
+            "[Pipeline] Execution policy: %s",
+            policy.describe(),
+        )
 
         self.ctx.create_output_folder()
         self.ctx.start_output_manager()
 
-        start_time = time.time()
-        self.engine.run(self.ctx, targets, callback=callback)
-        elapsed = time.time() - start_time
+        start_time = time.perf_counter()
+        run_start = process_snapshot()
+        status = "failed"
+        execution_error = None
+        try:
+            self.engine.run(self.ctx, targets, callback=callback)
+            status = "success"
+        except BaseException as error:
+            execution_error = error
+            raise
+        finally:
+            try:
+                elapsed = time.perf_counter() - start_time
+                run_end = process_snapshot()
+                record_for_context(
+                    self.ctx,
+                    "pipeline",
+                    status=status,
+                    duration_s=elapsed,
+                    process_rss_start_mb=run_start["rss_mb"],
+                    process_rss_end_mb=run_end["rss_mb"],
+                    process_rss_delta_mb=run_end["rss_mb"] - run_start["rss_mb"],
+                    process_threads_start=run_start["process_threads"],
+                    process_threads_end=run_end["process_threads"],
+                )
+            finally:
+                try:
+                    self.ctx.finish_output_manager(success=status == "success")
+                except Exception:
+                    if execution_error is None:
+                        raise
+                    logger.exception(
+                        "[Pipeline] Output cleanup also failed; preserving the "
+                        "original execution error"
+                    )
         logger.info(f"[Pipeline] Finished execution in {elapsed:.2f}s")
 
         # # If in debug mode, save the entire cache to the H5 file after execution
         # if self.ctx.debug_mode:
         #     logger.info(f"[Pipeline] Saving cache to H5 file.")
         #     self.ctx.output_manager.save_cache(self.ctx)
-        self.ctx.stop_output_manager()
         return self.ctx
 
     def run_batch(self, targets=None, callback=None):
+        batch_started = time.perf_counter()
         if callback:
             callback("batch_start", len(self.ctx.input_list))
 
@@ -424,4 +587,19 @@ class Pipeline:
         if callback:
             callback("batch_done", results)
 
+        succeeded = sum(result["status"] == "success" for result in results)
+        failed = len(results) - succeeded
+        metrics = getattr(self.ctx, "runtime_metrics", None)
+        if metrics is not None:
+            metrics.record(
+                "batch",
+                duration_s=time.perf_counter() - batch_started,
+                inputs=total,
+                succeeded=succeeded,
+                failed=failed,
+            )
+
         return results
+
+    def close(self):
+        self.ctx.close()

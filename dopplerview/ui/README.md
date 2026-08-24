@@ -13,5 +13,7 @@ Advanced tabs, compact toolbars, bordered drop/preview areas, Segoe UI type and
 Sun Valley accent controls.
 
 The collapsible **Logs** panel mirrors parent and pipeline-process log messages.
-The same messages are persisted to `%APPDATA%\\DopplerView\\logs\\last_run.log`,
-which keeps diagnostics available in the windowed (console-free) Windows build.
+The same readable messages are persisted to
+`%APPDATA%\\DopplerView\\logs\\last_run.log`. A complete trace, including DEBUG
+records and runtime metrics, is written alongside it as `last_run_debug.log`.
+Both keep diagnostics available in the windowed (console-free) Windows build.

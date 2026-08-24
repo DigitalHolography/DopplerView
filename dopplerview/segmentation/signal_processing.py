@@ -180,8 +180,15 @@ def compute_correlation(video, signal):
     signal_centered = signal - np.nanmean(signal)
     video_centered = video - np.nanmean(video)
 
-    numerator = np.nanmean(video_centered * signal_centered[:, np.newaxis, np.newaxis], axis=0)
     denominator = np.nanstd(video_centered) * np.nanstd(signal_centered)
+    # Reuse the centered video as multiplication scratch space. The former
+    # expression retained both full-sized arrays until the reduction finished.
+    np.multiply(
+        video_centered,
+        signal_centered[:, np.newaxis, np.newaxis],
+        out=video_centered,
+    )
+    numerator = np.nanmean(video_centered, axis=0)
     
     R = numerator / denominator
     
@@ -197,7 +204,14 @@ def get_pulse_from_mask(video, mask):
     Returns:
         pulse (np.ndarray): 1D array of length T representing the pulse signal
     """
-    pulse = np.nansum(video * mask[np.newaxis, :, :], axis=(1, 2))
+    mask = np.asarray(mask, dtype=bool)
+    pulse = np.empty(video.shape[0], dtype=video.dtype)
+    frame_scratch = np.empty(video.shape[1:], dtype=video.dtype)
+    for index, frame in enumerate(video):
+        # Preserve the former multiply-and-reduce ordering exactly while
+        # reducing temporary storage from a full video to one frame.
+        np.multiply(frame, mask, out=frame_scratch)
+        pulse[index] = np.nansum(frame_scratch)
     pulse = pulse / np.count_nonzero(mask)
     return pulse
 

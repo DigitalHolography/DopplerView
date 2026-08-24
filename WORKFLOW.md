@@ -16,7 +16,9 @@ For instructions on extending the system, see [`CONTRIBUTING.md`](CONTRIBUTING.m
 Each pipeline step computes a unique fingerprint based on:
 
 * Relevant configuration
-* Input data
+* Upstream artifact identities
+* Selected model registry identity and configured revision
+* External source-file identity
 
 If configuration or inputs change, only the necessary steps are recomputed.
 
@@ -54,17 +56,20 @@ Supported formats:
 
 ---
 
-## 1. High-Level Architecture
+## 1. Architecture Overview
 
-DopplerView is built around a modular, deterministic pipeline designed for:
+DopplerView is built around four core components:
 
-* Reproducibility
-* Partial recomputation
-* Clear dependency management
-* Model version traceability
-* Separation of concerns
+1. **Model Registry + Model Manager**
+2. **PipelineDefinition (static steps and DAG topology)**
+3. **Pipeline + DAGEngine (runtime execution)**
+4. **Context (runtime data container)**
 
 Execution flow:
+
+The GUI main process reads `PipelineDefinition` for step selection and sends a
+picklable run specification to its child worker. Only the CLI or child worker
+constructs the runtime pipeline shown below.
 
 ```
 CLI / GUI
@@ -124,7 +129,7 @@ class ExampleStep(BaseStep):
 
 ### 2.2 Dependency Resolution
 
-During initialization:
+During `PipelineDefinition` initialization:
 
 1. All steps are registered.
 2. The engine maps:
@@ -145,10 +150,10 @@ If a cycle is detected, execution fails immediately.
 
 ## 3. Execution Engine
 
-The `DAGEngine` is responsible for:
+`PipelineDefinition` owns static validation, dependency resolution, and
+deterministic topology. `DAGEngine` consumes that definition and owns runtime
+behavior:
 
-* Dependency resolution
-* Topological sorting
 * Selective execution
 * Cache validation
 * Downstream invalidation
@@ -176,8 +181,14 @@ pipeline.run(targets=["av_segmentation"])
 The engine:
 
 1. Resolves the minimal required subgraph.
-2. Executes only necessary upstream steps.
-3. Preserves global topological order.
+2. Groups ready, independent steps into deterministic dependency waves.
+3. Runs each wave with the centralized bounded DAG concurrency policy.
+4. Executes only necessary upstream steps while preserving dependency order.
+
+The default policy permits at most two independent steps at once. A
+machine-aware `DagConcurrency` setting can be used for profiling, while the
+`sequential_reference` profile always forces one. Internally parallel work
+from concurrent steps shares the single bounded context executor.
 
 This enables:
 
@@ -237,22 +248,33 @@ Each step has a deterministic fingerprint.
 The fingerprint depends on:
 
 * Relevant configuration
-* Input data signatures
+* Required upstream artifact fingerprints
+* Stable model registry identity
+* External input identity
+* Fingerprint schema and application version
 
 By default:
 
-* The entire configuration is hashed.
-* All required inputs are hashed.
-* NumPy arrays are hashed via raw bytes.
+* Execution-only configuration is excluded.
+* Produced artifacts inherit an identity from their producer step and key.
+* Downstream steps consume those identities instead of repeatedly hashing large arrays.
+* A direct NumPy input without producer metadata falls back to dtype-, shape-, and content hashing.
+* Large source files use resolved path, size, and nanosecond modification time.
 
 Fingerprint formula (conceptually):
 
 ```
 fingerprint = hash(
     relevant_config +
-    hashed_inputs
+    upstream_artifact_fingerprints +
+    model_identity +
+    external_input_identity +
+    schema_and_app_version
 )
 ```
+
+Configuration-only hashes written by older versions intentionally fail the
+new schema comparison, causing a one-time safe cache rebuild.
 
 ---
 

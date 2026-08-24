@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dopplerview"
-version = "1.7.4"
+version = "1.8.0"
 description = "Doppler holography vessel segmentation pipeline"
 authors = [{ name = "Marius Dubosc" }]
 readme = "README.md"
@@ -30,13 +30,17 @@ dependencies = [
     "huggingface_hub",
     "tkinterdnd2",
     "sv-ttk>=2.6.1",
-    "psutil"
+    "psutil",
+    "threadpoolctl"
 ]
 
 [project.optional-dependencies]
 ui = [
     "streamlit",
     "tkinterdnd2",
+]
+test = [
+    "pytest>=8",
 ]
 
 [project.scripts]
@@ -48,3 +52,8 @@ include = ["dopplerview*"]
 
 [tool.setuptools.package-data]
 dopplerview = ["resources/*.json", "resources/*.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"

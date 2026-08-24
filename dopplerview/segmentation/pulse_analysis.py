@@ -434,9 +434,18 @@ def get_filtered_branch_signals(video, labeled_vessels, sampling_frequency):
     b, a = butter(4, 15 / (sampling_frequency / 2), btype='low')
     moving_window = round(sampling_frequency * 0.1)
 
+    flat_labels = labeled_vessels.ravel()
+    vessel_positions = np.flatnonzero(flat_labels > 0)
+    vessel_labels = flat_labels[vessel_positions]
+    order = np.argsort(vessel_labels, kind="stable")
+    vessel_positions = vessel_positions[order]
+    vessel_labels = vessel_labels[order]
+    vessel_pixels = video.reshape(num_frames, -1)[:, vessel_positions]
+
     for i in range(1, num_branches + 1):
-        branch_mask = (labeled_vessels == i)
-        branch_pixels = video[:, branch_mask]
+        start = np.searchsorted(vessel_labels, i, side="left")
+        stop = np.searchsorted(vessel_labels, i, side="right")
+        branch_pixels = vessel_pixels[:, start:stop]
         branch_mean = np.nanmean(branch_pixels, axis=1)
 
         signals[i - 1, :] = filtfilt(b, a, branch_mean)
@@ -504,18 +513,15 @@ def compute_pre_masks_by_systolic_gradient(signals, labeled_vessels, sampling_fr
         is_pure[:] = True
 
     # Step 4: Combine into artery / vein masks
-    pre_mask_artery = np.zeros_like(labeled_vessels, bool)
-    pre_mask_vein = np.zeros_like(labeled_vessels, bool)
-
     num_branches = labeled_vessels.max()
-
-    for i in range(1, num_branches+1):
-        if not is_pure[i-1]:
-            continue
-        if s_idx[i-1] == 1:
-            pre_mask_artery |= labeled_vessels == i
-        else:
-            pre_mask_vein |= labeled_vessels == i
+    valid_arteries = np.flatnonzero(is_pure & (s_idx == 1)) + 1
+    valid_veins = np.flatnonzero(is_pure & (s_idx != 1)) + 1
+    artery_lookup = np.zeros(num_branches + 1, dtype=bool)
+    vein_lookup = np.zeros(num_branches + 1, dtype=bool)
+    artery_lookup[valid_arteries] = True
+    vein_lookup[valid_veins] = True
+    pre_mask_artery = artery_lookup[labeled_vessels]
+    pre_mask_vein = vein_lookup[labeled_vessels]
 
     return pre_mask_artery, pre_mask_vein
 
@@ -543,8 +549,10 @@ def compute_pre_masks_by_clustering(signals, labeled_vessels, sampling_frequency
     cluster0 = np.where(labels == 0)[0]
     cluster1 = np.where(labels == 1)[0]
 
-    mask0 = np.isin(labeled_vessels, cluster0+1)
-    mask1 = np.isin(labeled_vessels, cluster1+1)
+    cluster0_lookup = np.zeros(labeled_vessels.max() + 1, dtype=bool)
+    cluster0_lookup[cluster0 + 1] = True
+    mask0 = cluster0_lookup[labeled_vessels]
+    mask1 = ~mask0 & (labeled_vessels > 0)
 
     cluster0_period = np.median(np.array(periods)[cluster0], axis=0)
     cluster1_period = np.median(np.array(periods)[cluster1], axis=0)
@@ -804,7 +812,7 @@ def compute_diasys(video, pulse_artery, sampling_frequency, pulse_vein=None):
         diasindexes = [0]
 
     # --- Mean images ---
-    M0_Systole_img, M0_Diastole_img = np.nanmean(video[sysindexes], axis=0), np.nanmean(video[diasindexes], axis=0), 
+    M0_Systole_img, M0_Diastole_img = np.nanmean(video[sysindexes], axis=0), np.nanmean(video[diasindexes], axis=0)
 
     return M0_Systole_img, M0_Diastole_img, sysindexes, diasindexes, sys_index_list
 
@@ -813,4 +821,3 @@ def compute_diasys_image(video, pulse_artery, sampling_frequency, pulse_vein=Non
 
     diasys_image = M0_Systole_img - M0_Diastole_img
     return diasys_image, sysindexes, diasindexes, M0_Systole_img, M0_Diastole_img, sys_index_list
- 

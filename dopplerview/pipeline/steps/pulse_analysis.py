@@ -1,7 +1,6 @@
 from dopplerview.pipeline.step import BaseStep, NestedStep
 from dopplerview.segmentation import process_masks, pulse_analysis, signal_processing
 import dopplerview.utils.image_utils as image_utils
-from dopplerview.utils.parallelization_utils import run_in_parallel
 from functools import partial
 
 import numpy as np
@@ -25,7 +24,6 @@ class PreArteryMaskStep(BaseStep):
         return {
             "sampling_freq": ctx.holodoppler_config.get("sampling_freq", 37037),
             "batch_stride": ctx.holodoppler_config.get("batch_stride", 256),
-            "NumberOfWorkers": ctx.dopplerview_config.get("NumberOfWorkers", 0.5),
             "PreMaskMethod": ctx.dopplerview_config.get("Mask").get("PreMaskMethod", "clustering"),
             "CorrectBranchSignals": ctx.dopplerview_config.get("Mask").get("CorrectBranchSignals", True),
             }
@@ -43,8 +41,21 @@ class PreArteryMaskStep(BaseStep):
         self.logger.info(f"    - Camera sampling frequency: {fs} Hz, batch stride: {stride}. Effective sampling frequency after accounting for batch stride: {sampling_frequency:.2f} Hz")
 
         # --- Step 1: Separate mask into branches ---
-        labeled_vessels, _ = process_masks.get_labeled_vessels(vessel_mask, *optic_disc_center) if optic_disc_center is not None else process_masks.get_labeled_vessels(vessel_mask, mask_optic_disc=False)
+        if optic_disc_center is not None:
+            labeled_vessels, _ = process_masks.get_labeled_vessels(vessel_mask, *optic_disc_center) 
+            if len(np.unique(labeled_vessels)) <= 1:
+                self.logger.warning("    - No branches detected in the retinal vessel mask. Might be due to faulty optic disc detection. Trying to label vessels without optic disc center.")
+
+        if optic_disc_center is None or len(np.unique(labeled_vessels)) <= 1: 
+            labeled_vessels, _ = process_masks.get_labeled_vessels(vessel_mask, mask_optic_disc=False) # If optic disc center is not available or if no branches were detected, label vessels without using optic disc center
         ctx.set("labeled_vessels", labeled_vessels)
+
+        if len(np.unique(labeled_vessels)) <= 1:
+            self.logger.warning("    - No branches detected in the retinal vessel mask. Use vessel mask as pre-mask.")
+            ctx.set("pre_artery_mask", vessel_mask)
+            ctx.set("pre_vein_mask", np.zeros_like(labeled_vessels))
+            ctx.set("branch_signals", np.zeros((0, video.shape[0])))
+            return
 
         # --- Step 2: Compute mean temporal signal for each branch ---
         # ctx.output_manager.output("pulse_analysis", "M0_ff_video", video, "video")
@@ -63,7 +74,11 @@ class PreArteryMaskStep(BaseStep):
             self.logger.info(f"    - Median heartbeat period: {beat_period_time:.2f} seconds ({beat_period_frames} frames) -> {bpm:.2f} bpm.")
             corrected_signals = np.zeros_like(signals_n)
             func = partial(pulse_analysis.correct_signal_with_heartbeat, beat_period=beat_period_frames, k=5)
-            corrected_signals = run_in_parallel(func, signals_n, n_jobs=ctx.dopplerview_config.get("NumberOfWorkers", 0.5), chunking=False, task_name="branch signal correction")
+            corrected_signals = ctx.parallel.map(
+                func,
+                signals_n,
+                task_name="branch signal correction",
+            )
             ctx.set("corrected_signals", corrected_signals)
 
             for i in range(1, labeled_vessels.max() + 1):
@@ -143,11 +158,14 @@ class ComputeTemporalCuesStep(BaseStep):
             ctx.output_manager.output("pulse_analysis", f"outlier removal", (arterial_pulse_filtered, beat_signal), "signal", options={"multiple_signals": True, "legend": ["Original Signal", "beat signal"]})
             ctx.output_manager.output("pulse_analysis", f"median beat", median_beat, "signal")
             ctx.output_manager.output("pulse_analysis", f"peaks", (arterial_pulse_filtered, peaks), "signal", options={"scatter": True})
+            if (len(arterial_pulse_filtered) - len(arterial_pulse_cleaned)) > (len(arterial_pulse_filtered) / 2):
+                self.logger.info(f"    - Outlier frames removal cancelled, as it would remove {len(arterial_pulse_filtered) - len(arterial_pulse_cleaned)}/{len(arterial_pulse_filtered)} frames.")
+                arterial_pulse_cleaned, video_cleaned = arterial_pulse_filtered, video  # Revert to original if too many frames would be removed
+            else: 
+                self.logger.info(f"    - Removed {len(arterial_pulse_filtered) - len(arterial_pulse_cleaned)} frames due to low correlation with median arterial pulse beat pattern")
 
         M0_ff_image_cleaned = image_utils.normalize_to_uint8(np.mean(video_cleaned, axis=0))
         ctx.set("M0_ff_image_cleaned", M0_ff_image_cleaned)
-
-        self.logger.info(f"    - Removed {len(arterial_pulse_filtered) - len(arterial_pulse_cleaned)} frames due to low correlation with median arterial pulse beat pattern")
 
         # --- Compute correlation map with filtered pulses ---
 
@@ -155,29 +173,8 @@ class ComputeTemporalCuesStep(BaseStep):
         ctx.set("correlation_M0", correlation_artery)
         ctx.output_manager.output("pulse_analysis", f"correlation map RGB", correlation_artery, "image", options={"blue_gray_red": True, "M0_ff_image": M0_ff_image_cleaned})
 
-        LF_M0_ff = ctx.require("LF_M0_ff")
-        if LF_M0_ff is not None:
-            correlation_LF_M0_ff = signal_processing.compute_correlation(LF_M0_ff, arterial_pulse_filtered)
-            diasys_LF_M0_ff, *_ = pulse_analysis.compute_diasys_image(LF_M0_ff, arterial_pulse_filtered, sampling_frequency)
-            ctx.set("correlation_LF_M0_ff", correlation_LF_M0_ff)
-            ctx.set("diasys_LF_M0_ff", diasys_LF_M0_ff)
-
-        HF_M0_ff = ctx.require("HF_M0_ff")
-        if HF_M0_ff is not None:
-            correlation_HF_M0_ff = signal_processing.compute_correlation(HF_M0_ff, arterial_pulse_filtered)
-            diasys_HF_M0_ff, *_ = pulse_analysis.compute_diasys_image(HF_M0_ff, arterial_pulse_filtered, sampling_frequency)
-            ctx.set("correlation_HF_M0_ff", correlation_HF_M0_ff)
-            ctx.set("diasys_HF_M0_ff", diasys_HF_M0_ff)
-
-        band_ratio_ff = ctx.require("band_ratio_ff")
-        if band_ratio_ff is not None:
-            correlation_band_ratio_ff = signal_processing.compute_correlation(band_ratio_ff, arterial_pulse_filtered)
-            diasys_band_ratio_ff, *_ = pulse_analysis.compute_diasys_image(band_ratio_ff, arterial_pulse_filtered, sampling_frequency)
-            ctx.set("correlation_band_ratio_ff", correlation_band_ratio_ff)
-            ctx.set("diasys_band_ratio_ff", diasys_band_ratio_ff)
-
         # --- Accumulate frames at the systolic and diastolic peaks of the filtered pulses ---
-
+        
         diasys, sysindexes, diasindexes, systole, diastole, sys_index_list = pulse_analysis.compute_diasys_image(video_cleaned, arterial_pulse_cleaned, sampling_frequency)
         ctx.output_manager.output("pulse_analysis", f"diasys image RGB", diasys, "image", options={"blue_gray_red": True, "M0_ff_image": M0_ff_image_cleaned})
         ctx.output_manager.output("pulse_analysis", f"diasys plot", (arterial_pulse_cleaned, sysindexes), "signal", options={"scatter": True})
@@ -187,5 +184,28 @@ class ComputeTemporalCuesStep(BaseStep):
         ctx.set("systole_image", systole)
         ctx.set("diastole_image", diastole)
 
+        # --- Repeat for LF_M0_ff, HF_M0_ff, and band_ratio_ff if they exist in the context ---
 
+        LF_M0_ff = ctx.require("LF_M0_ff")
+        if LF_M0_ff is not None:
+            correlation_LF_M0_ff = signal_processing.compute_correlation(LF_M0_ff, arterial_pulse_filtered)
+            M0_Systole_img, M0_Diastole_img = np.nanmean(LF_M0_ff[sysindexes], axis=0), np.nanmean(LF_M0_ff[diasindexes], axis=0)
+            diasys_LF_M0_ff = M0_Systole_img - M0_Diastole_img
+            ctx.set("correlation_LF_M0_ff", correlation_LF_M0_ff)
+            ctx.set("diasys_LF_M0_ff", diasys_LF_M0_ff)
 
+        HF_M0_ff = ctx.require("HF_M0_ff")
+        if HF_M0_ff is not None:
+            correlation_HF_M0_ff = signal_processing.compute_correlation(HF_M0_ff, arterial_pulse_filtered)
+            M0_Systole_img, M0_Diastole_img = np.nanmean(HF_M0_ff[sysindexes], axis=0), np.nanmean(HF_M0_ff[diasindexes], axis=0)
+            diasys_HF_M0_ff = M0_Systole_img - M0_Diastole_img
+            ctx.set("correlation_HF_M0_ff", correlation_HF_M0_ff)
+            ctx.set("diasys_HF_M0_ff", diasys_HF_M0_ff)
+
+        band_ratio_ff = ctx.require("band_ratio_ff")
+        if band_ratio_ff is not None:
+            correlation_band_ratio_ff = signal_processing.compute_correlation(band_ratio_ff, arterial_pulse_filtered)
+            M0_Systole_img, M0_Diastole_img = np.nanmean(band_ratio_ff[sysindexes], axis=0), np.nanmean(band_ratio_ff[diasindexes], axis=0)
+            diasys_band_ratio_ff = M0_Systole_img - M0_Diastole_img
+            ctx.set("correlation_band_ratio_ff", correlation_band_ratio_ff)
+            ctx.set("diasys_band_ratio_ff", diasys_band_ratio_ff)

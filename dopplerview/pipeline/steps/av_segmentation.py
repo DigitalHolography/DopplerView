@@ -145,7 +145,11 @@ class ChoroidalAVSegmentationStep(BaseStep):
 
         self.logger.info("    - Identifying choroidal aliased arteries with -0.2 correlation threshold in high frequency signal and -0.25 for M0 correlation.")
         pre_aliased_arteries = corr_HF < -0.2   # Identify aliased arteries based on high frequency correlation
-        connected_arteries = process_masks.connect_components(pre_aliased_arteries, max_distance=5)  # Connect disconnected aliased arteries that are close to each other
+        connected_arteries = process_masks.connect_components(
+            pre_aliased_arteries,
+            max_distance=5,
+            executor=ctx.parallel,
+        )  # Connect disconnected aliased arteries that are close to each other
         large_arteries = opening(connected_arteries, disk(2))
         anti_correlated_vessels = corr_M0 < -0.25
         aliased_arteries = process_masks.keep_connected_components(anti_correlated_vessels, large_arteries) # Keep only the vessels that are connected to the aliased arteries

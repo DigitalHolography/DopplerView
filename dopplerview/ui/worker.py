@@ -118,7 +118,7 @@ def pipeline_process_worker(command_queue, queue_out):
     The Tk process must remain UI-only.  This isolates native crashes/hangs from
     OpenCV, ONNXRuntime, PyTorch, h5py, etc. from Tkinter's event loop. Keeping
     this process alive between runs also keeps the Pipeline context and its
-    runtime cache alive, just as the pre-multiprocessing GUI did.
+    runtime cache alive.
     """
     _configure_child_process_logging(queue_out)
 
@@ -127,6 +127,8 @@ def pipeline_process_worker(command_queue, queue_out):
     while True:
         run_spec = command_queue.get()
         if run_spec is None:
+            if pipeline is not None:
+                pipeline.close()
             return
 
         try:
@@ -139,6 +141,8 @@ def pipeline_process_worker(command_queue, queue_out):
             selected_models = run_spec.get("selected_models", {})
             config_mode = run_spec.get("config_mode", "default")
             output_enabled = bool(run_spec.get("output_enabled", False))
+            execution_profile = run_spec.get("execution_profile")
+            execution_settings = run_spec.get("execution_settings", {})
 
             if pipeline is None:
                 output_manager = OutputManager(
@@ -146,15 +150,21 @@ def pipeline_process_worker(command_queue, queue_out):
                     output_config_path,
                     output_enabled=output_enabled,
                 )
-                pipeline = Pipeline(output_manager=output_manager)
+                pipeline = Pipeline(
+                    output_manager=output_manager,
+                    execution_profile=execution_profile,
+                )
             elif output_enabled:
                 pipeline.ctx.output_manager.enable_output()
             else:
                 pipeline.ctx.output_manager.disable_output()
 
+            pipeline.set_execution_profile(execution_profile)
+
             pipeline.load_model_registry(models_config_path)
             if dopplerview_config_path and Path(dopplerview_config_path).exists():
                 pipeline.load_dopplerview_config(dopplerview_config_path)
+            pipeline.set_execution_overrides(execution_settings)
 
             try:
                 pipeline.set_config_mode(config_mode)
