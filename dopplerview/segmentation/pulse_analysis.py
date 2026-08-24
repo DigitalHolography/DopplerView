@@ -812,7 +812,7 @@ def compute_diasys(video, pulse_artery, sampling_frequency, pulse_vein=None):
         diasindexes = [0]
 
     # --- Mean images ---
-    M0_Systole_img, M0_Diastole_img = np.nanmean(video[sysindexes], axis=0), np.nanmean(video[diasindexes], axis=0), 
+    M0_Systole_img, M0_Diastole_img = np.nanmean(video[sysindexes], axis=0), np.nanmean(video[diasindexes], axis=0)
 
     return M0_Systole_img, M0_Diastole_img, sysindexes, diasindexes, sys_index_list
 
