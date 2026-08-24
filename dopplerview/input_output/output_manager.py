@@ -446,7 +446,7 @@ class OutputManager:
 
     def save(self, payload):
         if payload.value is None:
-            logger.warning(f"Value for key '{payload.key}' is None, skipping save.")
+            logger.warning(f"[OutputManager] Value for key '{payload.key}' is None, skipping save.")
             return
         self.save_h5(payload.key, payload.value)
         if self.output_enabled:
