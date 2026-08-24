@@ -158,11 +158,14 @@ class ComputeTemporalCuesStep(BaseStep):
             ctx.output_manager.output("pulse_analysis", f"outlier removal", (arterial_pulse_filtered, beat_signal), "signal", options={"multiple_signals": True, "legend": ["Original Signal", "beat signal"]})
             ctx.output_manager.output("pulse_analysis", f"median beat", median_beat, "signal")
             ctx.output_manager.output("pulse_analysis", f"peaks", (arterial_pulse_filtered, peaks), "signal", options={"scatter": True})
+            if (len(arterial_pulse_filtered) - len(arterial_pulse_cleaned)) > (len(arterial_pulse_filtered) / 2):
+                self.logger.info(f"    - Outlier frames removal cancelled, as it would remove {len(arterial_pulse_filtered) - len(arterial_pulse_cleaned)}/{len(arterial_pulse_filtered)} frames.")
+                arterial_pulse_cleaned, video_cleaned = arterial_pulse_filtered, video  # Revert to original if too many frames would be removed
+            else: 
+                self.logger.info(f"    - Removed {len(arterial_pulse_filtered) - len(arterial_pulse_cleaned)} frames due to low correlation with median arterial pulse beat pattern")
 
         M0_ff_image_cleaned = image_utils.normalize_to_uint8(np.mean(video_cleaned, axis=0))
         ctx.set("M0_ff_image_cleaned", M0_ff_image_cleaned)
-
-        self.logger.info(f"    - Removed {len(arterial_pulse_filtered) - len(arterial_pulse_cleaned)} frames due to low correlation with median arterial pulse beat pattern")
 
         # --- Compute correlation map with filtered pulses ---
 
