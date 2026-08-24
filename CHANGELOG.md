@@ -1,15 +1,16 @@
 # Changelog
 
 ## 1.8.0
-* Add unit tests for DAG engine execution, cache behavior and output worker
+* Introduce a shared model executor following an execution policy, to ensure that parallelization libraries (OpenCV, scipy), models and concurrent DAG steps don't over-use threads
 * Ensure DAG determinism
-* Introduce a shared model executor following an execution policy, to ensure that parallelization libraries (OpenCV, scipy), models and concurrent DAG steps don't over-use threads.
 * Refactorize OutputManager, Pipeline and cache system
+* Add unit tests for DAG engine execution, cache behavior and output worker
 * GUI
     * Number of workers and max number of concurrent steps can now be modified in the GUI
 * Correct matplotlib backend issue in GUI
 * Save outputs even for cached steps
 * Fix pre-mask bug caused by bad optic disc detection
+* Fix outlier removal bug : cancel if half or more frames would be removed
 
 ## 1.7.4
 * GUI
