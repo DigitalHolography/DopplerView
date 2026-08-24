@@ -131,28 +131,7 @@ dopplerview ./data/patient_01 \
     --config ./configs/default.json \
 ```
 
-For a sequential performance reference:
 
-```bash
-dopplerview ./data/patient_01 --execution-profile sequential_reference
-```
-
-To collect a comparable sequential/default baseline with raw per-step timing
-and peak-RSS metrics, run both profiles against the same representative input:
-
-```bash
-python scripts/benchmark_pipeline.py ./data/patient_01.holo --repetitions 3 --output pipeline_baseline.json
-```
-
-The runner creates a fresh pipeline for every sample and alternates profile
-order between repetitions. Optional diagnostic PNG rendering is disabled so it
-does not distort the compute baseline; pass `--diagnostic-images` to measure the
-full diagnostic-output workload instead. The normal HDF5 output is still
-written, so benchmark a disposable copy of patient data when outputs must be
-preserved unchanged.
-
-The same profile can be applied to either the CLI or GUI process with the
-`DOPPLERVIEW_EXECUTION_PROFILE=sequential_reference` environment variable.
 ---
 
 # Project Structure
@@ -251,10 +230,10 @@ It also creates an `output` folder, with the content produced by each step, depe
 # Documentation
 
 * Architecture and execution model → `WORKFLOW.md`
-* How to add steps or models → `CONTRIBUTING.md`
+* How to add steps, make a release, run the testuite → `CONTRIBUTING.md`
 
 ---
 
 # License
 
-GPL-3
+Apache-2
