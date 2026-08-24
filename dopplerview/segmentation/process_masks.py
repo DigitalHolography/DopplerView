@@ -393,6 +393,6 @@ def keep_connected_components(mask, anchor, negative=False):
 def remove_small_vessels(labeled_vessels, min_size=10):
     unique_labels, counts = np.unique(labeled_vessels, return_counts=True)
     small_labels = unique_labels[counts < min_size]
-    for label in small_labels:
-        labeled_vessels[labeled_vessels == label] = 0
+    if small_labels.size:
+        labeled_vessels[np.isin(labeled_vessels, small_labels)] = 0
     return labeled_vessels
