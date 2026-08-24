@@ -41,8 +41,21 @@ class PreArteryMaskStep(BaseStep):
         self.logger.info(f"    - Camera sampling frequency: {fs} Hz, batch stride: {stride}. Effective sampling frequency after accounting for batch stride: {sampling_frequency:.2f} Hz")
 
         # --- Step 1: Separate mask into branches ---
-        labeled_vessels, _ = process_masks.get_labeled_vessels(vessel_mask, *optic_disc_center) if optic_disc_center is not None else process_masks.get_labeled_vessels(vessel_mask, mask_optic_disc=False)
+        if optic_disc_center is not None:
+            labeled_vessels, _ = process_masks.get_labeled_vessels(vessel_mask, *optic_disc_center) 
+            if len(np.unique(labeled_vessels)) <= 1:
+                self.logger.warning("    - No branches detected in the retinal vessel mask. Might be due to faulty optic disc detection. Trying to label vessels without optic disc center.")
+
+        if optic_disc_center is None or len(np.unique(labeled_vessels)) <= 1: 
+            labeled_vessels, _ = process_masks.get_labeled_vessels(vessel_mask, mask_optic_disc=False) # If optic disc center is not available or if no branches were detected, label vessels without using optic disc center
         ctx.set("labeled_vessels", labeled_vessels)
+
+        if len(np.unique(labeled_vessels)) <= 1:
+            self.logger.warning("    - No branches detected in the retinal vessel mask. Use vessel mask as pre-mask.")
+            ctx.set("pre_artery_mask", vessel_mask)
+            ctx.set("pre_vein_mask", np.zeros_like(labeled_vessels))
+            ctx.set("branch_signals", np.zeros((0, video.shape[0])))
+            return
 
         # --- Step 2: Compute mean temporal signal for each branch ---
         # ctx.output_manager.output("pulse_analysis", "M0_ff_video", video, "video")
