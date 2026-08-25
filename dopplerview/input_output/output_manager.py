@@ -42,7 +42,7 @@ class OutputManager:
 
         self.renderers = {
             "image": output_renderer.ImageRenderer(),
-            "mask": output_renderer.ImageRenderer(),
+            "mask": output_renderer.MaskRenderer(),
             "signal": output_renderer.SignalRenderer(),
             "video": output_renderer.VideoRenderer(),
             "optic_disc": output_renderer.OpticDiscRenderer(),

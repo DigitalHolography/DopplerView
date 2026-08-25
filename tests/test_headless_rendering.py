@@ -4,10 +4,12 @@ from concurrent.futures import ThreadPoolExecutor
 import warnings
 
 import matplotlib
+import imageio
 import numpy as np
 
 from dopplerview.input_output.output_renderer import (
     LabeledMaskRenderer,
+    MaskRenderer,
     SignalRenderer,
 )
 
@@ -22,6 +24,19 @@ class DictionaryContext:
 
 def test_pipeline_rendering_uses_non_gui_backend():
     assert matplotlib.get_backend().lower() == "agg"
+
+
+def test_mask_renderer_expands_uint8_binary_mask_to_full_range(tmp_path):
+    context = DictionaryContext(
+        {"mask": np.array([[0, 1], [1, 0]], dtype=np.uint8)}
+    )
+    path = tmp_path / "mask.png"
+
+    MaskRenderer().render("mask", context, path)
+
+    rendered = imageio.imread(path)
+    assert rendered.dtype == np.uint8
+    assert np.array_equal(rendered, np.array([[0, 255], [255, 0]], dtype=np.uint8))
 
 
 def test_matplotlib_renderers_work_from_background_threads(tmp_path):

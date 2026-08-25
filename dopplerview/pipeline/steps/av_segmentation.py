@@ -166,8 +166,6 @@ class ChoroidalAVSegmentationStep(BaseStep):
         arteries = process_masks.remove_small_vessels(label(arteries), min_size=10) > 0
         choroidal_artery_mask = arteries & ~retinal_vessel_mask  # Remove retinal vessels
 
-        ctx.output_manager.save_overlay(self.name, "overlay", ctx.require("M0_ff_image_cleaned"), [choroidal_artery_mask, choroidal_vein_mask, choroidal_aliased_artery_mask], colors=[(0, 0, 255), (255, 0, 0), (0, 255, 0)])
-
         return choroidal_artery_mask, choroidal_vein_mask, choroidal_aliased_artery_mask
     
     def run(self, ctx):
@@ -178,6 +176,8 @@ class ChoroidalAVSegmentationStep(BaseStep):
         ctx.set("choroidal_artery_mask", choroidal_artery_mask)
         ctx.set("choroidal_vein_mask", choroidal_vein_mask)
         ctx.set("choroidal_aliased_artery_mask", choroidal_aliased_artery_mask)
+
+        ctx.output_manager.save_overlay(self.name, "overlay", ctx.require("M0_ff_image_cleaned"), [choroidal_artery_mask, choroidal_vein_mask, choroidal_aliased_artery_mask], colors=[(0, 0, 255), (255, 0, 0), (0, 255, 0)])
 
         choroidal_artery_mask_clean = self.clean_vessel_mask(choroidal_artery_mask, ctx)
         choroidal_vein_mask_clean = self.clean_vessel_mask(choroidal_vein_mask, ctx)

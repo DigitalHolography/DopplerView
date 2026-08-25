@@ -22,6 +22,13 @@ class ImageRenderer(OutputRenderer):
         else:
             imageio.imwrite(path, normalize_to_uint8(ctx.get(key)))
 
+class MaskRenderer(OutputRenderer):
+    def render(self, key, ctx, path, options=None):
+        """Render a binary mask with foreground pixels visibly white.
+        """
+        mask = np.asarray(ctx.get(key))
+        imageio.imwrite(path, (mask > 0).astype(np.uint8) * 255)
+
 class SignalRenderer(OutputRenderer):
     @serialized_render
     def render(self, key, ctx, path, options=None):
