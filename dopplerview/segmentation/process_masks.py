@@ -6,7 +6,8 @@ import numpy as np
 from skimage.morphology import closing, skeletonize, disk
 from skimage.measure import label, regionprops
 from skimage.segmentation import watershed, find_boundaries
-from scipy.ndimage import distance_transform_edt, binary_dilation, convolve
+from scipy.ndimage import distance_transform_edt, binary_dilation, binary_erosion, convolve
+from scipy.spatial import cKDTree
 
 import logging
 logger = logging.getLogger(__name__)
@@ -300,8 +301,6 @@ def draw_connection(mask, point1, point2, thickness=1):
 
     return mask_with_line
 
-from functools import partial
-
 def get_all_points_in_radius(mask, center, radius):
     """
     Get all points in the mask that are within a given radius from a center point.
@@ -334,40 +333,51 @@ def connect_components(mask, max_distance=5, executor=None):
     Returns:
     - connected_mask: 2D numpy array (binary mask) with connected components
     """
+    mask = np.asarray(mask, dtype=bool)
+    if max_distance <= 0 or not mask.any():
+        return mask.copy()
+
     labeled_mask = label(mask)
-    props = regionprops(labeled_mask)
+    if labeled_mask.max() < 2:
+        return mask.copy()
 
-    # Create a distance map
-    # distance_map = distance_transform_edt(~mask)
+    # Only component boundary pixels can form a shortest bridge. A spatial
+    # index avoids the previous implementation's full foreground scan for
+    # every pixel (and its full-image copy per connected component).
+    boundary = mask & ~binary_erosion(mask, structure=np.ones((3, 3), dtype=bool))
+    coords = np.column_stack(np.nonzero(boundary))  # (row, column)
+    component_labels = labeled_mask[boundary]
+    pairs = cKDTree(coords).query_pairs(max_distance, output_type="ndarray")
+    if pairs.size == 0:
+        return mask.copy()
 
-    mask_cpy = mask.copy()
+    pairs = pairs[component_labels[pairs[:, 0]] != component_labels[pairs[:, 1]]]
+    if pairs.size == 0:
+        return mask.copy()
 
-    def connect_neighbours(prop, mask, labeled_mask, max_distance):
-        # Get the coordinates of the current component
-        coords = prop.coords
+    # One shortest bridge is sufficient for each pair of components. Drawing
+    # every nearby pixel pair only thickens the same bridge and dominates the
+    # runtime on dense masks.
+    component_pairs = np.sort(component_labels[pairs], axis=1)
+    distances_sq = np.sum((coords[pairs[:, 0]] - coords[pairs[:, 1]]) ** 2, axis=1)
+    order = np.lexsort((distances_sq, component_pairs[:, 1], component_pairs[:, 0]))
+    sorted_component_pairs = component_pairs[order]
+    first_for_pair = np.ones(order.size, dtype=bool)
+    first_for_pair[1:] = np.any(
+        sorted_component_pairs[1:] != sorted_component_pairs[:-1], axis=1
+    )
 
-        # Check if any pixel in the component is within max_distance of another component
-        for coord in coords:
-            neighbourhood = get_all_points_in_radius((labeled_mask != 0) & (labeled_mask != prop.label), (coord[1], coord[0]), max_distance)
-            for neighbour in neighbourhood:
-                # if not mask[neighbour[1], neighbour[0]]:
-                #     # Draw a line between the two points
-                    mask = draw_connection(mask, (coord[1], coord[0]), (neighbour[0], neighbour[1]), thickness=2)
-
-        return mask
-    
-    f = partial(connect_neighbours, mask=mask_cpy, labeled_mask=labeled_mask, max_distance=max_distance)
-    if executor is None:
-        masks = np.stack([f(prop) for prop in props], axis=0)
-    else:
-        masks = executor.map(
-            f,
-            props,
-            chunking=False,
-            task_name="component connection",
+    connected_mask = mask.copy()
+    for pair_index in order[first_for_pair]:
+        first, second = coords[pairs[pair_index]]
+        connected_mask = draw_connection(
+            connected_mask,
+            (first[1], first[0]),
+            (second[1], second[0]),
+            thickness=2,
         )
 
-    return np.logical_or.reduce(masks)
+    return connected_mask
 
 def keep_connected_components(mask, anchor, negative=False):
     """
