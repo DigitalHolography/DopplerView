@@ -95,7 +95,7 @@ class PreArteryMaskStep(BaseStep):
             self.logger.info("    - Pre-classifying arteries and veins using clustering on the first harmonic of branch signals in the complex domain")
             pre_artery_mask, pre_vein_mask, labels, z = pulse_analysis.compute_pre_masks_by_clustering(signals_n, labeled_vessels, sampling_frequency)
             ctx.output_manager.save_clusterization("pulse_analysis", "pre_mask_clusterization", labels, z)
-        elif pre_mask_method == "gradient":
+        if pre_mask_method == "gradient":
             self.logger.info("    - Pre-classifying arteries and veins using systolic gradient")
             pre_artery_mask, pre_vein_mask = pulse_analysis.compute_pre_masks_by_systolic_gradient(signals_n, labeled_vessels, sampling_frequency)
         ctx.output_manager.save_overlay("pulse_analysis", "av_overlay_pre_masks", ctx.require("M0_ff_image"), [pre_artery_mask, pre_vein_mask])

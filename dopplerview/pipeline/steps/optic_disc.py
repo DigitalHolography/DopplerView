@@ -37,7 +37,7 @@ class OpticDiscSegmentationStep(BaseStep):
         ctx.output_manager.save_optic_disc_detections(self.name, "optic_disc_detection", boxes, scale_x, scale_y, ctx)
         
         # Keep detections above confidence threshold
-        if bestbox[4] < 0.3:
+        if bestbox[4] < 0.5:
             raise ValueError(
                 "No confident bounding box found."
             )

@@ -529,7 +529,7 @@ class Pipeline:
                         "[Pipeline] Output cleanup also failed; preserving the "
                         "original execution error"
                     )
-        logger.info(f"[Pipeline] Finished execution in {elapsed:.2f}s")
+        logger.info(f"[Pipeline] Finished execution in {elapsed:.2f}s\n")
 
         # # If in debug mode, save the entire cache to the H5 file after execution
         # if self.ctx.debug_mode:
