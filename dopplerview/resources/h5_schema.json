@@ -60,6 +60,8 @@
     },
     "doppler_signal": {
         "M0_ff": "M0_ff_video",
+        "HF_M0_ff": "HF_M0_ff_video",
+        "LF_M0_ff": "LF_M0_ff_video",
         "M0_ff_cleaned": "video_cleaned"
     }
 }

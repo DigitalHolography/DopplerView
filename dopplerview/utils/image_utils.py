@@ -287,3 +287,57 @@ def inpaint_stack(stack, mask, executor=None, dilation_radius=0):
         )
 
     return inpainted_stack
+
+def overlay_with_labels(image, label_mask, classes, colors=None):
+    """
+    Overlay an image with a label mask, where each label is assigned a color.
+
+    Parameters:
+    - image: 2D numpy array representing the grayscale image.
+    - label_mask: 2D numpy array of the same shape as image, containing integer labels.
+    - classes: List or array of unique classes in the label_mask.
+    - colors: Optional dictionary mapping classes to RGB colors. If None, random colors will be generated.
+
+    Returns:
+    - overlay_image: 3D numpy array representing the RGB overlay image.
+    """
+    # Create an RGB version of the grayscale image
+    overlay_image = np.stack([image] * 3, axis=-1)
+
+    # Generate random colors if not provided
+    if colors is None:
+        np.random.seed(0)  # For reproducibility
+        colors = {cls: np.random.randint(0, 255, size=3) for cls in classes}
+
+    # Overlay each class with its corresponding color
+    for cls in np.unique(classes):
+        branch_indices = np.where(classes == cls)[0] + 1
+        branch_mask = np.zeros_like(label_mask, dtype=bool)
+        for idx in branch_indices:
+            branch_mask[label_mask == idx] = True
+        overlay_image[branch_mask] = colors[cls]
+
+    return overlay_image
+
+def overlay_with_masks(image, masks, colors=[(0, 0, 255), (255, 0, 0)], artery_mask=None, vein_mask=None):
+    img = image.copy()
+
+    if img.ndim == 2:
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+
+    for i, mask in enumerate(masks):
+        color = colors[i % len(colors)]
+        img[mask > 0] = color
+
+    return img
+
+def display_image_side_by_side(image1, image2, title1="Image 1", title2="Image 2"):
+    image1 = normalize_to_uint8(image1)
+    image2 = normalize_to_uint8(image2)
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+    axes[0].imshow(image1, cmap='gray')
+    axes[0].set_title(title1)
+    axes[1].imshow(image2, cmap='gray')
+    axes[1].set_title(title2)
+    plt.show()

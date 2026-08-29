@@ -80,7 +80,7 @@ def bwareafilt_largest(binary_mask, connectivity=2):
     largest_label = counts.argmax()
     return labeled == largest_label
 
-def get_labeled_vessels(mask, mask_optic_disc=True, x_center=None, y_center=None, r1=0.1, r2=0.35):
+def get_labeled_vessels(mask, mask_optic_disc=True, x_center=None, y_center=None, r1=0.1):
     numX, numY = mask.shape
 
     if mask_optic_disc:
@@ -322,7 +322,7 @@ def get_all_points_in_radius(mask, center, radius):
     
     return points_in_radius
 
-def connect_components(mask, max_distance=5, executor=None):
+def connect_components(mask, max_distance=5):
     """
     Connect components in a binary mask that are within a certain distance of each other.
 
@@ -406,3 +406,106 @@ def remove_small_vessels(labeled_vessels, min_size=10):
     if small_labels.size:
         labeled_vessels[np.isin(labeled_vessels, small_labels)] = 0
     return labeled_vessels
+
+
+def compute_branch_overlaps(labels, artery_mask, vein_mask, choroid_mask=None):
+    artery_mask = artery_mask.astype(bool)
+    vein_mask = vein_mask.astype(bool)
+    if choroid_mask is not None:
+        choroid_mask = choroid_mask.astype(bool)
+
+    max_label = labels.max()
+
+    sizes = np.bincount(labels.ravel(), minlength=max_label + 1)
+
+    artery_counts = np.bincount(
+        labels[artery_mask].ravel(),
+        minlength=max_label + 1,
+    )
+
+    vein_counts = np.bincount(
+        labels[vein_mask].ravel(),
+        minlength=max_label + 1,
+    )
+
+    if choroid_mask is not None:
+        choroid_counts = np.bincount(
+            labels[choroid_mask].ravel(),
+            minlength=max_label + 1,
+        )
+
+    branch_ids = np.arange(1, max_label + 1)
+
+    artery_ratio = artery_counts[branch_ids] / sizes[branch_ids]
+    vein_ratio = vein_counts[branch_ids] / sizes[branch_ids]
+
+    if choroid_mask is not None:
+        choroid_ratio = choroid_counts[branch_ids] / sizes[branch_ids]
+
+    return {
+        "branch_ids": branch_ids,
+        "size": sizes[branch_ids],
+        "artery_pixels": artery_counts[branch_ids],
+        "vein_pixels": vein_counts[branch_ids],
+        "choroid_pixels": choroid_counts[branch_ids] if choroid_mask is not None else None,
+        "artery_ratio": artery_ratio,
+        "vein_ratio": vein_ratio,
+        "choroid_ratio": choroid_ratio if choroid_mask is not None else None,
+    }
+
+def compute_branch_label(overlaps, artery_threshold=0.4, vein_threshold=0.4, choroid_threshold=0.4, remove_overlaps=False, labeled_vessels=None):
+    artery_mask = overlaps["artery_ratio"] >= artery_threshold
+    vein_mask = overlaps["vein_ratio"] >= vein_threshold
+    if overlaps["choroid_ratio"] is not None:
+        choroid_mask = overlaps["choroid_ratio"] >= choroid_threshold
+
+    labels = np.zeros_like(overlaps["branch_ids"], dtype=int)
+    labels[artery_mask] += 1
+    labels[vein_mask] += 2
+    if overlaps["choroid_ratio"] is not None:
+        labels[choroid_mask] += 4 if not remove_overlaps else 3
+    if remove_overlaps:
+        if labeled_vessels is None:
+            raise ValueError("labeled_vessels must be provided when remove_overlaps is True")
+        # Remove overlapping labels
+        labels[artery_mask & vein_mask] = 0
+        if overlaps["choroid_ratio"] is not None:
+            labels[artery_mask & choroid_mask] = 0
+            labels[vein_mask & choroid_mask] = 0
+
+        to_remove = np.where(labels == 0)[0]
+        labeled_vessels[np.isin(labeled_vessels, to_remove + 1)] = 0
+        labels = labels[labels != 0]
+
+        # Relabel the clean mask
+        l = np.unique(labeled_vessels)
+        l = l[l != 0]
+
+        relabel_map = np.zeros(labeled_vessels.max() + 1, dtype=labeled_vessels.dtype)
+        relabel_map[l] = np.arange(1, len(l) + 1)
+
+        labeled_vessels = relabel_map[labeled_vessels]
+
+        return labels, labeled_vessels
+
+    return labels
+
+def remove_small_vessels(labeled_vessels, min_size=10):
+    unique_labels, counts = np.unique(labeled_vessels, return_counts=True)
+    small_labels = unique_labels[counts < min_size]
+    for label in small_labels:
+        labeled_vessels[labeled_vessels == label] = 0
+    return labeled_vessels
+
+def get_branch_differences(pred_labels, gt_labels, labeled_vessels):
+    differences = np.zeros_like(labeled_vessels, dtype=object)
+    for branch_idx in np.unique(labeled_vessels)[1:]:
+        label_idx = branch_idx - 1  # Adjust for 0-based indexing
+
+
+        if pred_labels[label_idx] != gt_labels[label_idx]:
+            print(f"Branch {branch_idx}: Predicted label = {pred_labels[label_idx]}, Ground truth label = {gt_labels[label_idx]}")
+            branch_mask = labeled_vessels == branch_idx
+            differences[branch_mask] = branch_idx
+            
+    return differences

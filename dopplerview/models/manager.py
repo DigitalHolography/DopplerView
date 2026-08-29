@@ -66,6 +66,15 @@ class ModelManager:
         if not model_name:
             raise ValueError(f"No model registered for task '{task_name}'")
         return model_name
+
+    def get_current_model_for_task(self, task_name):
+        model_name = self.get_current_model_name_for_task(task_name)
+        return self.get_model(model_name)
+
+    def get_model(self, model_name: str):
+        spec, local_path = self.resolve(model_name)
+        model_wrapper = self.build_model_wrapper(spec, local_path)
+        return model_wrapper
     
     @staticmethod
     def build_model_wrapper(spec, local_path, execution_policy=None):

@@ -148,7 +148,7 @@ def get_peaks(signal, beat_period, height_percentile=80, distance_tolerance=0.8)
 
     return peaks
 
-def correct_signal_with_heartbeat(signal, beat_period, k=2, distance_tolerance=0.8, use_peaks=True):
+def correct_signal_with_heartbeat(signal, beat_period, sampling_freq=None, k=2, distance_tolerance=0.8, use_peaks=True):
     """Correct the signal using heartbeat-based correction.
     Parameters
     ----------
@@ -175,13 +175,41 @@ def correct_signal_with_heartbeat(signal, beat_period, k=2, distance_tolerance=0
         average_beat = np.nanmedian(beats, axis=0)
     else:
         peaks = None
-        average_beat, beat_period = get_cycle_template(signal, beat_period, return_period=True)
+        average_beat, beat_period = get_cycle_template(signal, sampling_freq=sampling_freq, beat_period=beat_period, return_period=True)
 
     pseudo_signal = get_pseudo_signal(average_beat, peaks=peaks, length=signal_length)
     corrected_signal = correct_signal(signal, pseudo_signal, k=k)
     return corrected_signal
 
-def remove_bad_beats(signal, video, beat_period, threshold=0.5, distance_tolerance=0.8, use_peaks=True):
+def remove_bad_beats(signal, beat_period, threshold=0.5):
+    """Remove bad beats from the signal based on correlation with the average beat."""
+    peaks = get_peaks(signal, beat_period)
+    beats = get_beats(signal, peaks)
+    median_beat = np.nanmedian(beats, axis=0)
+
+    # Compute correlation of each beat with the average beat
+    correlations = np.array([np.corrcoef(beat, median_beat)[0, 1] for beat in beats])
+    good_beats_mask = correlations > threshold
+
+    # Create a cleaned signal by keeping only good beats
+    beat_signal = get_pseudo_signal(median_beat, peaks, len(signal))
+    cleaned_signal = np.zeros_like(signal)
+    for i, is_good in enumerate(good_beats_mask):
+        if is_good:
+            start, end = peaks[i], peaks[i + 1]
+            cleaned_signal[start:end] = signal[start:end]
+        else:
+            start, end = peaks[i], peaks[i + 1]
+            cleaned_signal[start:end] = 0
+            beat_signal[start:end] = 0
+
+    
+    cleaned_signal = cleaned_signal[cleaned_signal != 0]
+    beat_signal = beat_signal[beat_signal != 0]
+
+    return cleaned_signal, beat_signal, correlations
+
+def remove_bad_beats_on_video_on_video(signal, video, beat_period, threshold=0.5, distance_tolerance=0.8, use_peaks=True):
     """Remove frames on the video corresponding to bad beats from the signal based on correlation with the average beat."""
     if use_peaks:
         signal_length = len(signal)
@@ -502,7 +530,7 @@ def get_nb_of_positive_peaks(signal, beat_period):
 
 def compute_pre_masks_by_systolic_gradient(signals, labeled_vessels, sampling_frequency):
     """
-    Compute a preliminary artery mask based on pulse analysis of the video frames within the vessel mask
+    Compute a preliminary artery mask based on pulse analysis of the video frames within the vessel mask.
     """
 
     idx0 = compute_period(signals, sampling_frequency)
@@ -528,7 +556,8 @@ def compute_pre_masks_by_systolic_gradient(signals, labeled_vessels, sampling_fr
 
 def compute_pre_masks_by_clustering(signals, labeled_vessels, sampling_frequency):
     """
-    Compute a preliminary artery mask based on pulse analysis of the video frames within the vessel mask
+    Compute a preliminary artery mask based on the clustering of the complex first Fourier harmonic of all signals. 
+    The 2 clusters are then classified as artery or vein based on the number of positive peaks in their median signal's gradient.
     """
 
     # --- Compute median heartbeat template for each branch ---
@@ -560,7 +589,7 @@ def compute_pre_masks_by_clustering(signals, labeled_vessels, sampling_frequency
     cluster0_signal = np.median(signals[cluster0], axis=0)
     cluster1_signal = np.median(signals[cluster1], axis=0)
 
-    # --- Classify based on number of positive peaks in the median heartbeat ---
+    # --- Classify based on number of positive peaks in the gradient of the median heartbeat ---
     cluster0_peaks = get_nb_of_positive_peaks(cluster0_signal, cluster0_period)
     cluster1_peaks = get_nb_of_positive_peaks(cluster1_signal, cluster1_period)
 

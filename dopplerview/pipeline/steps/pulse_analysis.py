@@ -153,7 +153,7 @@ class ComputeTemporalCuesStep(BaseStep):
             arterial_pulse_cleaned = arterial_pulse_filtered
             video_cleaned = video
         else:
-            arterial_pulse_cleaned, video_cleaned, beat_signal, median_beat, peaks = pulse_analysis.remove_bad_beats(arterial_pulse_filtered, video, beat_period_frames, threshold=0.8)
+            arterial_pulse_cleaned, video_cleaned, beat_signal, median_beat, peaks = pulse_analysis.remove_bad_beats_on_video(arterial_pulse_filtered, video, beat_period_frames, threshold=0.8)
             ctx.set("pre_arterial_pulse_cleaned", arterial_pulse_cleaned)
             ctx.output_manager.output("pulse_analysis", f"outlier removal", (arterial_pulse_filtered, beat_signal), "signal", options={"multiple_signals": True, "legend": ["Original Signal", "beat signal"]})
             ctx.output_manager.output("pulse_analysis", f"median beat", median_beat, "signal")
