@@ -194,6 +194,56 @@ def compute_correlation(video, signal):
     
     return R
 
+def correlate_signal(signal, reference_signal):
+    """
+    Compute the zero-lag correlation between two signals.
+
+    Parameters:
+        signal (np.ndarray): 1D array of shape (T,)
+        reference_signal (np.ndarray): 1D array of shape (T,)
+
+    Returns:
+        R (float): Correlation coefficient
+    """
+    signal_centered = signal - np.nanmean(signal)
+    reference_signal_centered = reference_signal - np.nanmean(reference_signal)
+
+    denominator = np.nanstd(signal_centered) * np.nanstd(reference_signal_centered)
+    numerator = np.nanmean(signal_centered * reference_signal_centered)
+
+    R = numerator / denominator
+
+    return R
+
+def correlate_signals(signals, reference_signal, include_std=False):
+    """
+    Compute the zero-lag correlations between multiple signals and a reference signal.
+
+    Parameters:
+        signals (np.ndarray): 2D array of shape (N, T)
+        reference_signal (np.ndarray): 1D array of shape (T,)
+        include_std (bool): If True, also compute the standard deviation of the correlations across signals.
+
+    Returns:
+        R (np.ndarray): 2D array of shape (N, T) containing the correlation coefficients
+    """
+    reference_signal_centered = reference_signal - np.nanmean(reference_signal)
+    denominator = np.nanstd(reference_signal_centered)
+
+    R = np.empty(signals.shape[0]) if not include_std else np.empty((signals.shape[0], 2))
+    for i in range(signals.shape[0]):
+        signal_centered = signals[i] - np.nanmean(signals[i])
+        numerator = np.nanmean(signal_centered * reference_signal_centered)
+        corr_avg = numerator / (np.nanstd(signal_centered) * denominator)
+
+        if include_std:
+            std_dev = np.nanstd(signal_centered * reference_signal_centered)
+            R[i] = (corr_avg, std_dev)
+        else:
+            R[i] = corr_avg
+
+    return R
+
 def get_pulse_from_mask(video, mask):
     """
     Get the pulse signal from the video using the provided mask.

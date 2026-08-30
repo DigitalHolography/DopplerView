@@ -98,6 +98,8 @@ def assign_clusters_to_av(
             0,
         )
 
+    mask_labels += 1
+
     return (
         artery_mask,
         vein_mask,
@@ -148,6 +150,7 @@ def evaluate_experiment(
     gt_branch_labels,
     gt_artery_mask,
     gt_vein_mask,
+    decimals=2
 ):
     metrics = {}
 
@@ -160,88 +163,88 @@ def evaluate_experiment(
 
     if len(np.unique(cluster_labels)) > 1:
 
-        metrics["silhouette"] = (
+        metrics["silhouette"] = round((
             silhouette_score(
                 X,
                 cluster_labels,
             )
-        )
+        ), decimals)
 
-        metrics["davies_bouldin"] = (
+        metrics["davies_bouldin"] = round((
             davies_bouldin_score(
                 X,
                 cluster_labels,
             )
-        )
+        ), decimals)
 
-        metrics["calinski_harabasz"] = (
+        metrics["calinski_harabasz"] = round((
             calinski_harabasz_score(
                 X,
                 cluster_labels,
             )
-        )
+        ), decimals)
 
     # ------------------
     # branch metrics
     # ------------------
 
-    valid = gt_branch_labels > 0
+    # valid = gt_branch_labels > 0
 
-    gt = gt_branch_labels[valid]
-    pred = result.mask_labels[valid]
+    gt = gt_branch_labels
+    pred = result.mask_labels
 
-    metrics["ARI"] = adjusted_rand_score(
+    metrics["ARI"] = round(adjusted_rand_score(
         gt,
         pred,
-    )
+    ), decimals)
 
-    metrics["NMI"] = (
+    metrics["NMI"] = round((
         normalized_mutual_info_score(
             gt,
             pred,
         )
-    )
+    ), decimals)
 
-    metrics["accuracy"] = (
+    metrics["accuracy"] = round((
         accuracy_score(
             gt,
             pred,
         )
-    )
+    ), decimals)
 
-    metrics["balanced_accuracy"] = (
+    metrics["balanced_accuracy"] = round((
         balanced_accuracy_score(
             gt,
             pred,
         )
-    )
+    ), decimals)
 
-    metrics["precision"] = (
+    metrics["precision"] = round((
         precision_score(
             gt,
             pred,
-            average="binary",
+            average="micro",
             zero_division=0,
         )
-    )
+    ), decimals)
 
-    metrics["recall"] = (
+    metrics["recall"] = round((
         recall_score(
             gt,
             pred,
-            average="binary",
+            average="micro",
             zero_division=0,
         )
-    )
+    ), decimals)
 
-    metrics["f1"] = (
+    metrics["f1"] = round((
         f1_score(
             gt,
             pred,
-            average="binary",
+            average="micro",
             zero_division=0,
         )
-    )
+    ), decimals)
 
     # ------------------
     # segmentation
@@ -251,38 +254,93 @@ def evaluate_experiment(
         dice_score(
             result.artery_mask,
             gt_artery_mask,
-        )
+        ).round(decimals).item()
     )
 
     metrics["dice_vein"] = (
         dice_score(
             result.vein_mask,
             gt_vein_mask,
-        )
+        ).round(decimals).item()
     )
 
     metrics["iou_artery"] = (
         iou_score(
             result.artery_mask,
             gt_artery_mask,
-        )
+        ).round(decimals).item()
     )
 
     metrics["iou_vein"] = (
         iou_score(
             result.vein_mask,
             gt_vein_mask,
-        )
+        ).round(decimals).item()
     )
 
-    metrics["dice_mean"] = (
+    metrics["dice_mean"] = round((
         metrics["dice_artery"]
         + metrics["dice_vein"]
-    ) / 2
+    ) / 2, decimals)
 
-    metrics["iou_mean"] = (
+    metrics["iou_mean"] = round((
         metrics["iou_artery"]
         + metrics["iou_vein"]
-    ) / 2
+    ) / 2, decimals)
 
     return metrics
+
+def save_experiment_h5(
+    h5_path,
+    experiment_name,
+    result,
+    metadata,
+):
+    """
+    Save one experiment.
+    """
+
+    with h5py.File(
+        h5_path,
+        "a",
+    ) as f:
+
+        if experiment_name in f:
+            del f[experiment_name]
+
+        g = f.create_group(
+            experiment_name
+        )
+
+        g.create_dataset(
+            "embedding_matrix",
+            data=result.X,
+            compression="gzip",
+        )
+
+        g.create_dataset(
+            "cluster_labels",
+            data=result.cluster_labels,
+        )
+
+        g.create_dataset(
+            "mask_labels",
+            data=result.mask_labels,
+        )
+
+        g.create_dataset(
+            "artery_mask",
+            data=result.artery_mask.astype(
+                np.uint8
+            ),
+        )
+
+        g.create_dataset(
+            "vein_mask",
+            data=result.vein_mask.astype(
+                np.uint8
+            ),
+        )
+
+        for k, v in metadata.items():
+            g.attrs[k] = v
