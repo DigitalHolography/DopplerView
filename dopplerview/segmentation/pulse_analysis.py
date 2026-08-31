@@ -578,8 +578,9 @@ def get_filtered_branch_signals(video, labeled_vessels, sampling_frequency):
         raise ValueError("sampling_frequency must be greater than 30 Hz for a 15 Hz low-pass filter")
 
     num_frames = video.shape[0]
-    num_branches = int(labeled_vessels.max())
-    signals = np.zeros((num_branches, num_frames))
+    branch_ids = np.unique(labeled_vessels)
+    branch_ids = branch_ids[branch_ids > 0]
+    signals = np.zeros((branch_ids.size, num_frames))
     b, a = butter(4, 15 / (sampling_frequency / 2), btype='low')
     padlen = 3 * max(len(a), len(b))
     moving_window = round(sampling_frequency * 0.1)
@@ -592,19 +593,21 @@ def get_filtered_branch_signals(video, labeled_vessels, sampling_frequency):
     vessel_labels = vessel_labels[order]
     vessel_pixels = video.reshape(num_frames, -1)[:, vessel_positions]
 
-    for i in range(1, num_branches + 1):
-        start = np.searchsorted(vessel_labels, i, side="left")
-        stop = np.searchsorted(vessel_labels, i, side="right")
+    for signal_index, branch_id in enumerate(branch_ids):
+        start = np.searchsorted(vessel_labels, branch_id, side="left")
+        stop = np.searchsorted(vessel_labels, branch_id, side="right")
         branch_pixels = vessel_pixels[:, start:stop]
         branch_mean = np.nanmean(branch_pixels, axis=1)
 
         if branch_mean.size <= padlen:
-            signals[i - 1, :] = branch_mean
+            signals[signal_index, :] = branch_mean
         else:
-            signals[i - 1, :] = filtfilt(b, a, branch_mean)
+            signals[signal_index, :] = filtfilt(b, a, branch_mean)
 
         if moving_window > 1:
-            signals[i - 1, :] = signal_processing.movmean(signals[i - 1, :], moving_window)
+            signals[signal_index, :] = signal_processing.movmean(
+                signals[signal_index, :], moving_window
+            )
 
     return signals
 
@@ -673,15 +676,14 @@ def compute_pre_masks_by_systolic_gradient(signals, labeled_vessels, sampling_fr
         is_pure[:] = True
 
     # Step 4: Combine into artery / vein masks
-    num_branches = labeled_vessels.max()
-    valid_arteries = np.flatnonzero(is_pure & (s_idx == 1)) + 1
-    valid_veins = np.flatnonzero(is_pure & (s_idx != 1)) + 1
-    artery_lookup = np.zeros(num_branches + 1, dtype=bool)
-    vein_lookup = np.zeros(num_branches + 1, dtype=bool)
-    artery_lookup[valid_arteries] = True
-    vein_lookup[valid_veins] = True
-    pre_mask_artery = artery_lookup[labeled_vessels]
-    pre_mask_vein = vein_lookup[labeled_vessels]
+    branch_ids = np.unique(labeled_vessels)
+    branch_ids = branch_ids[branch_ids > 0]
+    if branch_ids.size != len(signals):
+        raise ValueError("signals must contain exactly one row per labeled vessel branch")
+    valid_arteries = branch_ids[is_pure & (s_idx == 1)]
+    valid_veins = branch_ids[is_pure & (s_idx != 1)]
+    pre_mask_artery = np.isin(labeled_vessels, valid_arteries)
+    pre_mask_vein = np.isin(labeled_vessels, valid_veins)
 
     return pre_mask_artery, pre_mask_vein
 
@@ -707,12 +709,15 @@ def compute_pre_masks_by_clustering(signals, labeled_vessels, sampling_frequency
         random_state=0
     ).fit_predict(X)
 
+    branch_ids = np.unique(labeled_vessels)
+    branch_ids = branch_ids[branch_ids > 0]
+    if branch_ids.size != len(signals):
+        raise ValueError("signals must contain exactly one row per labeled vessel branch")
+
     cluster0 = np.where(labels == 0)[0]
     cluster1 = np.where(labels == 1)[0]
 
-    cluster0_lookup = np.zeros(labeled_vessels.max() + 1, dtype=bool)
-    cluster0_lookup[cluster0 + 1] = True
-    mask0 = cluster0_lookup[labeled_vessels]
+    mask0 = np.isin(labeled_vessels, branch_ids[cluster0])
     mask1 = ~mask0 & (labeled_vessels > 0)
 
     cluster0_period = np.median(np.array(periods)[cluster0], axis=0)

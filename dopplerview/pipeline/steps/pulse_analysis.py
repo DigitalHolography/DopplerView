@@ -96,8 +96,10 @@ class PreArteryMaskStep(BaseStep):
                 ))
                 ctx.set("corrected_signals", corrected_signals)
 
-                for i in range(1, labeled_vessels.max() + 1):
-                    ctx.output_manager.output("pulse_analysis", f"branch_{i}_corrected", (signals_n[i - 1, :], corrected_signals[i - 1, :]), "signal", options={"multiple_signals": True, "legend": ["Original Signal", "Corrected Signal"]})
+                branch_ids = np.unique(labeled_vessels)
+                branch_ids = branch_ids[branch_ids > 0]
+                for signal_index, branch_id in enumerate(branch_ids):
+                    ctx.output_manager.output("pulse_analysis", f"branch_{branch_id}_corrected", (signals_n[signal_index, :], corrected_signals[signal_index, :]), "signal", options={"multiple_signals": True, "legend": ["Original Signal", "Corrected Signal"]})
 
                 signals_n = corrected_signals
 

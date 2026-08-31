@@ -434,7 +434,8 @@ def compute_branch_overlaps(labels, artery_mask, vein_mask, choroid_mask=None):
             minlength=max_label + 1,
         )
 
-    branch_ids = np.arange(1, max_label + 1)
+    branch_ids = np.unique(labels)
+    branch_ids = branch_ids[branch_ids > 0]
 
     artery_ratio = artery_counts[branch_ids] / sizes[branch_ids]
     vein_ratio = vein_counts[branch_ids] / sizes[branch_ids]
@@ -474,7 +475,9 @@ def compute_branch_label(overlaps, artery_threshold=0.4, vein_threshold=0.4, cho
             labels[vein_mask & choroid_mask] = 0
 
         to_remove = np.where(labels == 0)[0]
-        labeled_vessels[np.isin(labeled_vessels, to_remove + 1)] = 0
+        labeled_vessels[
+            np.isin(labeled_vessels, overlaps["branch_ids"][to_remove])
+        ] = 0
         labels = labels[labels != 0]
 
         # Relabel the clean mask
@@ -499,10 +502,11 @@ def remove_small_vessels(labeled_vessels, min_size=10):
 
 def get_branch_differences(pred_labels, gt_labels, labeled_vessels):
     differences = np.zeros_like(labeled_vessels, dtype=object)
-    for branch_idx in np.unique(labeled_vessels)[1:]:
-        label_idx = branch_idx - 1  # Adjust for 0-based indexing
-
-
+    branch_ids = np.unique(labeled_vessels)
+    branch_ids = branch_ids[branch_ids > 0]
+    if len(pred_labels) != branch_ids.size or len(gt_labels) != branch_ids.size:
+        raise ValueError("pred_labels and gt_labels must contain one value per branch")
+    for label_idx, branch_idx in enumerate(branch_ids):
         if pred_labels[label_idx] != gt_labels[label_idx]:
             print(f"Branch {branch_idx}: Predicted label = {pred_labels[label_idx]}, Ground truth label = {gt_labels[label_idx]}")
             branch_mask = labeled_vessels == branch_idx

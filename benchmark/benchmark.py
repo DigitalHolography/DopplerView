@@ -189,15 +189,14 @@ def run_benchmark(
 
     for input_name, video in videos.items():
 
+        branch_ids = np.unique(labeled_vessels)
+        branch_ids = branch_ids[branch_ids > 0]
         signals = np.array([
             sp.get_pulse_from_mask(
                 video,
-                labeled_vessels == i
+                labeled_vessels == branch_id
             )
-            for i in range(
-                1,
-                labeled_vessels.max() + 1
-            )
+            for branch_id in branch_ids
         ])
 
         for embedding_name, embedding_func in embeddings.items():
