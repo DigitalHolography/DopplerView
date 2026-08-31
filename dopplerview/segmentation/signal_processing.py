@@ -201,23 +201,74 @@ def compute_correlation(video, signal):
     Returns:
         R (np.ndarray): 2D correlation map of shape (H, W)
     """
-    # compute local-to-average signal wave zero-lag correlation
-    signal_centered = signal - np.nanmean(signal)
-    video_centered = video - np.nanmean(video)
+    video = np.asarray(video)
+    signal = np.asarray(signal)
+    if video.ndim != 3:
+        raise ValueError("video must have shape (T, H, W)")
+    if signal.ndim != 1:
+        raise ValueError("signal must be one-dimensional")
+    if signal.size != video.shape[0]:
+        raise ValueError("video and signal must have the same temporal length")
+    if np.iscomplexobj(video) or np.iscomplexobj(signal):
+        raise ValueError("video and signal must be real-valued")
 
-    denominator = np.nanstd(video_centered) * np.nanstd(signal_centered)
-    # Reuse the centered video as multiplication scratch space. The former
-    # expression retained both full-sized arrays until the reduction finished.
-    np.multiply(
-        video_centered,
-        signal_centered[:, np.newaxis, np.newaxis],
-        out=video_centered,
+    signal_valid = np.isfinite(signal)
+    signal_work = signal.astype(float, copy=True)
+    if signal_valid.any():
+        signal_work[signal_valid] -= np.mean(signal_work[signal_valid])
+    signal_work[~signal_valid] = 0
+
+    work_dtype = video.dtype if np.issubdtype(video.dtype, np.floating) else float
+    video_work = video.astype(work_dtype, copy=True)
+    valid = np.isfinite(video_work) & signal_valid[:, np.newaxis, np.newaxis]
+    video_work[~valid] = 0
+
+    counts = np.sum(valid, axis=0, dtype=np.int64)
+    safe_counts = np.maximum(counts, 1)
+    video_means = np.sum(video_work, axis=0, dtype=float) / safe_counts
+    signal_sums = np.einsum(
+        "thw,t->hw",
+        valid,
+        signal_work,
+        dtype=float,
+        optimize=True,
     )
-    numerator = np.nanmean(video_centered, axis=0)
-    
-    R = numerator / denominator
-    
-    return R
+    signal_means = signal_sums / safe_counts
+
+    # Reuse the video copy for centered pixel signals to keep peak memory near
+    # one full video plus the finite-sample mask.
+    np.subtract(video_work, video_means, out=video_work, casting="unsafe")
+    video_work[~valid] = 0
+
+    covariance = np.einsum(
+        "thw,t->hw",
+        video_work,
+        signal_work,
+        dtype=float,
+        optimize=True,
+    )
+    video_sum_squares = np.einsum(
+        "thw,thw->hw",
+        video_work,
+        video_work,
+        dtype=float,
+        optimize=True,
+    )
+    signal_sum_squares = np.einsum(
+        "thw,t->hw",
+        valid,
+        signal_work ** 2,
+        dtype=float,
+        optimize=True,
+    ) - counts * signal_means ** 2
+    signal_sum_squares = np.maximum(signal_sum_squares, 0)
+    denominator = np.sqrt(video_sum_squares * signal_sum_squares)
+
+    correlation = np.full(video.shape[1:], np.nan, dtype=float)
+    defined = (counts >= 2) & (denominator > np.finfo(float).eps)
+    correlation[defined] = covariance[defined] / denominator[defined]
+    correlation[defined] = np.clip(correlation[defined], -1, 1)
+    return correlation
 
 def correlate_signal(signal, reference_signal):
     """
@@ -277,9 +328,7 @@ def get_pulse_from_mask(video, mask):
         video (np.ndarray): 3D array of shape (T, H, W)
         mask (np.ndarray): 2D binary mask of shape (H, W)
     Returns:
-        pulse (np.ndarray): 1D array of length T representing the pulse signal.
-            Each frame is averaged over its finite selected pixels; a frame
-            with no finite selected pixels is returned as NaN.
+        pulse (np.ndarray): 1D array of length T representing the pulse signal
     """
     video = np.asarray(video)
     mask = np.asarray(mask, dtype=bool)
@@ -293,23 +342,14 @@ def get_pulse_from_mask(video, mask):
     if num_mask_pixels == 0:
         raise ValueError("mask must contain at least one selected pixel")
 
-    pulse_dtype = video.dtype if np.issubdtype(video.dtype, np.inexact) else float
-    pulse = np.empty(video.shape[0], dtype=pulse_dtype)
+    pulse = np.empty(video.shape[0], dtype=video.dtype)
     frame_scratch = np.empty(video.shape[1:], dtype=video.dtype)
-    finite_scratch = np.empty(video.shape[1:], dtype=bool)
     for index, frame in enumerate(video):
-        # Copy only selected pixels so NaN/Inf values outside the mask do not
-        # participate in arithmetic (for example, Inf * False).
-        frame_scratch.fill(0)
-        np.copyto(frame_scratch, frame, where=mask)
-        np.isfinite(frame, out=finite_scratch)
-        np.logical_and(finite_scratch, mask, out=finite_scratch)
-        num_valid_pixels = np.count_nonzero(finite_scratch)
-        if num_valid_pixels == 0:
-            pulse[index] = np.nan
-        else:
-            np.copyto(frame_scratch, 0, where=~finite_scratch)
-            pulse[index] = np.sum(frame_scratch) / num_valid_pixels
+        # Preserve the former multiply-and-reduce ordering exactly while
+        # reducing temporary storage from a full video to one frame.
+        np.multiply(frame, mask, out=frame_scratch)
+        pulse[index] = np.nansum(frame_scratch)
+    pulse = pulse / num_mask_pixels
     return pulse
 
 def get_filtered_pulse(pulse, sampling_frequency, cutoff=15, order=4):
