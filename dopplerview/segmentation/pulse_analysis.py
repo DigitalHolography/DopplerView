@@ -209,7 +209,7 @@ def remove_bad_beats(signal, beat_period, threshold=0.5):
 
     return cleaned_signal, beat_signal, correlations
 
-def remove_bad_beats_on_video_on_video(signal, video, beat_period, threshold=0.5, distance_tolerance=0.8, use_peaks=True):
+def remove_bad_beats_on_video(signal, video, beat_period, threshold=0.5, distance_tolerance=0.8, use_peaks=True):
     """Remove frames on the video corresponding to bad beats from the signal based on correlation with the average beat."""
     if use_peaks:
         signal_length = len(signal)
@@ -238,6 +238,11 @@ def remove_bad_beats_on_video_on_video(signal, video, beat_period, threshold=0.5
     cleaned_signal = signal[mask_signal != 0]
 
     return cleaned_signal, cleaned_video, beat_signal, median_beat, peaks
+
+
+# Backward compatibility for notebooks that used the accidental duplicated
+# suffix before the public function name was corrected.
+remove_bad_beats_on_video_on_video = remove_bad_beats_on_video
 
 
 def select_regular_peaks(signals_n, method, idx0, threshold=0.1, tolerance=0.3):
