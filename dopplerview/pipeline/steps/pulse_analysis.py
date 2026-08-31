@@ -17,7 +17,16 @@ class PulseAnalysisStep(NestedStep):
             
 class PreArteryMaskStep(BaseStep):
     requires = {"M0_ff_video", "M0_ff_image", "retinal_vessel_mask", "optic_disc_center"}
-    produces = {"labeled_vessels", "pre_artery_mask", "branch_signals", "pre_vein_mask"}
+    produces = {
+        "labeled_vessels",
+        "pre_artery_mask",
+        "branch_signals",
+        "pre_vein_mask",
+        "pre_artery_mask_clustering",
+        "pre_vein_mask_clustering",
+        "pre_artery_mask_gradient",
+        "pre_vein_mask_gradient",
+    }
     name = "pre_artery_mask"
 
     def _relevant_config(self, ctx):
@@ -54,6 +63,7 @@ class PreArteryMaskStep(BaseStep):
             self.logger.warning("    - No branches detected in the retinal vessel mask. Use vessel mask as pre-mask.")
             ctx.set("pre_artery_mask", vessel_mask)
             ctx.set("pre_vein_mask", np.zeros_like(labeled_vessels))
+            self._set_research_masks(ctx, None, None)
             ctx.set("branch_signals", np.zeros((0, video.shape[0])))
             return
 
@@ -101,33 +111,65 @@ class PreArteryMaskStep(BaseStep):
 
                 signals_n = corrected_signals
 
-        # --- Step 4: Pre-classify arteries and veins using systolic gradient ---
+        # --- Step 4: Pre-classify arteries and veins ---
         pre_mask_method = ctx.dopplerview_config.get("Mask").get("PreMaskMethod", "clustering")
-        if pre_mask_method not in ["clustering", "gradient"]:
+        if pre_mask_method not in ["clustering", "gradient", "both"]:
             self.logger.info(f"Warning: Invalid PreMaskMethod {pre_mask_method}, defaulting to clustering.")
             pre_mask_method = "clustering"
-        if pre_mask_method == "clustering":
-            self.logger.info("    - Pre-classifying arteries and veins using clustering on the first harmonic of branch signals in the complex domain")
-            pre_artery_mask, pre_vein_mask, labels, z = pulse_analysis.compute_pre_masks_by_clustering(signals_n, labeled_vessels, sampling_frequency)
-            ctx.output_manager.save_clusterization("pulse_analysis", "pre_mask_clusterization", labels, z)
-        if pre_mask_method == "gradient":
-            self.logger.info("    - Pre-classifying arteries and veins using systolic gradient")
-            pre_artery_mask, pre_vein_mask = pulse_analysis.compute_pre_masks_by_systolic_gradient(signals_n, labeled_vessels, sampling_frequency)
+        methods = ("clustering", "gradient") if pre_mask_method == "both" else (pre_mask_method,)
+        masks = {}
+
+        for method in methods:
+            if method == "clustering":
+                self.logger.info("    - Pre-classifying arteries and veins using clustering on the first harmonic of branch signals in the complex domain")
+                artery_mask, vein_mask, labels, z = pulse_analysis.compute_pre_masks_by_clustering(signals_n, labeled_vessels, sampling_frequency)
+                ctx.output_manager.save_clusterization("pulse_analysis", "pre_mask_clusterization", labels, z)
+            else:
+                self.logger.info("    - Pre-classifying arteries and veins using systolic gradient")
+                artery_mask, vein_mask = pulse_analysis.compute_pre_masks_by_systolic_gradient(signals_n, labeled_vessels, sampling_frequency)
+            masks[method] = (artery_mask, vein_mask)
+
+            if pre_mask_method == "both":
+                ctx.output_manager.save_overlay(
+                    "pulse_analysis",
+                    f"av_overlay_pre_masks_{method}",
+                    ctx.require("M0_ff_image"),
+                    [artery_mask, vein_mask],
+                )
+
+        canonical_method = "clustering" if pre_mask_method == "both" else pre_mask_method
+        pre_artery_mask, pre_vein_mask = masks[canonical_method]
         ctx.output_manager.save_overlay("pulse_analysis", "av_overlay_pre_masks", ctx.require("M0_ff_image"), [pre_artery_mask, pre_vein_mask])
         ctx.set("pre_artery_mask", pre_artery_mask)
         ctx.set("pre_vein_mask", pre_vein_mask)
+        self._set_research_masks(
+            ctx,
+            masks.get("clustering") if pre_mask_method == "both" else None,
+            masks.get("gradient") if pre_mask_method == "both" else None,
+        )
+
+    @staticmethod
+    def _set_research_masks(ctx, clustering_masks, gradient_masks):
+        for method, method_masks in (
+            ("clustering", clustering_masks),
+            ("gradient", gradient_masks),
+        ):
+            artery_mask, vein_mask = method_masks or (None, None)
+            ctx.set(f"pre_artery_mask_{method}", artery_mask)
+            ctx.set(f"pre_vein_mask_{method}", vein_mask)
 
 class ComputeTemporalCuesStep(BaseStep):
     requires = {
         "M0_ff_video",
         "pre_artery_mask",
         "pre_vein_mask",
+        "pre_artery_mask_gradient",
         "choroidal_vessel_mask",
         "LF_M0_ff",
         "HF_M0_ff",
         "band_ratio_ff",
     }
-    produces = {"correlation_M0", "diasys_image", "pre_arterial_pulse", "choroidal_pulse", "pre_arterial_pulse_filtered", "choroidal_pulse_filtered", "pre_arterial_pulse_cleaned", "pre_venous_pulse", "pre_venous_pulse_filtered", "M0_ff_image_cleaned", "beat_period", "systole_image", "diastole_image", "systole_index_list", "correlation_LF_M0_ff", "correlation_HF_M0_ff", "correlation_band_ratio_ff", "diasys_LF_M0_ff", "diasys_HF_M0_ff", "diasys_band_ratio_ff"}
+    produces = {"correlation_M0", "diasys_image", "pre_arterial_pulse", "choroidal_pulse", "pre_arterial_pulse_filtered", "choroidal_pulse_filtered", "pre_arterial_pulse_cleaned", "pre_venous_pulse", "pre_venous_pulse_filtered", "M0_ff_image_cleaned", "beat_period", "systole_image", "diastole_image", "systole_index_list", "correlation_LF_M0_ff", "correlation_HF_M0_ff", "correlation_band_ratio_ff", "diasys_LF_M0_ff", "diasys_HF_M0_ff", "diasys_band_ratio_ff", "correlation_M0_clustering", "diasys_image_clustering", "correlation_M0_gradient", "diasys_image_gradient"}
     name = "temporal_cues"
 
     def _relevant_config(self, ctx):
@@ -255,3 +297,98 @@ class ComputeTemporalCuesStep(BaseStep):
             diasys_band_ratio_ff = None
         ctx.set("correlation_band_ratio_ff", correlation_band_ratio_ff)
         ctx.set("diasys_band_ratio_ff", diasys_band_ratio_ff)
+
+        pre_mask_method = ctx.dopplerview_config.get("Mask").get("PreMaskMethod", "clustering")
+        if pre_mask_method == "both":
+            ctx.set("correlation_M0_clustering", correlation_artery)
+            ctx.set("diasys_image_clustering", diasys)
+            ctx.output_manager.output(
+                "pulse_analysis",
+                "correlation map RGB clustering",
+                correlation_artery,
+                "image",
+                options={"blue_gray_red": True, "M0_ff_image": M0_ff_image_cleaned},
+            )
+            ctx.output_manager.output(
+                "pulse_analysis",
+                "diasys image RGB clustering",
+                diasys,
+                "image",
+                options={"blue_gray_red": True, "M0_ff_image": M0_ff_image_cleaned},
+            )
+            gradient_correlation, gradient_diasys = self._compute_research_temporal_cues(
+                ctx,
+                ctx.get("pre_artery_mask_gradient"),
+                sampling_frequency,
+            )
+            ctx.set("correlation_M0_gradient", gradient_correlation)
+            ctx.set("diasys_image_gradient", gradient_diasys)
+        else:
+            ctx.set("correlation_M0_clustering", None)
+            ctx.set("diasys_image_clustering", None)
+            ctx.set("correlation_M0_gradient", None)
+            ctx.set("diasys_image_gradient", None)
+
+    def _compute_research_temporal_cues(self, ctx, artery_mask, sampling_frequency):
+        """Compute the additional gradient M0 cues without changing canonical outputs."""
+        if artery_mask is None or not np.any(artery_mask):
+            self.logger.warning(
+                "    - Gradient pre-mask is empty; gradient temporal cues are unavailable."
+            )
+            return None, None
+
+        video = ctx.require("M0_ff_video")
+        arterial_pulse = signal_processing.get_pulse_from_mask(video, artery_mask)
+        arterial_pulse_filtered = signal_processing.get_filtered_pulse(
+            arterial_pulse,
+            sampling_frequency,
+        )
+        beat_period_frames = pulse_analysis.compute_period(
+            arterial_pulse_filtered,
+            sampling_frequency,
+        )
+        if beat_period_frames is None:
+            self.logger.warning(
+                "    - No cardiac period detected with the gradient pre-mask; "
+                "gradient temporal cues are unavailable."
+            )
+            return None, None
+
+        if len(arterial_pulse_filtered) // beat_period_frames < 3:
+            arterial_pulse_cleaned = arterial_pulse_filtered
+            video_cleaned = video
+        else:
+            arterial_pulse_cleaned, video_cleaned, *_ = pulse_analysis.remove_bad_beats_on_video(
+                arterial_pulse_filtered,
+                video,
+                beat_period_frames,
+                threshold=0.8,
+            )
+            if len(arterial_pulse_filtered) - len(arterial_pulse_cleaned) > len(arterial_pulse_filtered) / 2:
+                arterial_pulse_cleaned, video_cleaned = arterial_pulse_filtered, video
+
+        cleaned_image = image_utils.normalize_to_uint8(np.mean(video_cleaned, axis=0))
+        correlation = signal_processing.compute_correlation(
+            video_cleaned,
+            arterial_pulse_cleaned,
+        )
+        diasys, *_ = pulse_analysis.compute_diasys_image(
+            video_cleaned,
+            arterial_pulse_cleaned,
+            sampling_frequency,
+        )
+        ctx.output_manager.output(
+            "pulse_analysis",
+            "correlation map RGB gradient",
+            correlation,
+            "image",
+            options={"blue_gray_red": True, "M0_ff_image": cleaned_image},
+        )
+        ctx.output_manager.output(
+            "pulse_analysis",
+            "diasys image RGB gradient",
+            diasys,
+            "image",
+            options={"blue_gray_red": True, "M0_ff_image": cleaned_image},
+        )
+        return correlation, diasys

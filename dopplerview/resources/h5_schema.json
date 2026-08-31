@@ -54,6 +54,20 @@
         "beat_indices": "beat_indices",
         "time_per_beat": "time_per_beat"
     },
+    "research": {
+        "clustering": {
+            "pre_artery_mask": "pre_artery_mask_clustering",
+            "pre_vein_mask": "pre_vein_mask_clustering",
+            "correlation_M0": "correlation_M0_clustering",
+            "diasys_M0": "diasys_image_clustering"
+        },
+        "gradient": {
+            "pre_artery_mask": "pre_artery_mask_gradient",
+            "pre_vein_mask": "pre_vein_mask_gradient",
+            "correlation_M0": "correlation_M0_gradient",
+            "diasys_M0": "diasys_image_gradient"
+        }
+    },
     "laterality": {
         "eye_laterality": "eye_laterality",
         "eye_laterality_confidence": "eye_laterality_confidence"
