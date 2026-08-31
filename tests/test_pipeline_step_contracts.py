@@ -94,6 +94,37 @@ def test_preprocess_sets_all_declared_outputs_when_frequency_bands_are_absent(
     assert ctx.get("band_ratio_ff") is None
 
 
+def test_preprocess_uses_configured_band_ratio_denominator_floor(monkeypatch):
+    moment = np.ones((2, 1, 2), dtype=float)
+    high_frequency = np.array([[[2.0, 1.0]], [[2.0, 1.0]]])
+    low_frequency = np.array([[[1.0, 0.01]], [[1.0, 0.01]]])
+    ctx = DummyContext(
+        {
+            "moment0": moment,
+            "moment1": moment,
+            "moment2": moment,
+            "HF_M0": high_frequency,
+            "LF_M0": low_frequency,
+        }
+    )
+    ctx.dopplerview_config["BandRatio"] = {
+        "MinDenominatorFraction": 0.1,
+    }
+    step = PreprocessStep()
+    monkeypatch.setattr(
+        step,
+        "normalize",
+        lambda *_args: (moment, moment, high_frequency, low_frequency),
+    )
+
+    step.run(ctx)
+
+    assert np.array_equal(
+        ctx.get("band_ratio_ff"),
+        np.array([[[2.0, 0.0]], [[2.0, 0.0]]]),
+    )
+
+
 def test_temporal_cues_sets_conditional_outputs_on_short_recording(monkeypatch):
     video = np.arange(40, dtype=float).reshape(10, 2, 2)
     artery_mask = np.array([[True, False], [False, False]])

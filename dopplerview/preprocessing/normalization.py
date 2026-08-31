@@ -7,6 +7,54 @@ from scipy.ndimage import gaussian_filter
 from functools import partial
 
 
+def compute_stable_band_ratio(
+    high_frequency,
+    low_frequency,
+    min_denominator_fraction=1e-3,
+):
+    """Compute HF/LF while rejecting numerically unreliable denominators. Invalid samples retain the former
+    zero-denominator behavior and are written as zero.
+    """
+    high_frequency = np.asarray(high_frequency)
+    low_frequency = np.asarray(low_frequency)
+    if high_frequency.shape != low_frequency.shape:
+        raise ValueError("HF and LF bands must have the same shape")
+    if (
+        not np.isfinite(min_denominator_fraction)
+        or min_denominator_fraction <= 0
+        or min_denominator_fraction > 1
+    ):
+        raise ValueError(
+            "min_denominator_fraction must be finite and in the interval (0, 1]"
+        )
+
+    output_dtype = np.result_type(
+        high_frequency.dtype,
+        low_frequency.dtype,
+        np.float32,
+    )
+    numerator = high_frequency.astype(output_dtype, copy=False)
+    denominator = low_frequency.astype(output_dtype, copy=False)
+    ratio = np.zeros(high_frequency.shape, dtype=output_dtype)
+
+    finite_denominator = np.isfinite(denominator)
+    nonzero_magnitudes = np.abs(denominator[finite_denominator & (denominator != 0)])
+    if nonzero_magnitudes.size == 0:
+        return ratio
+
+    denominator_scale = np.median(nonzero_magnitudes)
+    denominator_floor = denominator_scale * min_denominator_fraction
+    valid = (
+        np.isfinite(numerator)
+        & finite_denominator
+        & (np.abs(denominator) >= denominator_floor)
+    )
+    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+        np.divide(numerator, denominator, out=ratio, where=valid)
+    ratio[~np.isfinite(ratio)] = 0
+    return ratio
+
+
 def _flatfield(data, gw, offset=0.0, scale=1.0):
     if offset != 0.0 or scale != 1.0:
         normalized = np.empty_like(data)

@@ -3,6 +3,9 @@
     "GWRatio": 0.07,
     "Border": 0.15
   },
+  "BandRatio": {
+    "MinDenominatorFraction": 0.001
+  },
   "Execution": {
     "NumberOfWorkers": 0.5,
     "DagConcurrency": "auto"

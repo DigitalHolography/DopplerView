@@ -17,6 +17,9 @@ class PreprocessStep(BaseStep):
             "FlatFieldCorrection": {
                 "GWRatio": ctx.dopplerview_config.get("FlatFieldCorrection", {}).get("GWRatio", 0.07),
                 "Border": ctx.dopplerview_config.get("FlatFieldCorrection", {}).get("Border", 0.15)
+            },
+            "BandRatio": {
+                "MinDenominatorFraction": ctx.dopplerview_config.get("BandRatio", {}).get("MinDenominatorFraction", 1e-3)
             }
         }
 
@@ -82,7 +85,15 @@ class PreprocessStep(BaseStep):
         ctx.set("M2_ff_image", image_utils.normalize_to_uint8(np.mean(M2_ff_video, axis=0)) if M2_ff_video is not None else None)
         band_ratio_ff = None
         if HF_M0_ff is not None and LF_M0_ff is not None:
-            band_ratio_ff = np.divide(HF_M0_ff, LF_M0_ff, out=np.zeros_like(HF_M0_ff), where=LF_M0_ff!=0)
+            min_denominator_fraction = ctx.dopplerview_config.get("BandRatio", {}).get(
+                "MinDenominatorFraction",
+                1e-3,
+            )
+            band_ratio_ff = normalization.compute_stable_band_ratio(
+                HF_M0_ff,
+                LF_M0_ff,
+                min_denominator_fraction=min_denominator_fraction,
+            )
         ctx.set("band_ratio_ff", band_ratio_ff)
         ctx.set("HF_M0_ff", HF_M0_ff)
         ctx.set("LF_M0_ff", LF_M0_ff)
