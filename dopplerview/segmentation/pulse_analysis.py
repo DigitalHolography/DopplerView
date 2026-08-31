@@ -416,11 +416,30 @@ def compute_period(signal, sampling_frequency,
     """
     Robust estimation of cardiac period in number of frames
     """
-    signal = np.squeeze(signal)
-    if len(signal.shape) == 2:
-        signal = np.median(signal, axis=0)
+    if not np.isfinite(sampling_frequency) or sampling_frequency <= 0:
+        raise ValueError("sampling_frequency must be finite and positive")
+    if not np.isfinite(fmin) or not np.isfinite(fmax) or not 0 < fmin < fmax:
+        raise ValueError("fmin and fmax must be finite and satisfy 0 < fmin < fmax")
+
+    signal = np.squeeze(np.asarray(signal, dtype=float))
+    if signal.ndim == 2:
+        signal = np.nanmedian(signal, axis=0)
+    elif signal.ndim != 1:
+        raise ValueError("signal must be one-dimensional or a 2D collection of signals")
 
     num_frames = len(signal)
+    if num_frames < 4:
+        return None
+
+    finite = np.isfinite(signal)
+    if np.count_nonzero(finite) < 4:
+        return None
+    if not finite.all():
+        sample_indices = np.arange(num_frames)
+        signal = np.interp(sample_indices, sample_indices[finite], signal[finite])
+    scale = max(1.0, np.max(np.abs(signal)))
+    if np.ptp(signal) <= np.finfo(float).eps * scale:
+        return None
 
     # --- Detrend ---
     signal = detrend(signal, type='linear')
@@ -441,14 +460,20 @@ def compute_period(signal, sampling_frequency,
     f_sel = f[mask]
     P_sel = P[mask]
 
-    if len(P_sel) == 0 or np.sum(P_sel) == 0:
+    selected_power = np.sum(P_sel)
+    if len(P_sel) == 0 or not np.isfinite(selected_power) or selected_power <= 0:
         return None
 
     # --- Smooth spectrum ---
     P_sel = gaussian_filter1d(P_sel, sigma=2)
 
     # --- Weighted frequency (robust) ---
-    f0 = np.sum(f_sel * P_sel) / np.sum(P_sel)
+    smoothed_power = np.sum(P_sel)
+    if not np.isfinite(smoothed_power) or smoothed_power <= 0:
+        return None
+    f0 = np.sum(f_sel * P_sel) / smoothed_power
+    if not np.isfinite(f0) or f0 <= 0:
+        return None
 
     # --- Convert to index ---
     t0 = 1 / f0
@@ -482,12 +507,13 @@ def check_validity(signal, sampling_frequency, beat_period=None):
     freqRange = (0.5, 2.0)  # Hz, physiological range (30–120 bpm)
 
     # ---------------- Preprocessing ----------------
-    signal = np.asarray(signal).ravel()
+    if not np.isfinite(sampling_frequency) or sampling_frequency <= 0:
+        raise ValueError("sampling_frequency must be finite and positive")
+    signal = np.asarray(signal, dtype=float).ravel()
+    if signal.size < 4 or not np.all(np.isfinite(signal)):
+        return False
     signal = signal - np.mean(signal)   # remove DC
     numFrames = signal.size
-
-    if numFrames < 4:
-        return False
 
     # ---------------- Power Spectrum ----------------
     Y = np.fft.fft(signal)
@@ -525,7 +551,10 @@ def check_validity(signal, sampling_frequency, beat_period=None):
 
     # 2. Spectral entropy
     eps = np.finfo(float).eps
-    spectralEntropy = -np.sum(P_local * np.log(P_local + eps)) / np.log(P_local.size)
+    if P_local.size == 1:
+        spectralEntropy = 0.0
+    else:
+        spectralEntropy = -np.sum(P_local * np.log(P_local + eps)) / np.log(P_local.size)
     purityEntropy = 1.0 - spectralEntropy   # invert so 1 = pure, 0 = noisy
 
     # 3. Combine into final purity score (weighted average)
@@ -539,10 +568,20 @@ def get_filtered_branch_signals(video, labeled_vessels, sampling_frequency):
     """
     Get mean temporal signal for each branch in the labeled vessel mask.
     """
+    video = np.asarray(video)
+    labeled_vessels = np.asarray(labeled_vessels)
+    if video.ndim != 3:
+        raise ValueError("video must have shape (T, H, W)")
+    if labeled_vessels.shape != video.shape[1:]:
+        raise ValueError("labeled_vessels must match the video's spatial shape")
+    if not np.isfinite(sampling_frequency) or sampling_frequency <= 30:
+        raise ValueError("sampling_frequency must be greater than 30 Hz for a 15 Hz low-pass filter")
+
     num_frames = video.shape[0]
-    num_branches = labeled_vessels.max()
+    num_branches = int(labeled_vessels.max())
     signals = np.zeros((num_branches, num_frames))
     b, a = butter(4, 15 / (sampling_frequency / 2), btype='low')
+    padlen = 3 * max(len(a), len(b))
     moving_window = round(sampling_frequency * 0.1)
 
     flat_labels = labeled_vessels.ravel()
@@ -559,7 +598,10 @@ def get_filtered_branch_signals(video, labeled_vessels, sampling_frequency):
         branch_pixels = vessel_pixels[:, start:stop]
         branch_mean = np.nanmean(branch_pixels, axis=1)
 
-        signals[i - 1, :] = filtfilt(b, a, branch_mean)
+        if branch_mean.size <= padlen:
+            signals[i - 1, :] = branch_mean
+        else:
+            signals[i - 1, :] = filtfilt(b, a, branch_mean)
 
         if moving_window > 1:
             signals[i - 1, :] = signal_processing.movmean(signals[i - 1, :], moving_window)
@@ -753,6 +795,10 @@ def validate_peaks(sys_idx_list, min_distance):
     return sys_idx_list
 
 def get_effective_sampling_frequency(sampling_freq, stride):
+    if not np.isfinite(sampling_freq) or sampling_freq <= 0:
+        raise ValueError("sampling_freq must be finite and positive")
+    if not np.isfinite(stride) or stride <= 0:
+        raise ValueError("stride must be finite and positive")
     return sampling_freq / stride
 
 

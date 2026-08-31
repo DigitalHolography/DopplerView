@@ -249,12 +249,23 @@ def get_pulse_from_mask(video, mask):
     Get the pulse signal from the video using the provided mask.
 
     Parameters:
-        video (np.ndarray): 3D array of shape (H, W, T)
+        video (np.ndarray): 3D array of shape (T, H, W)
         mask (np.ndarray): 2D binary mask of shape (H, W)
     Returns:
         pulse (np.ndarray): 1D array of length T representing the pulse signal
     """
+    video = np.asarray(video)
     mask = np.asarray(mask, dtype=bool)
+    if video.ndim != 3:
+        raise ValueError("video must have shape (T, H, W)")
+    if mask.shape != video.shape[1:]:
+        raise ValueError(
+            f"mask shape {mask.shape} does not match video spatial shape {video.shape[1:]}"
+        )
+    num_mask_pixels = np.count_nonzero(mask)
+    if num_mask_pixels == 0:
+        raise ValueError("mask must contain at least one selected pixel")
+
     pulse = np.empty(video.shape[0], dtype=video.dtype)
     frame_scratch = np.empty(video.shape[1:], dtype=video.dtype)
     for index, frame in enumerate(video):
@@ -262,7 +273,7 @@ def get_pulse_from_mask(video, mask):
         # reducing temporary storage from a full video to one frame.
         np.multiply(frame, mask, out=frame_scratch)
         pulse[index] = np.nansum(frame_scratch)
-    pulse = pulse / np.count_nonzero(mask)
+    pulse = pulse / num_mask_pixels
     return pulse
 
 def get_filtered_pulse(pulse, sampling_frequency, cutoff=15, order=4):
@@ -274,6 +285,19 @@ def get_filtered_pulse(pulse, sampling_frequency, cutoff=15, order=4):
     Returns:
     filtered_pulse (np.ndarray): 1D array representing the filtered pulse signal
     """
+    pulse = np.asarray(pulse)
+    if pulse.ndim != 1:
+        raise ValueError("pulse must be one-dimensional")
+    if not np.isfinite(sampling_frequency) or sampling_frequency <= 0:
+        raise ValueError("sampling_frequency must be finite and positive")
+    if not np.isfinite(cutoff) or cutoff <= 0 or cutoff >= sampling_frequency / 2:
+        raise ValueError("cutoff must lie strictly between 0 and the Nyquist frequency")
+    if not isinstance(order, (int, np.integer)) or order < 1:
+        raise ValueError("order must be a positive integer")
+
     b, a = butter(order, cutoff / (sampling_frequency / 2), btype="low")
+    padlen = 3 * max(len(a), len(b))
+    if pulse.size <= padlen:
+        return pulse.copy()
     filtered_pulse = filtfilt(b, a, pulse)
     return filtered_pulse

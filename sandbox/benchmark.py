@@ -34,6 +34,9 @@ class ExperimentResult:
 
     metrics: dict
 
+import evaluation
+import clustering
+
 def run_clustering_pipeline(
     signals,
     labeled_vessels,
@@ -50,55 +53,56 @@ def run_clustering_pipeline(
     -------
     ClusteringResult
     """
+    if embedding_func is not None:
+        if correct_signals:
+            if beat_period is None:
+                beat_period = pa.compute_period(signals, sampling_frequency)
+            if beat_period is None:
+                raise ValueError("Unable to estimate a cardiac period for signal correction")
+            corrected = [
+                pa.remove_bad_beats(
+                    branch,
+                    beat_period,
+                )[0]
+                for branch in signals
+            ]
 
-    if correct_signals:
-        if beat_period is None:
-            beat_period = pa.compute_period(signals, sampling_frequency)
-        if beat_period is None:
-            raise ValueError("Unable to estimate a cardiac period for signal correction")
-        corrected = [
-            pa.remove_bad_beats(
-                branch,
-                beat_period,
-            )[0]
-            for branch in signals
-        ]
+            cycle_templates = [
+                pa.get_cycle_template(
+                    branch,
+                    sampling_frequency,
+                    return_period=True,
+                )
+                for branch in corrected
+            ]
 
-        cycle_templates = [
-            pa.get_cycle_template(
-                branch,
-                sampling_frequency,
-                return_period=True,
-            )
-            for branch in corrected
-        ]
+        else:
+
+            cycle_templates = [
+                pa.get_cycle_template(
+                    branch,
+                    sampling_freq=sampling_frequency,
+                    beat_period=beat_period,
+                    return_period=True,
+                )
+                for branch in signals
+            ]
+
+        templates, periods = zip(*cycle_templates)
+
+        templates = np.asarray(templates)
+        periods = np.asarray(periods)
+
+        X = embedding_func(templates)
 
     else:
-
-        cycle_templates = [
-            pa.get_cycle_template(
-                branch,
-                sampling_freq=sampling_frequency,
-                beat_period=beat_period,
-                return_period=True,
-            )
-            for branch in signals
-        ]
-
-    templates, periods = zip(*cycle_templates)
-
-    templates = np.asarray(templates)
-    periods = np.asarray(periods)
-
-    X = embedding_func(templates)
+        X = signals
+        templates = None
+        periods = np.asarray([beat_period] * len(signals))
 
     cluster_labels = clustering_func(X)
 
-    (
-        artery_mask,
-        vein_mask,
-        mask_labels,
-    ) = evaluation.assign_clusters_to_av(
+    (artery_mask, vein_mask, mask_labels,) = evaluation.assign_clusters_to_av(
         cluster_labels,
         signals,
         periods,

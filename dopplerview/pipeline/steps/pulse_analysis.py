@@ -61,30 +61,45 @@ class PreArteryMaskStep(BaseStep):
         # ctx.output_manager.output("pulse_analysis", "M0_ff_video", video, "video")
         signals = pulse_analysis.get_filtered_branch_signals(video, labeled_vessels, sampling_frequency)
         ctx.output_manager.output("pulse_analysis", "labeled_vessels", labeled_vessels, "labeled_mask")
-        signals_n = (signals - signals.mean(axis=1, keepdims=True)) / signals.std(axis=1, keepdims=True)
+        branch_means = np.nanmean(signals, axis=1, keepdims=True)
+        branch_means[~np.isfinite(branch_means)] = 0
+        centered_signals = signals - branch_means
+        centered_signals[~np.isfinite(centered_signals)] = 0
+        branch_stds = centered_signals.std(axis=1, keepdims=True)
+        degenerate_branches = ~np.isfinite(branch_stds) | (branch_stds <= np.finfo(float).eps)
+        if np.any(degenerate_branches):
+            self.logger.warning(
+                f"    - {np.count_nonzero(degenerate_branches)} branch signal(s) have no usable temporal variation."
+            )
+            branch_stds[degenerate_branches] = 1
+        signals_n = centered_signals / branch_stds
         ctx.set("branch_signals", signals_n)
 
         # --- Step 3: Correct signals by aligning with median heartbeat ---
         correct_branch_signals = ctx.dopplerview_config.get("Mask").get("CorrectBranchSignals", True)
         if correct_branch_signals:
             beat_period_frames = pulse_analysis.compute_period(signals_n, sampling_frequency)
-            beat_period_time = beat_period_frames / sampling_frequency
-            bpm = 60 / beat_period_time
+            if beat_period_frames is None:
+                self.logger.warning(
+                    "    - Could not estimate a cardiac period from branch signals. Skipping signal correction."
+                )
+            else:
+                beat_period_time = beat_period_frames / sampling_frequency
+                bpm = 60 / beat_period_time
 
-            self.logger.info(f"    - Median heartbeat period: {beat_period_time:.2f} seconds ({beat_period_frames} frames) -> {bpm:.2f} bpm.")
-            corrected_signals = np.zeros_like(signals_n)
-            func = partial(pulse_analysis.correct_signal_with_heartbeat, beat_period=beat_period_frames, k=5)
-            corrected_signals = ctx.parallel.map(
-                func,
-                signals_n,
-                task_name="branch signal correction",
-            )
-            ctx.set("corrected_signals", corrected_signals)
+                self.logger.info(f"    - Median heartbeat period: {beat_period_time:.2f} seconds ({beat_period_frames} frames) -> {bpm:.2f} bpm.")
+                func = partial(pulse_analysis.correct_signal_with_heartbeat, beat_period=beat_period_frames, k=5)
+                corrected_signals = np.asarray(ctx.parallel.map(
+                    func,
+                    signals_n,
+                    task_name="branch signal correction",
+                ))
+                ctx.set("corrected_signals", corrected_signals)
 
-            for i in range(1, labeled_vessels.max() + 1):
-                ctx.output_manager.output("pulse_analysis", f"branch_{i}_corrected", (signals_n[i - 1, :], corrected_signals[i - 1, :]), "signal", options={"multiple_signals": True, "legend": ["Original Signal", "Corrected Signal"]})
+                for i in range(1, labeled_vessels.max() + 1):
+                    ctx.output_manager.output("pulse_analysis", f"branch_{i}_corrected", (signals_n[i - 1, :], corrected_signals[i - 1, :]), "signal", options={"multiple_signals": True, "legend": ["Original Signal", "Corrected Signal"]})
 
-            signals_n = corrected_signals
+                signals_n = corrected_signals
 
         # --- Step 4: Pre-classify arteries and veins using systolic gradient ---
         pre_mask_method = ctx.dopplerview_config.get("Mask").get("PreMaskMethod", "clustering")
@@ -119,9 +134,19 @@ class ComputeTemporalCuesStep(BaseStep):
 
         # --- Get pulses from masks ---
 
+        if not np.any(pre_artery_mask):
+            raise RuntimeError("Cannot compute temporal cues: the preliminary artery mask is empty")
         arterial_pulse = signal_processing.get_pulse_from_mask(video, pre_artery_mask)
-        venous_pulse = signal_processing.get_pulse_from_mask(video, pre_vein_mask)
-        choroidal_pulse = signal_processing.get_pulse_from_mask(video, choroidal_vessel_mask)
+        venous_pulse = (
+            signal_processing.get_pulse_from_mask(video, pre_vein_mask)
+            if np.any(pre_vein_mask)
+            else np.zeros(video.shape[0], dtype=float)
+        )
+        choroidal_pulse = (
+            signal_processing.get_pulse_from_mask(video, choroidal_vessel_mask)
+            if np.any(choroidal_vessel_mask)
+            else np.zeros(video.shape[0], dtype=float)
+        )
         ctx.set("pre_arterial_pulse", arterial_pulse)
         ctx.set("pre_venous_pulse", venous_pulse)
         ctx.set("choroidal_pulse", choroidal_pulse)
@@ -143,6 +168,10 @@ class ComputeTemporalCuesStep(BaseStep):
         # --- Remove bad beats from arterial pulse by comparing to median beat pattern ---
 
         beat_period_frames = pulse_analysis.compute_period(arterial_pulse_filtered, sampling_frequency)
+        if beat_period_frames is None:
+            raise RuntimeError(
+                "Cannot compute temporal cues: no cardiac period was detected in the arterial pulse"
+            )
         ctx.set("beat_period", beat_period_frames)
         beat_period_time = beat_period_frames / sampling_frequency
         bpm = 60 / beat_period_time
