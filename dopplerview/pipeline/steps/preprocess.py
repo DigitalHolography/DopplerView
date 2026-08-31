@@ -9,7 +9,7 @@ import logging
 logger = logging.getLogger(__name__)
 class PreprocessStep(BaseStep):
     requires = {"moment0", "moment1", "moment2", "HF_M0", "LF_M0"}
-    produces = {"M0_ff_video", "M0_ff_image", "M1_ff_video", "M1_image", "M2_ff_video", "M2_ff_image", "HF_M0_ff", "HF_M0_ff_image", "LF_M0_ff", "LF_M0_ff_image", "band_ratio_ff", "band_ratio_ff_image"}
+    produces = {"M0_ff_video", "M0_ff_image", "M1_video", "M1_image", "M2_ff_video", "M2_ff_image", "HF_M0_ff", "HF_M0_ff_image", "LF_M0_ff", "LF_M0_ff_image", "band_ratio_ff", "band_ratio_ff_image"}
     name = "preprocess"
 
     def _relevant_config(self, ctx):
@@ -80,12 +80,12 @@ class PreprocessStep(BaseStep):
         ctx.set("M0_ff_image", image_utils.normalize_to_uint8(np.mean(M0_ff_video, axis=0)) if M0_ff_video is not None else None)
         ctx.set("M1_image", image_utils.normalize_to_uint8(np.mean(moment1, axis=0)) if moment1 is not None else None)
         ctx.set("M2_ff_image", image_utils.normalize_to_uint8(np.mean(M2_ff_video, axis=0)) if M2_ff_video is not None else None)
+        band_ratio_ff = None
         if HF_M0_ff is not None and LF_M0_ff is not None:
-            band_ratio_ff = np.divide(HF_M0_ff, LF_M0_ff, out=np.zeros_like(HF_M0_ff), where=LF_M0_ff!=0) if HF_M0_ff is not None and LF_M0_ff is not None else None
-            ctx.set("band_ratio_ff", band_ratio_ff)
-            ctx.set("band_ratio_ff_image", image_utils.normalize_to_uint8(np.mean(band_ratio_ff, axis=0)) if band_ratio_ff is not None else None)
-            ctx.set("HF_M0_ff", HF_M0_ff)
-            ctx.set("LF_M0_ff", LF_M0_ff)
-            ctx.set("HF_M0_ff_image", image_utils.normalize_to_uint8(np.mean(HF_M0_ff, axis=0)) if HF_M0_ff is not None else None)
-            ctx.set("LF_M0_ff_image", image_utils.normalize_to_uint8(np.mean(LF_M0_ff, axis=0)) if LF_M0_ff is not None else None)
-            ctx.set("band_ratio_ff_image", image_utils.normalize_to_uint8(np.mean(band_ratio_ff, axis=0)) if band_ratio_ff is not None else None)
+            band_ratio_ff = np.divide(HF_M0_ff, LF_M0_ff, out=np.zeros_like(HF_M0_ff), where=LF_M0_ff!=0)
+        ctx.set("band_ratio_ff", band_ratio_ff)
+        ctx.set("HF_M0_ff", HF_M0_ff)
+        ctx.set("LF_M0_ff", LF_M0_ff)
+        ctx.set("HF_M0_ff_image", image_utils.normalize_to_uint8(np.mean(HF_M0_ff, axis=0)) if HF_M0_ff is not None else None)
+        ctx.set("LF_M0_ff_image", image_utils.normalize_to_uint8(np.mean(LF_M0_ff, axis=0)) if LF_M0_ff is not None else None)
+        ctx.set("band_ratio_ff_image", image_utils.normalize_to_uint8(np.mean(band_ratio_ff, axis=0)) if band_ratio_ff is not None else None)
