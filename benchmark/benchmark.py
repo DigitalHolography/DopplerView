@@ -53,10 +53,10 @@ def run_clustering_pipeline(
 
     if correct_signals:
         corrected = [
-            pa.remove_bad_beats_on_video(
+            pa.remove_bad_beats(
                 branch,
                 beat_period,
-            )
+            )[0]
             for branch in signals
         ]
 

@@ -35,13 +35,24 @@ def get_beats(signal, sys_idx, target_len=None):
     beats : (n_beats, target_len)
     """
     
-    sys_idx = np.asarray(sys_idx)
+    signal = np.asarray(signal)
+    sys_idx = np.asarray(sys_idx, dtype=int).reshape(-1)
+    if sys_idx.size < 2:
+        empty_length = 0 if target_len is None else int(target_len)
+        return np.empty((0, max(0, empty_length)), dtype=float)
+    if np.any(np.diff(sys_idx) <= 0):
+        raise ValueError("sys_idx must contain strictly increasing peak indices")
+    if sys_idx[0] < 0 or sys_idx[-1] > signal.size:
+        raise ValueError("peak indices must lie within the signal")
     n_beats = len(sys_idx) - 1
 
     # --- Determine target length ---
     lengths = np.diff(sys_idx)
     if target_len is None:
         target_len = int(np.max(lengths))
+    target_len = int(target_len)
+    if target_len < 1:
+        raise ValueError("target_len must be positive")
 
     beats = np.zeros((n_beats, target_len))
 
@@ -68,7 +79,10 @@ def fill_with_beat(beat, start_offset, end_offset, length):
     """
     Fill the start and end of the signal with the average beat to create a pseudo beat.
     """
+    beat = np.asarray(beat)
     l = len(beat)
+    if l == 0:
+        raise ValueError("beat must not be empty")
     pseudo_signal = np.zeros(length)
     i = start_offset
 
@@ -81,7 +95,9 @@ def fill_with_beat(beat, start_offset, end_offset, length):
         pseudo_signal[index:index + l] = beat
 
     # Fill the remaining part with the appropriate segment of the beat
-    pseudo_signal[:start_offset % l] = beat[-(start_offset % l):]
+    start_remainder = start_offset % l
+    if start_remainder > 0:
+        pseudo_signal[:start_remainder] = beat[-start_remainder:]
     if end_offset % l > 0:
         pseudo_signal[-(end_offset % l):] = beat[:(end_offset % l)]
     return pseudo_signal
@@ -90,6 +106,9 @@ def get_pseudo_signal(beat, peaks, length):
     """
     Create a pseudo beat by repeating the average beat and aligning it with the peaks.
     """
+    beat = np.asarray(beat)
+    if beat.size == 0:
+        raise ValueError("beat must not be empty")
     x_old = np.linspace(0, 1, len(beat))
     if peaks is None or len(peaks) == 0:
         pseudo_signal = np.tile(beat, (length // len(beat) + 1))[:length]
@@ -121,12 +140,21 @@ def correct_signal(signal, pseudo_signal, k=2):
         The corrected signal.
     """
 
+    signal = np.asarray(signal)
+    pseudo_signal = np.asarray(pseudo_signal)
+    if signal.shape != pseudo_signal.shape:
+        raise ValueError("signal and pseudo_signal must have the same shape")
+    if k <= 0:
+        raise ValueError("k must be positive")
+
     residual = signal - pseudo_signal
 
     # robust scale
     sigma = 1.4826 * np.median(np.abs(residual))
 
     # weight (soft rejection)
+    if not np.isfinite(sigma) or sigma <= np.finfo(float).eps:
+        return signal.copy()
     alpha = np.clip(1 - (np.abs(residual) / (k * sigma)), 0, 1)
 
     signal_clean = pseudo_signal + alpha * residual
@@ -136,9 +164,14 @@ def get_peaks(signal, beat_period, height_percentile=80, distance_tolerance=0.8)
     """
     Get peaks of the signal using a robust method based on the beat period.
     """
+    signal = np.asarray(signal).reshape(-1)
+    if beat_period is None or not np.isfinite(beat_period) or beat_period <= 0:
+        raise ValueError("beat_period must be a finite positive number")
+    if signal.size < 3:
+        return np.empty(0, dtype=int)
     diff_artery_signal = np.gradient(signal)
     min_peak_height = np.percentile(diff_artery_signal, height_percentile)
-    min_peak_distance = int(beat_period * distance_tolerance)  # Allow some variability in heart rate
+    min_peak_distance = max(1, int(beat_period * distance_tolerance))  # Allow some variability in heart rate
 
     peaks, _ = find_peaks(
         diff_artery_signal,
@@ -168,9 +201,12 @@ def correct_signal_with_heartbeat(signal, beat_period, sampling_freq=None, k=2, 
     corrected_signal : 1D array
         The corrected signal.
     """
+    signal = np.asarray(signal)
     signal_length = len(signal)
     if use_peaks:
         peaks = get_peaks(signal, beat_period, distance_tolerance=distance_tolerance)
+        if peaks.size < 2:
+            return signal.copy()
         beats = get_beats(signal, peaks, target_len=signal_length)
         average_beat = np.nanmedian(beats, axis=0)
     else:
@@ -181,61 +217,103 @@ def correct_signal_with_heartbeat(signal, beat_period, sampling_freq=None, k=2, 
     corrected_signal = correct_signal(signal, pseudo_signal, k=k)
     return corrected_signal
 
+
+def _safe_beat_correlation(beat, reference):
+    """Return zero when a beat pair cannot define a Pearson correlation."""
+    beat = np.asarray(beat, dtype=float)
+    reference = np.asarray(reference, dtype=float)
+    valid = np.isfinite(beat) & np.isfinite(reference)
+    if np.count_nonzero(valid) < 2:
+        return 0.0
+    beat_centered = beat[valid] - np.mean(beat[valid])
+    reference_centered = reference[valid] - np.mean(reference[valid])
+    denominator = np.linalg.norm(beat_centered) * np.linalg.norm(reference_centered)
+    if denominator <= np.finfo(float).eps:
+        return 0.0
+    return float(np.dot(beat_centered, reference_centered) / denominator)
+
+
 def remove_bad_beats(signal, beat_period, threshold=0.5):
     """Remove bad beats from the signal based on correlation with the average beat."""
+    signal = np.asarray(signal)
     peaks = get_peaks(signal, beat_period)
+    if peaks.size < 2:
+        return signal.copy(), signal.copy(), np.empty(0, dtype=float)
     beats = get_beats(signal, peaks)
     median_beat = np.nanmedian(beats, axis=0)
 
     # Compute correlation of each beat with the average beat
-    correlations = np.array([np.corrcoef(beat, median_beat)[0, 1] for beat in beats])
+    correlations = np.array([
+        _safe_beat_correlation(beat, median_beat) for beat in beats
+    ])
     good_beats_mask = correlations > threshold
+    if not np.any(good_beats_mask):
+        return signal.copy(), signal.copy(), correlations
 
     # Create a cleaned signal by keeping only good beats
     beat_signal = get_pseudo_signal(median_beat, peaks, len(signal))
-    cleaned_signal = np.zeros_like(signal)
+    keep_samples = np.zeros(signal.shape, dtype=bool)
     for i, is_good in enumerate(good_beats_mask):
         if is_good:
             start, end = peaks[i], peaks[i + 1]
-            cleaned_signal[start:end] = signal[start:end]
+            keep_samples[start:end] = True
         else:
             start, end = peaks[i], peaks[i + 1]
-            cleaned_signal[start:end] = 0
             beat_signal[start:end] = 0
 
-    
-    cleaned_signal = cleaned_signal[cleaned_signal != 0]
-    beat_signal = beat_signal[beat_signal != 0]
-
-    return cleaned_signal, beat_signal, correlations
+    return signal[keep_samples], beat_signal[keep_samples], correlations
 
 def remove_bad_beats_on_video(signal, video, beat_period, threshold=0.5, distance_tolerance=0.8, use_peaks=True):
     """Remove frames on the video corresponding to bad beats from the signal based on correlation with the average beat."""
+    signal = np.asarray(signal)
+    video = np.asarray(video)
+    if video.shape[0] != signal.size:
+        raise ValueError("video and signal must have the same temporal length")
     if use_peaks:
         signal_length = len(signal)
         peaks = get_peaks(signal, beat_period, distance_tolerance=distance_tolerance)
+        if peaks.size < 2:
+            return (
+                signal.copy(),
+                video.copy(),
+                signal.copy(),
+                np.empty(0, dtype=float),
+                peaks,
+            )
         beats = get_beats(signal, peaks, target_len=signal_length)
         median_beat = np.nanmedian(beats, axis=0)
     else:
-        peaks = list(range(0, len(signal), beat_period))
         beats = get_cycle_templates(signal, beat_period)
+        if beats.shape[0] == 0:
+            return (
+                signal.copy(),
+                video.copy(),
+                signal.copy(),
+                np.empty(0, dtype=float),
+                np.empty(0, dtype=int),
+            )
+        peaks = np.arange(beats.shape[0] + 1, dtype=int) * int(beat_period)
         median_beat = np.nanmedian(beats, axis=0)
 
     # Compute correlation of each beat with the average beat
-    correlations = np.array([np.corrcoef(beat, median_beat)[0, 1] for beat in beats])
+    correlations = np.array([
+        _safe_beat_correlation(beat, median_beat) for beat in beats
+    ])
     good_beats_mask = correlations > threshold
+    if not np.any(good_beats_mask):
+        return signal.copy(), video.copy(), signal.copy(), median_beat, peaks
 
     # Create a cleaned signal by keeping only good beats
     beat_signal = get_pseudo_signal(median_beat, peaks, len(signal))
-    mask_signal = np.zeros_like(signal)
+    mask_signal = np.zeros(signal.shape, dtype=bool)
     for i, is_good in enumerate(good_beats_mask):
         if is_good:
             start, end = max(peaks[i]-10,0), peaks[i + 1] # keep the beat and a small window before the peak to capture the systolic upstroke
 
-            mask_signal[start:end] = 1
+            mask_signal[start:end] = True
 
-    cleaned_video = video[mask_signal != 0]
-    cleaned_signal = signal[mask_signal != 0]
+    cleaned_video = video[mask_signal]
+    cleaned_signal = signal[mask_signal]
 
     return cleaned_signal, cleaned_video, beat_signal, median_beat, peaks
 
@@ -489,6 +567,11 @@ def get_filtered_branch_signals(video, labeled_vessels, sampling_frequency):
     return signals
 
 def get_cycle_templates(signal, beat_period):
+    if beat_period is None or not np.isfinite(beat_period) or beat_period <= 0:
+        raise ValueError("beat_period must be a finite positive number")
+    beat_period = int(beat_period)
+    if beat_period < 1:
+        raise ValueError("beat_period must be at least one sample")
     n_cycles = len(signal)//beat_period
 
     cycles = signal[:n_cycles*beat_period].reshape(
@@ -503,6 +586,8 @@ def get_cycle_template(signal, sampling_freq=None, beat_period=None, return_peri
             raise ValueError("Either sampling_freq or beat_period must be provided.")
         beat_period = compute_period(signal, sampling_freq)
     cycles = get_cycle_templates(signal, beat_period)
+    if cycles.shape[0] == 0:
+        raise ValueError("signal does not contain a complete cardiac cycle")
     result = np.average(cycles, axis=0)
     if return_period:
         return result, beat_period
