@@ -85,8 +85,19 @@ def detect_outliers_moving_median(signal, window=5, threshold_factor=2.0):
     return deviation > threshold_factor * mad if mad != 0 else np.zeros_like(signal, dtype=bool)
 
 def remove_outliers(video, outlier_mask):
-    cleaned_video = video.copy()
-    cleaned_video[:, :, outlier_mask] = np.nan
+    """Replace outlier frames with NaN in a ``(T, H, W)`` video."""
+    video = np.asarray(video)
+    outlier_mask = np.asarray(outlier_mask, dtype=bool)
+    if video.ndim != 3:
+        raise ValueError("video must have shape (T, H, W)")
+    if outlier_mask.ndim != 1 or outlier_mask.size != video.shape[0]:
+        raise ValueError("outlier_mask must be one-dimensional with one value per frame")
+
+    if np.issubdtype(video.dtype, np.inexact):
+        cleaned_video = video.copy()
+    else:
+        cleaned_video = video.astype(float)
+    cleaned_video[outlier_mask, :, :] = np.nan
     return cleaned_video
 
 def interpolate_outlier_frames(video, outlier_frames_mask):
@@ -94,13 +105,27 @@ def interpolate_outlier_frames(video, outlier_frames_mask):
     Interpolate outlier frames in a 3D video array.
 
     Parameters:
-        video (np.ndarray): 3D array of shape (H, W, T)
+        video (np.ndarray): 3D array of shape (T, H, W)
         outlier_frames_mask (np.ndarray): 1D boolean array of length T
 
     Returns:
         video_cleaned (np.ndarray): 3D array with interpolated outlier frames
     """
-    video_cleaned = video.copy()
+    video = np.asarray(video)
+    outlier_frames_mask = np.asarray(outlier_frames_mask, dtype=bool)
+    if video.ndim != 3:
+        raise ValueError("video must have shape (T, H, W)")
+    if outlier_frames_mask.ndim != 1 or outlier_frames_mask.size != video.shape[0]:
+        raise ValueError(
+            "outlier_frames_mask must be one-dimensional with one value per frame"
+        )
+    if outlier_frames_mask.all() and outlier_frames_mask.size:
+        raise ValueError("at least one non-outlier frame is required for interpolation")
+
+    if np.issubdtype(video.dtype, np.inexact):
+        video_cleaned = video.copy()
+    else:
+        video_cleaned = video.astype(float)
     outlier_indices = np.where(outlier_frames_mask)[0]
 
     for idx in outlier_indices:
@@ -170,11 +195,11 @@ def compute_correlation(video, signal):
     Compute the zero-lag correlation between the video signal and the average signal in the mask.
 
     Parameters:
-        video (np.ndarray): 3D array of shape (H, W, T)
-        mask (np.ndarray): 2D binary mask of shape (H, W)
+        video (np.ndarray): 3D array of shape (T, H, W)
+        signal (np.ndarray): 1D temporal reference signal of length T
 
     Returns:
-        R (np.ndarray): 1D array of correlation values
+        R (np.ndarray): 2D correlation map of shape (H, W)
     """
     # compute local-to-average signal wave zero-lag correlation
     signal_centered = signal - np.nanmean(signal)
