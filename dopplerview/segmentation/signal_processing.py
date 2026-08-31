@@ -277,7 +277,9 @@ def get_pulse_from_mask(video, mask):
         video (np.ndarray): 3D array of shape (T, H, W)
         mask (np.ndarray): 2D binary mask of shape (H, W)
     Returns:
-        pulse (np.ndarray): 1D array of length T representing the pulse signal
+        pulse (np.ndarray): 1D array of length T representing the pulse signal.
+            Each frame is averaged over its finite selected pixels; a frame
+            with no finite selected pixels is returned as NaN.
     """
     video = np.asarray(video)
     mask = np.asarray(mask, dtype=bool)
@@ -291,14 +293,23 @@ def get_pulse_from_mask(video, mask):
     if num_mask_pixels == 0:
         raise ValueError("mask must contain at least one selected pixel")
 
-    pulse = np.empty(video.shape[0], dtype=video.dtype)
+    pulse_dtype = video.dtype if np.issubdtype(video.dtype, np.inexact) else float
+    pulse = np.empty(video.shape[0], dtype=pulse_dtype)
     frame_scratch = np.empty(video.shape[1:], dtype=video.dtype)
+    finite_scratch = np.empty(video.shape[1:], dtype=bool)
     for index, frame in enumerate(video):
-        # Preserve the former multiply-and-reduce ordering exactly while
-        # reducing temporary storage from a full video to one frame.
-        np.multiply(frame, mask, out=frame_scratch)
-        pulse[index] = np.nansum(frame_scratch)
-    pulse = pulse / num_mask_pixels
+        # Copy only selected pixels so NaN/Inf values outside the mask do not
+        # participate in arithmetic (for example, Inf * False).
+        frame_scratch.fill(0)
+        np.copyto(frame_scratch, frame, where=mask)
+        np.isfinite(frame, out=finite_scratch)
+        np.logical_and(finite_scratch, mask, out=finite_scratch)
+        num_valid_pixels = np.count_nonzero(finite_scratch)
+        if num_valid_pixels == 0:
+            pulse[index] = np.nan
+        else:
+            np.copyto(frame_scratch, 0, where=~finite_scratch)
+            pulse[index] = np.sum(frame_scratch) / num_valid_pixels
     return pulse
 
 def get_filtered_pulse(pulse, sampling_frequency, cutoff=15, order=4):

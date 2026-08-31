@@ -40,6 +40,53 @@ def test_get_pulse_from_mask_rejects_mismatched_shape():
         signal_processing.get_pulse_from_mask(video, np.ones((3, 2), dtype=bool))
 
 
+def test_get_pulse_from_mask_uses_finite_pixel_count_per_frame():
+    video = np.array(
+        [
+            [[2.0, 4.0], [100.0, 100.0]],
+            [[2.0, np.nan], [100.0, 100.0]],
+        ]
+    )
+    mask = np.array([[True, True], [False, False]])
+
+    pulse = signal_processing.get_pulse_from_mask(video, mask)
+
+    assert np.array_equal(pulse, [3.0, 2.0])
+
+
+def test_get_pulse_from_mask_preserves_fully_missing_frame_as_nan():
+    video = np.array(
+        [
+            [[1.0, 3.0]],
+            [[np.nan, np.nan]],
+        ]
+    )
+    mask = np.ones((1, 2), dtype=bool)
+
+    pulse = signal_processing.get_pulse_from_mask(video, mask)
+
+    assert pulse[0] == 2.0
+    assert np.isnan(pulse[1])
+
+
+def test_get_pulse_from_mask_ignores_nonfinite_values_outside_mask():
+    video = np.array([[[2.0, np.nan], [np.inf, 50.0]]])
+    mask = np.array([[True, False], [False, False]])
+
+    pulse = signal_processing.get_pulse_from_mask(video, mask)
+
+    assert np.array_equal(pulse, [2.0])
+
+
+def test_get_pulse_from_mask_excludes_infinite_selected_pixels():
+    video = np.array([[[2.0, np.inf]]])
+    mask = np.ones((1, 2), dtype=bool)
+
+    pulse = signal_processing.get_pulse_from_mask(video, mask)
+
+    assert np.array_equal(pulse, [2.0])
+
+
 def test_short_pulse_bypasses_zero_phase_filter():
     pulse = np.arange(10, dtype=float)
 
