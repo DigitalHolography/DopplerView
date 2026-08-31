@@ -9,9 +9,6 @@ from pathlib import Path
 from dopplerview.input_output.output_manager import OutputManager
 from dopplerview.pipeline.pipeline import Pipeline
 from dopplerview.input_output import log_config, user_config
-import matplotlib
-
-
 import dopplerview.input_output.user_config as user_config
 
 import logging
@@ -24,7 +21,6 @@ def load_dopplerview_config(config_path):
 
 
 def main():
-    matplotlib.use("Agg")
     log_config.setup_logging()
     """Main CLI entry point"""
     parser = argparse.ArgumentParser(

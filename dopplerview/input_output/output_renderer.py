@@ -1,7 +1,7 @@
 import imageio
 from dopplerview.utils.image_utils import normalize_to_uint8, save_numpy_as_avi, save_labeled_branches, normalize_image, lab_duo_image
-from dopplerview.utils.matplotlib_backend import serialized_render
-import matplotlib.pyplot as plt
+from dopplerview.utils.matplotlib_backend import new_agg_figure, serialized_render
+from matplotlib.patches import Rectangle
 import numpy as np
 
 class OutputRenderer:
@@ -32,8 +32,9 @@ class MaskRenderer(OutputRenderer):
 class SignalRenderer(OutputRenderer):
     @serialized_render
     def render(self, key, ctx, path, options=None):
-        plt.figure()
-        plt.title(key)
+        fig = new_agg_figure()
+        ax = fig.subplots()
+        ax.set_title(key)
 
         scatter_indices = None
         if options and options.get("scatter"):
@@ -45,14 +46,14 @@ class SignalRenderer(OutputRenderer):
                 if scatter_indices is not None:
                     if i == len(ctx.get(key)) - 1:  # Skip las iteration if scatter is True
                         continue
-                    plt.scatter(scatter_indices, signal[scatter_indices], label=f"{legend[i]} Peaks" if i < len(legend) else "Peaks", s=50)
-                plt.plot(signal, label=legend[i] if i < len(legend) else "")
+                    ax.scatter(scatter_indices, signal[scatter_indices], label=f"{legend[i]} Peaks" if i < len(legend) else "Peaks", s=50)
+                ax.plot(signal, label=legend[i] if i < len(legend) else "")
             if legend:
-                plt.legend()
+                ax.legend()
         else:
-            plt.plot(ctx.get(key))
-        plt.savefig(path)
-        plt.close()
+            ax.plot(ctx.get(key))
+        fig.savefig(path)
+        fig.clear()
 
 class VideoRenderer(OutputRenderer):
     def render(self, key, ctx, path, options=None):
@@ -85,13 +86,14 @@ class OpticDiscRenderer(OutputRenderer):
         x = x_center + a*np.cos(angle)
         y = y_center + b*np.sin(angle)
 
-        plt.figure(figsize=(6,6))
-        plt.imshow(image, cmap="gray")
+        fig = new_agg_figure(figsize=(6, 6))
+        ax = fig.subplots()
+        ax.imshow(image, cmap="gray")
 
-        plt.plot(x, y, "r")
+        ax.plot(x, y, "r")
 
-        plt.gca().add_patch(
-            plt.Rectangle(
+        ax.add_patch(
+            Rectangle(
                 (x_center-a, y_center-b),
                 diameter_x,
                 diameter_y,
@@ -100,8 +102,8 @@ class OpticDiscRenderer(OutputRenderer):
             )
         )
 
-        plt.savefig(path)
-        plt.close()
+        fig.savefig(path)
+        fig.clear()
 
 class LabeledMaskRenderer(OutputRenderer):
     @serialized_render

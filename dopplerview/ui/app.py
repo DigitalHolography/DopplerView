@@ -3,8 +3,6 @@ import multiprocessing
 import tkinter as tk
 from tkinter import messagebox
 
-import matplotlib
-
 from dopplerview.input_output import log_config
 
 from dopplerview.ui.main_window import MainWindow, TkinterDnD
@@ -17,7 +15,6 @@ def main() -> None:
     multiprocessing.freeze_support()
 
     log_config.setup_logging()
-    matplotlib.use("Agg")
 
     root = None
     try:

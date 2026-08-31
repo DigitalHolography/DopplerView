@@ -5,8 +5,8 @@ Utils for handling images, such as loading, saving, and preprocessing.
 import numpy as np
 from PIL import Image
 from skimage.measure import regionprops
-from dopplerview.utils.matplotlib_backend import serialized_render
-import matplotlib.pyplot as plt
+from dopplerview.utils.matplotlib_backend import new_agg_figure, serialized_render
+from matplotlib.patches import Rectangle
 import cv2
 from skimage.color import lab2rgb
 from skimage.restoration import inpaint
@@ -65,11 +65,12 @@ def normalize_to_uint8(arr):
 
 @serialized_render
 def save_bounding_box(image, x_center, y_center, diameter_x, diameter_y, output_path):
-    plt.figure(figsize=(6, 6))
+    fig = new_agg_figure(figsize=(6, 6))
+    ax = fig.subplots()
     if image.ndim == 3 and image.shape[0] == 3:
         image = np.transpose(image, (1, 2, 0))  # Convert from (C, H, W) to (H, W, C)
         
-    plt.imshow(image, cmap='gray')
+    ax.imshow(image, cmap='gray')
 
     a = diameter_x / 2
     b = diameter_y / 2
@@ -78,22 +79,22 @@ def save_bounding_box(image, x_center, y_center, diameter_x, diameter_y, output_
     angle = np.linspace(0, 2 * np.pi, 360)
     x_ellipsis = x_center + a * np.cos(angle)
     y_ellipsis = y_center + b * np.sin(angle)
-    plt.plot(x_ellipsis, y_ellipsis, "r", linewidth=2, label="Ellipse")
+    ax.plot(x_ellipsis, y_ellipsis, "r", linewidth=2, label="Ellipse")
 
     # Bounding box coordinates
     x_min = x_center - a
     y_min = y_center - b
 
     # Create a rectangle patch
-    plt.gca().add_patch(
-        plt.Rectangle((x_min, y_min), diameter_x, diameter_y, 
+    ax.add_patch(
+        Rectangle((x_min, y_min), diameter_x, diameter_y,
                   fill=False, edgecolor="lime", linewidth=2, label="Box"))
 
     # Add the rectangle to the Axes
 
-    plt.legend()
-    plt.savefig(output_path)
-    plt.close()
+    ax.legend()
+    fig.savefig(output_path)
+    fig.clear()
 
 @serialized_render
 def save_labeled_branches(label_mask, output_path):
@@ -107,7 +108,8 @@ def save_labeled_branches(label_mask, output_path):
         Background must be 0.
     """
 
-    fig, ax = plt.subplots(figsize=(8, 8))
+    fig = new_agg_figure(figsize=(8, 8))
+    ax = fig.subplots()
 
     # show mask
     ax.imshow(label_mask, cmap="nipy_spectral")
@@ -131,9 +133,9 @@ def save_labeled_branches(label_mask, output_path):
         )
 
     ax.set_axis_off()
-    plt.tight_layout()
-    plt.savefig(output_path)
-    plt.close()
+    fig.tight_layout()
+    fig.savefig(output_path)
+    fig.clear()
 
 def save_numpy_as_avi(video: np.ndarray, filename: str, fps: int = 30):
     """
@@ -332,6 +334,10 @@ def overlay_with_masks(image, masks, colors=[(0, 0, 255), (255, 0, 0)], artery_m
     return img
 
 def display_image_side_by_side(image1, image2, title1="Image 1", title2="Image 2"):
+    # Interactive display is notebook/UI-only. Import pyplot lazily so merely
+    # importing DopplerView cannot replace IPython's inline backend.
+    import matplotlib.pyplot as plt
+
     image1 = normalize_to_uint8(image1)
     image2 = normalize_to_uint8(image2)
 

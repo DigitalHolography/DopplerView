@@ -1,18 +1,25 @@
-"""Headless, thread-safe Matplotlib setup for pipeline diagnostics."""
+"""Headless, thread-safe Matplotlib helpers for pipeline diagnostics."""
 
 import threading
 from functools import wraps
 
-import matplotlib
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.figure import Figure
 
-
-# # Rendering happens in a spawned compute process and background writer thread;
-# # it must never create a Tk window or depend on the GUI event loop.
-# matplotlib.use("Agg", force=True)
-
-# pyplot owns process-global state. Serialize diagnostic figure creation even
-# with the non-interactive backend.
+# Matplotlib also has shared caches (for example, font discovery). Serialize
+# diagnostic figure creation performed by background output threads.
 render_lock = threading.RLock()
+
+
+def new_agg_figure(*args, **kwargs):
+    """Create a figure attached directly to a non-GUI Agg canvas.
+
+    This avoids importing ``matplotlib.pyplot`` and therefore never changes
+    the process-global backend selected by Tk or an IPython notebook.
+    """
+    figure = Figure(*args, **kwargs)
+    FigureCanvasAgg(figure)
+    return figure
 
 
 def serialized_render(function):

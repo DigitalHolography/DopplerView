@@ -1,17 +1,22 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+import os
+from pathlib import Path
+import subprocess
+import sys
 import warnings
 
-import matplotlib
 import imageio
 import numpy as np
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 
 from dopplerview.input_output.output_renderer import (
     LabeledMaskRenderer,
     MaskRenderer,
     SignalRenderer,
 )
+from dopplerview.utils.matplotlib_backend import new_agg_figure
 
 
 class DictionaryContext:
@@ -22,8 +27,40 @@ class DictionaryContext:
         return self.values.get(key)
 
 
-def test_pipeline_rendering_uses_non_gui_backend():
-    assert matplotlib.get_backend().lower() == "agg"
+def test_dopplerview_imports_preserve_the_selected_matplotlib_backend():
+    """App imports must not replace a backend selected by a notebook or UI."""
+    repository_root = Path(__file__).resolve().parents[1]
+    environment = os.environ.copy()
+    environment["PYTHONPATH"] = os.pathsep.join(
+        filter(None, [str(repository_root), environment.get("PYTHONPATH")])
+    )
+    code = """
+import matplotlib
+
+matplotlib.use("svg", force=True)
+selected_backend = matplotlib.get_backend()
+
+import dopplerview.ui.app
+import dopplerview.cli
+from dopplerview.input_output.output_renderer import SignalRenderer
+
+assert matplotlib.get_backend() == selected_backend
+"""
+
+    completed = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=repository_root,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+
+
+def test_pipeline_figures_use_an_explicit_agg_canvas():
+    assert isinstance(new_agg_figure().canvas, FigureCanvasAgg)
 
 
 def test_mask_renderer_expands_uint8_binary_mask_to_full_range(tmp_path):

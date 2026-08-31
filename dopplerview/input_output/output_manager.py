@@ -15,8 +15,7 @@ from dopplerview.input_output.output_payload import (
     OutputPayload,
     freeze_value,
 )
-from dopplerview.utils.matplotlib_backend import serialized_render
-import matplotlib.pyplot as plt
+from dopplerview.utils.matplotlib_backend import new_agg_figure, serialized_render
 import numpy as np
 
 import queue
@@ -479,24 +478,25 @@ class OutputManager:
     def save_clusterization(self, step_name, filename, labels, z):
         if not self.output_enabled:
             return
-        plt.figure(figsize=(6,6))
+        fig = new_agg_figure(figsize=(6, 6))
+        ax = fig.subplots()
         theta = np.linspace(0, 2*np.pi, 500)
 
         for lab in np.unique(labels):
             idx = labels == lab
 
-            plt.scatter(
+            ax.scatter(
                 np.real(z[idx]),
                 np.imag(z[idx]),
                 label=f'cluster {lab}'
             )
 
-        plt.plot(np.cos(theta), np.sin(theta), 'k--', alpha=0.3)
+        ax.plot(np.cos(theta), np.sin(theta), 'k--', alpha=0.3)
 
-        plt.axis('equal')
-        plt.legend()
-        plt.savefig(self.ensure_step_dir(step_name) / f"{filename}.png")
-        plt.close()
+        ax.axis('equal')
+        ax.legend()
+        fig.savefig(self.ensure_step_dir(step_name) / f"{filename}.png")
+        fig.clear()
 
 
     def save_optic_disc_detections(self, step_name, filename, boxes, scale_x, scale_y, ctx):
