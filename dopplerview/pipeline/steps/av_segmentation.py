@@ -81,7 +81,7 @@ class RetinalAVSegmentationStep(BaseStep):
         ctx.output_manager.save_overlay(self.name, "av_overlay_cleaned", ctx.require("M0_ff_image_cleaned"), [artery_mask_clean, vein_mask_clean])
 
 class ChoroidalAVSegmentationStep(BaseStep):
-    requires = {"M0_ff_video", "M0_ff_image_cleaned", "HF_M0_FF", "retinal_artery_mask", "retinal_vein_mask", "correlation_M0", "correlation_HF_M0_ff", "optic_disc_center", "choroidal_vessel_mask"}
+    requires = {"M0_ff_video", "M0_ff_image_cleaned", "HF_M0_ff", "retinal_artery_mask", "retinal_vein_mask", "correlation_M0", "correlation_HF_M0_ff", "optic_disc_center", "choroidal_vessel_mask"}
     produces = {"choroidal_artery_mask", "choroidal_vein_mask", "choroidal_aliased_artery_mask", "choroidal_artery_mask_clean", "choroidal_vein_mask_clean", "choroidal_aliased_artery_mask_clean"}
     name = "choroidal_artery_vein_segmentation"
 
@@ -188,8 +188,8 @@ class ChoroidalAVSegmentationStep(BaseStep):
         sampling_freq = ctx.holodoppler_config.get("sampling_freq", 37037)
         beat_period = ctx.get("beat_period")
         retinal_artery_mask = ctx.require("retinal_artery_mask")
-        HF_M0_ff = ctx.require("HF_M0_FF")
-        LF_M0_ff = ctx.require("LF_M0_FF")
+        HF_M0_ff = ctx.require("HF_M0_ff")
+        LF_M0_ff = ctx.require("LF_M0_ff")
 
         if optic_disc_center is not None:
             labeled_vessels_choroid, _ = process_masks.get_labeled_vessels(choroid_vessels, *optic_disc_center) 
@@ -203,15 +203,14 @@ class ChoroidalAVSegmentationStep(BaseStep):
         signals_choroid = pa.get_filtered_branch_signals(M0_ff_video, labeled_vessels_choroid, sampling_freq)
 
         # --- Step 2: Cluster signals using complex Fourier embedding ---
-        complex_fourier_embedding = partial(embedding.complex_fourier_embedding, sampling_freq=sampling_freq, n_harmonics=3)
+        complex_fourier_embedding = partial(embedding.complex_fourier_embedding, n_harmonics=3)
         component_names = ["real", "imag"]
-        kmeans_2 = partial(clustering.kmeans_clustering, n_clusters=2)
+        kmeans_2 = partial(clustering.kmeans_cluster, n_clusters=2)
 
         result_complex_fourier_choroid = clustering.run_clustering_pipeline(
             signals_choroid,
             labeled_vessels_choroid,
             sampling_freq,
-            component_names=component_names,
             embedding_func=complex_fourier_embedding,
             clustering_func=kmeans_2,
             video=M0_ff_video,
