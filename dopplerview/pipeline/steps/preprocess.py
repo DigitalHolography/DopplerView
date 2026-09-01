@@ -94,9 +94,9 @@ class PreprocessStep(BaseStep):
                 LF_M0_ff,
                 min_denominator_fraction=min_denominator_fraction,
             )
-        ctx.set("band_ratio_ff", band_ratio_ff)
-        ctx.set("HF_M0_ff", HF_M0_ff)
-        ctx.set("LF_M0_ff", LF_M0_ff)
-        ctx.set("HF_M0_ff_image", image_utils.normalize_to_uint8(np.mean(HF_M0_ff, axis=0)) if HF_M0_ff is not None else None)
-        ctx.set("LF_M0_ff_image", image_utils.normalize_to_uint8(np.mean(LF_M0_ff, axis=0)) if LF_M0_ff is not None else None)
-        ctx.set("band_ratio_ff_image", image_utils.normalize_to_uint8(np.mean(band_ratio_ff, axis=0)) if band_ratio_ff is not None else None)
+            ctx.set("band_ratio_ff", band_ratio_ff)
+            ctx.set("HF_M0_ff", HF_M0_ff)
+            ctx.set("LF_M0_ff", LF_M0_ff)
+            ctx.set("HF_M0_ff_image", image_utils.normalize_to_uint8(np.mean(HF_M0_ff, axis=0)) if HF_M0_ff is not None else None)
+            ctx.set("LF_M0_ff_image", image_utils.normalize_to_uint8(np.mean(LF_M0_ff, axis=0)) if LF_M0_ff is not None else None)
+            ctx.set("band_ratio_ff_image", image_utils.normalize_to_uint8(np.mean(band_ratio_ff, axis=0)) if band_ratio_ff is not None else None)
