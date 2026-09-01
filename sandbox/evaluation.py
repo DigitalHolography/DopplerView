@@ -308,7 +308,7 @@ def evaluate_experiment(
     gt_branch_labels,
     gt_artery_mask,
     gt_vein_mask,
-    decimals=None,
+    decimals=2,
 ):
     """Evaluate clustering, annotated branches, and complete retinal masks."""
     X = np.asarray(result.X)
