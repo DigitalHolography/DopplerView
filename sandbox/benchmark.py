@@ -4,11 +4,7 @@ import numpy as np
 import pandas as pd
 import dopplerview.segmentation.pulse_analysis as pa
 import dopplerview.segmentation.signal_processing as sp
-try:
-    from . import clustering, evaluation
-except ImportError:  # Notebook kernels started in the sandbox directory.
-    import clustering
-    import evaluation
+from . import clustering, evaluation
 
 @dataclass
 class ExperimentConfig:
