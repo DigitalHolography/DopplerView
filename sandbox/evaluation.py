@@ -388,7 +388,7 @@ def evaluate_experiment(
     return _round_metrics(metrics, decimals)
 
 
-def save_experiment_h5(h5_path, experiment_name, result, metadata):
+def save_experiment_h5(h5_path, experiment_name, result, metadata, metrics=None):
     """Persist one clustering result, replacing an experiment of the same name."""
     with h5py.File(h5_path, "a") as file:
         if experiment_name in file:
@@ -400,4 +400,11 @@ def save_experiment_h5(h5_path, experiment_name, result, metadata):
         group.create_dataset("artery_mask", data=np.asarray(result.artery_mask, dtype=np.uint8))
         group.create_dataset("vein_mask", data=np.asarray(result.vein_mask, dtype=np.uint8))
         for key, value in metadata.items():
-            group.attrs[key] = value
+            if np.ndim(value) == 0 or isinstance(value, str):
+                group.attrs[key] = value
+            else:
+                group.create_dataset(key, data=value)
+        if metrics is not None:
+            metrics_group = group.create_group("metrics")
+            for key, value in metrics.items():
+                metrics_group.create_dataset(key, data=value)

@@ -1085,14 +1085,21 @@ def assign_clusters_to_av(
     idx0 = np.where(cluster_labels == c0)[0]
     idx1 = np.where(cluster_labels == c1)[0]
 
+    branch_ids = np.unique(labeled_vessels)
+    branch_ids = branch_ids[branch_ids > 0]
+    if branch_ids.size != len(cluster_labels):
+        raise ValueError(
+            "cluster_labels must contain exactly one value per labeled branch"
+        )
+
     mask0 = np.isin(
         labeled_vessels,
-        idx0 + 1,
+        branch_ids[idx0],
     )
 
     mask1 = np.isin(
         labeled_vessels,
-        idx1 + 1,
+        branch_ids[idx1],
     )
 
     signal0 = signal_processing.get_pulse_from_mask(

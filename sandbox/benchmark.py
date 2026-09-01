@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from typing import Callable
 import numpy as np
 import pandas as pd
-import h5py
 import dopplerview.segmentation.pulse_analysis as pa
 import dopplerview.segmentation.signal_processing as sp
 try:
@@ -64,6 +63,20 @@ def run_clustering_pipeline(
     -------
     ClusteringResult
     """
+    signals = np.asarray(signals)
+    labeled_vessels = np.asarray(labeled_vessels)
+    video = np.asarray(video)
+    if signals.ndim != 2:
+        raise ValueError("signals must be a 2-D branch-by-time array")
+    if labeled_vessels.ndim != 2:
+        raise ValueError("labeled_vessels must be a 2-D label image")
+    if video.ndim != 3 or video.shape[1:] != labeled_vessels.shape:
+        raise ValueError("video and labeled_vessels must have matching spatial shapes")
+    branch_ids = np.unique(labeled_vessels)
+    branch_ids = branch_ids[branch_ids > 0]
+    if len(signals) != len(branch_ids):
+        raise ValueError("signals must contain exactly one row per labeled branch")
+
     if embedding_func is not None:
         if correct_signals:
             if beat_period is None:
@@ -112,6 +125,9 @@ def run_clustering_pipeline(
         periods = np.asarray([beat_period] * len(signals))
 
     cluster_labels = clustering_func(X)
+    cluster_labels = np.asarray(cluster_labels)
+    if cluster_labels.ndim != 1 or len(cluster_labels) != len(branch_ids):
+        raise ValueError("clustering must return exactly one label per branch")
     if np.unique(cluster_labels).size == 2:
         cluster_labels = pa.canonicalize_binary_cluster_labels(cluster_labels, X)
 
@@ -138,62 +154,6 @@ def run_clustering_pipeline(
         vein_mask=vein_mask,
     )
 
-def save_experiment_h5(
-    h5_path,
-    experiment_name,
-    result,
-    metadata,
-):
-    """
-    Save one experiment.
-    """
-
-    with h5py.File(
-        h5_path,
-        "a",
-    ) as f:
-
-        if experiment_name in f:
-            del f[experiment_name]
-
-        g = f.create_group(
-            experiment_name
-        )
-
-        g.create_dataset(
-            "embedding_matrix",
-            data=result.X,
-            compression="gzip",
-        )
-
-        g.create_dataset(
-            "cluster_labels",
-            data=result.cluster_labels,
-        )
-
-        g.create_dataset(
-            "mask_labels",
-            data=result.mask_labels,
-        )
-
-        g.create_dataset(
-            "artery_mask",
-            data=result.artery_mask.astype(
-                np.uint8
-            ),
-        )
-
-        g.create_dataset(
-            "vein_mask",
-            data=result.vein_mask.astype(
-                np.uint8
-            ),
-        )
-
-        for k, v in metadata.items():
-            g.attrs[k] = v
-
-
 def run_benchmark(
     videos,
     labeled_vessels,
@@ -206,21 +166,38 @@ def run_benchmark(
     h5_path,
     beat_period=None
 ):
+    """Run the Cartesian product of inputs, embeddings, and clusterings."""
+    if not videos:
+        raise ValueError("videos cannot be empty")
+    if not embeddings:
+        raise ValueError("embeddings cannot be empty")
+    if not clusterings:
+        raise ValueError("clusterings cannot be empty")
+
+    labeled_vessels = np.asarray(labeled_vessels)
+    if labeled_vessels.ndim != 2:
+        raise ValueError("labeled_vessels must be a 2-D label image")
+    branch_ids = np.unique(labeled_vessels)
+    branch_ids = branch_ids[branch_ids > 0]
+    if branch_ids.size == 0:
+        raise ValueError("labeled_vessels does not contain any positive branch ID")
+
     rows = []
 
     experiment_id = 0
 
     for input_name, video in videos.items():
-
+        video = np.asarray(video)
+        if video.ndim != 3 or video.shape[1:] != labeled_vessels.shape:
+            raise ValueError(
+                f"video {input_name!r} and labeled_vessels have incompatible shapes"
+            )
         signals = np.array([
             sp.get_pulse_from_mask(
                 video,
-                labeled_vessels == i
+                labeled_vessels == branch_id
             )
-            for i in range(
-                1,
-                labeled_vessels.max() + 1
-            )
+            for branch_id in branch_ids
         ])
 
         for embedding_name, embedding_func in embeddings.items():
@@ -246,22 +223,20 @@ def run_benchmark(
                     gt_vein_mask,
                 )
 
+                experiment_name = f"experiment_{experiment_id:04d}"
                 metadata = {
+                    "experiment_name": experiment_name,
                     "input_name": input_name,
                     "embedding_name": embedding_name,
                     "clustering_name": clustering_name,
                 }
 
-                experiment_name = (
-                    f"experiment_"
-                    f"{experiment_id:04d}"
-                )
-
-                save_experiment_h5(
+                evaluation.save_experiment_h5(
                     h5_path,
                     experiment_name,
                     result,
-                    metadata,
+                    {**metadata, "branch_ids": branch_ids},
+                    metrics=metrics,
                 )
 
                 row = {
