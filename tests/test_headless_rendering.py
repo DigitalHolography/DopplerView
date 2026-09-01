@@ -7,7 +7,7 @@ import subprocess
 import sys
 import warnings
 
-import imageio
+import imageio.v2 as imageio
 import numpy as np
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 

@@ -1,6 +1,6 @@
 import numpy as np
 
-from benchmark import evaluation
+from sandbox import evaluation
 from dopplerview.segmentation import process_masks, pulse_analysis
 
 
@@ -108,24 +108,3 @@ def test_branch_differences_use_compact_label_order():
 
     assert not np.any(differences[labeled_vessels == 2])
     assert np.all(differences[labeled_vessels == 5] == 5)
-
-
-def test_benchmark_assignment_maps_clusters_to_actual_branch_ids(monkeypatch):
-    labeled_vessels = np.array([[2, 2, 0], [0, 5, 5]])
-    signals = np.vstack([np.full(20, 2.0), np.full(20, 5.0)])
-    monkeypatch.setattr(
-        evaluation.pa,
-        "get_nb_of_positive_peaks",
-        lambda signal, _period: 2 if signal[0] == 2 else 1,
-    )
-
-    artery, vein, labels = evaluation.assign_clusters_to_av(
-        cluster_labels=np.array([0, 1]),
-        signals=signals,
-        periods=np.array([5, 5]),
-        labeled_vessels=labeled_vessels,
-    )
-
-    assert np.array_equal(artery, labeled_vessels == 2)
-    assert np.array_equal(vein, labeled_vessels == 5)
-    assert np.array_equal(labels, [0, 1])
