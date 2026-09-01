@@ -43,11 +43,22 @@ def run_clustering_pipeline(
     sampling_frequency,
     embedding_func,
     clustering_func,
+    video,
     correct_signals=False,
     beat_period=None,
+    assign_to_av=True
 ):
     """
     Complete clustering pipeline.
+    signals: array of shape (n_branches, n_timepoints)
+    labeled_vessels: array of shape (height, width) with branch labels
+    sampling_frequency: sampling frequency of the signals
+    embedding_func: function to embed the signals (e.g., PCA). If the signals are already embedded, this can be None.
+    clustering_func: function to perform clustering
+    video: the video data
+    correct_signals: whether to correct the signals
+    beat_period: the period of the heartbeats
+    assign_to_av: whether to assign clusters to artery/vein
 
     Returns
     -------
@@ -101,13 +112,21 @@ def run_clustering_pipeline(
         periods = np.asarray([beat_period] * len(signals))
 
     cluster_labels = clustering_func(X)
+    if np.unique(cluster_labels).size == 2:
+        cluster_labels = pa.canonicalize_binary_cluster_labels(cluster_labels, X)
 
-    (artery_mask, vein_mask, mask_labels,) = evaluation.assign_clusters_to_av(
-        cluster_labels,
-        signals,
-        periods,
-        labeled_vessels,
-    )
+    if assign_to_av:
+        (artery_mask, vein_mask, mask_labels,) = pa.assign_clusters_to_av(
+            cluster_labels,
+            video,
+            periods,
+            labeled_vessels,
+            sampling_freq=sampling_frequency
+        )
+    else:
+        mask_labels = np.zeros_like(cluster_labels, dtype=int)
+        artery_mask = np.zeros_like(labeled_vessels, dtype=bool)
+        vein_mask = np.zeros_like(labeled_vessels, dtype=bool)
 
     return clustering.ClusteringResult(
         templates=templates,
@@ -216,6 +235,7 @@ def run_benchmark(
                     sampling_frequency=sampling_frequency,
                     embedding_func=embedding_func,
                     clustering_func=clustering_func,
+                    video=video,
                     beat_period=beat_period
                 )
 

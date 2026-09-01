@@ -9,7 +9,10 @@ import numpy as np
 def kmeans_cluster(X, n_clusters=2):
     return KMeans(
         n_clusters=n_clusters,
-        random_state=0
+        init="k-means++",
+        n_init=20,
+        random_state=0,
+        algorithm="lloyd",
     ).fit_predict(X)
 
 

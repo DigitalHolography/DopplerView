@@ -688,11 +688,51 @@ def compute_pre_masks_by_systolic_gradient(signals, labeled_vessels, sampling_fr
     return pre_mask_artery, pre_mask_vein
 
 
-def compute_pre_masks_by_clustering(signals, labeled_vessels, sampling_frequency):
+def canonicalize_binary_cluster_labels(labels, features):
+    """Make binary cluster IDs independent of K-means' arbitrary label order."""
+    labels = np.asarray(labels)
+    features = np.asarray(features)
+    if labels.ndim != 1 or features.ndim != 2 or len(labels) != len(features):
+        raise ValueError("labels and features must have matching sample dimensions")
+    if set(np.unique(labels)) != {0, 1}:
+        raise ValueError("binary cluster canonicalization requires labels 0 and 1")
+    centers = np.array([features[labels == cluster].mean(axis=0) for cluster in (0, 1)])
+
+    def sort_key(cluster):
+        center = centers[cluster]
+        if center.size == 2:
+            return (np.arctan2(center[1], center[0]), *center)
+        return tuple(center)
+
+    order = sorted(
+        (0, 1),
+        key=sort_key,
+    )
+    mapping = {original: canonical for canonical, original in enumerate(order)}
+    return np.array([mapping[label] for label in labels], dtype=int)
+
+
+def compute_pre_masks_by_clustering(
+    signals,
+    labeled_vessels,
+    sampling_frequency,
+    ambiguity_policy="warn",
+):
     """
     Compute a preliminary artery mask based on the clustering of the complex first Fourier harmonic of all signals. 
     The 2 clusters are then classified as artery or vein based on the number of positive peaks in their median signal's gradient.
     """
+
+    signals = np.asarray(signals)
+    if signals.ndim != 2 or signals.shape[0] < 2:
+        raise ValueError("clustering requires at least two branch signals")
+    if ambiguity_policy not in {"warn", "raise"}:
+        raise ValueError("ambiguity_policy must be either 'warn' or 'raise'")
+
+    branch_ids = np.unique(labeled_vessels)
+    branch_ids = branch_ids[branch_ids > 0]
+    if branch_ids.size != len(signals):
+        raise ValueError("signals must contain exactly one row per labeled vessel branch")
 
     # --- Compute median heartbeat template for each branch ---
     cycle_templates = [get_cycle_template(branch, sampling_frequency, return_period=True) for branch in signals]
@@ -702,17 +742,22 @@ def compute_pre_masks_by_clustering(signals, labeled_vessels, sampling_frequency
         np.real(z),
         np.imag(z)
     ])
+    if not np.all(np.isfinite(X)):
+        raise ValueError("clustering features contain a non-finite first harmonic")
+    if np.unique(X, axis=0).shape[0] < 2:
+        raise ValueError("clustering requires at least two distinct first-harmonic features")
 
     # --- Cluster branches based on heartbeat template shape ---
     labels = KMeans(
         n_clusters=2,
-        random_state=0
+        init="k-means++",
+        n_init=20,
+        random_state=0,
+        algorithm="lloyd",
     ).fit_predict(X)
-
-    branch_ids = np.unique(labeled_vessels)
-    branch_ids = branch_ids[branch_ids > 0]
-    if branch_ids.size != len(signals):
-        raise ValueError("signals must contain exactly one row per labeled vessel branch")
+    if np.unique(labels).size != 2:
+        raise ValueError("K-means did not produce two non-empty clusters")
+    labels = canonicalize_binary_cluster_labels(labels, X)
 
     cluster0 = np.where(labels == 0)[0]
     cluster1 = np.where(labels == 1)[0]
@@ -730,14 +775,36 @@ def compute_pre_masks_by_clustering(signals, labeled_vessels, sampling_frequency
     cluster0_peaks = get_nb_of_positive_peaks(cluster0_signal, cluster0_period)
     cluster1_peaks = get_nb_of_positive_peaks(cluster1_signal, cluster1_period)
 
-    if cluster0_peaks > cluster1_peaks:
-        mask_artery = mask0
-        mask_vein = mask1
-        labels = np.where(labels == 0, 0, 1)  # artery=0, vein=1
+    if cluster0_peaks != cluster1_peaks:
+        artery_cluster = 0 if cluster0_peaks > cluster1_peaks else 1
     else:
-        mask_artery = mask1
-        mask_vein = mask0
-        labels = np.where(labels == 0, 1, 0)  # artery=1, vein=0
+        # Peak counts are discrete and can tie. A sharper positive upstroke is
+        # the continuous physiological tie-breaker; normalized branch signals
+        # make the two cluster scores comparable.
+        upstroke0 = np.max(np.gradient(cluster0_signal))
+        upstroke1 = np.max(np.gradient(cluster1_signal))
+        if not np.isclose(upstroke0, upstroke1, rtol=1e-6, atol=1e-12):
+            artery_cluster = 0 if upstroke0 > upstroke1 else 1
+            logger.warning(
+                "Equal positive-peak counts for both clusters; artery/vein "
+                "assignment was resolved using systolic upstroke strength."
+            )
+        else:
+            message = (
+                "Ambiguous artery/vein cluster assignment: positive-peak "
+                "counts and systolic upstroke strengths are equal."
+            )
+            if ambiguity_policy == "raise":
+                raise ValueError(message)
+            logger.warning(
+                "%s Using canonical centroid-phase order as a deterministic fallback.",
+                message,
+            )
+            artery_cluster = 0
+
+    mask_artery = mask0 if artery_cluster == 0 else mask1
+    mask_vein = mask1 if artery_cluster == 0 else mask0
+    labels = np.where(labels == artery_cluster, 0, 1)
 
     return mask_artery, mask_vein, labels, z
 
@@ -991,3 +1058,180 @@ def compute_diasys_image(video, pulse_artery, sampling_frequency, pulse_vein=Non
 
     diasys_image = M0_Systole_img - M0_Diastole_img
     return diasys_image, sysindexes, diasindexes, M0_Systole_img, M0_Diastole_img, sys_index_list
+
+def assign_clusters_to_av(
+    cluster_labels,
+    video,
+    periods,
+    labeled_vessels,
+    sampling_freq
+):
+    """
+    Assign artery/vein labels from cluster labels.
+
+    Assumes two clusters.
+    """
+
+    unique_clusters = np.unique(cluster_labels)
+
+    if len(unique_clusters) != 2:
+        raise ValueError(
+            "Current artery/vein assignment "
+            "requires exactly 2 clusters."
+        )
+
+    c0, c1 = unique_clusters
+
+    idx0 = np.where(cluster_labels == c0)[0]
+    idx1 = np.where(cluster_labels == c1)[0]
+
+    mask0 = np.isin(
+        labeled_vessels,
+        idx0 + 1,
+    )
+
+    mask1 = np.isin(
+        labeled_vessels,
+        idx1 + 1,
+    )
+
+    signal0 = signal_processing.get_pulse_from_mask(
+        video,
+        mask0,
+    )
+
+    signal1 = signal_processing.get_pulse_from_mask(
+        video,
+        mask1,
+    )
+
+    signal0 = signal_processing.get_filtered_pulse(
+        signal0,
+        sampling_frequency=sampling_freq,
+    )
+
+    signal1 = signal_processing.get_filtered_pulse(
+        signal1,
+        sampling_frequency=sampling_freq,
+    )
+
+    period0 = int(
+        np.median(periods[idx0])
+    )
+
+    period1 = int(
+        np.median(periods[idx1])
+    )
+
+    peaks0 = get_nb_of_positive_peaks(
+        signal0,
+        period0,
+    )
+
+    peaks1 = get_nb_of_positive_peaks(
+        signal1,
+        period1,
+    )
+
+    if peaks0 == peaks1:
+        upstroke0 = np.max(np.gradient(signal0))
+        upstroke1 = np.max(np.gradient(signal1))
+        if np.isclose(upstroke0, upstroke1, rtol=1e-6, atol=1e-12):
+            logger.warning(
+                "Ambiguous benchmark artery/vein assignment; using canonical "
+                "cluster order as a deterministic fallback."
+            )
+            artery_cluster = c0
+        else:
+            artery_cluster = c0 if upstroke0 > upstroke1 else c1
+    else:
+        artery_cluster = c0 if peaks0 > peaks1 else c1
+
+    if artery_cluster == c0:
+
+        artery_mask = mask0
+        vein_mask = mask1
+
+        mask_labels = np.where(
+            cluster_labels == c0,
+            0,
+            1,
+        )
+
+    else:
+
+        artery_mask = mask1
+        vein_mask = mask0
+
+        mask_labels = np.where(
+            cluster_labels == c0,
+            1,
+            0,
+        )
+
+    mask_labels += 1
+
+    return (
+        artery_mask,
+        vein_mask,
+        mask_labels,
+    )
+
+def assign_corr_stack_to_av(corr_stack, cluster_labels, labeled_vessels, negative=False):
+    """
+    Assign clusters to artery and vein based on correlation stack.
+
+    Parameters
+    ----------
+    corr_stack : ndarray, shape (n_samples, n_features)
+        Correlation stack features.
+    cluster_labels : ndarray, shape (n_samples,)
+        Cluster labels for each sample.
+    labeled_vessels : ndarray, shape (H, W)
+        Labeled vessel mask.
+    negative : bool
+        If True, assign the cluster with lower correlation to artery.
+
+    Returns
+    -------
+    artery_mask : ndarray, shape (H, W)
+        Binary mask for arteries.
+    vein_mask : ndarray, shape (H, W)
+        Binary mask for veins.
+    mask_labels : ndarray, shape (H, W)
+        labels for each labeled vessel (1 for artery, 2 for vein).
+    """
+
+    # Assign artery and vein based on correlation
+    if negative:
+        corr_stack = -corr_stack
+
+    c0, c1 = np.unique(cluster_labels)
+
+    cluster0 = np.where(cluster_labels == c0)[0]
+    cluster1 = np.where(cluster_labels == c1)[0]
+    correlation0 = np.median(corr_stack[cluster0], axis=0)
+    correlation1 = np.median(corr_stack[cluster1], axis=0)
+
+    if np.max(correlation0) > np.max(correlation1):
+        artery_mask = np.zeros_like(labeled_vessels, dtype=bool)
+        vein_mask = np.zeros_like(labeled_vessels, dtype=bool)
+        artery_mask[np.isin(labeled_vessels, cluster0 + 1)] = True
+        vein_mask[np.isin(labeled_vessels, cluster1 + 1)] = True
+        mask_labels = np.where(
+            cluster_labels == c0,
+            1,
+            2,
+        )
+    else:
+        artery_mask = np.zeros_like(labeled_vessels, dtype=bool)
+        vein_mask = np.zeros_like(labeled_vessels, dtype=bool)
+        artery_mask[np.isin(labeled_vessels, cluster1 + 1)] = True
+        vein_mask[np.isin(labeled_vessels, cluster0 + 1)] = True
+        mask_labels = np.where(
+            cluster_labels == c0,
+            2,
+            1,
+        )
+
+    return artery_mask, vein_mask, mask_labels

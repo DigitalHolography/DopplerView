@@ -17,6 +17,7 @@
     "CenterRadius": 0.1,
     "OpticDiskDetectorMethod": "deep",
     "PreMaskMethod": "clustering",
+    "ClusteringAmbiguityPolicy": "warn",
     "CorrectBranchSignals": false
   },
   "VelocityEstimation": {

@@ -10,14 +10,18 @@ from sklearn.metrics import (
     recall_score,
     f1_score,
 )
+import logging
 import numpy as np
 import dopplerview.segmentation.pulse_analysis as pa
+import dopplerview.segmentation.signal_processing as sp
 
-def assign_clusters_to_av(
+logger = logging.getLogger(__name__)
+
+def assign_clusters_to_correlation_stack(
     cluster_labels,
-    signals,
-    periods,
+    X,
     labeled_vessels,
+    negative=False
 ):
     """
     Assign artery/vein labels from cluster labels.
@@ -25,80 +29,30 @@ def assign_clusters_to_av(
     Assumes two clusters.
     """
 
-    unique_clusters = np.unique(cluster_labels)
+    # Assign artery and vein based on correlation
+    cluster0 = np.where(cluster_labels == 0)[0]
+    cluster1 = np.where(cluster_labels == 1)[0]
+    correlation0 = np.median(X[cluster0], axis=0)
+    correlation1 = np.median(X[cluster1], axis=0)
+    
+    if negative:
+        correlation0 = -correlation0
+        correlation1 = -correlation1
 
-    if len(unique_clusters) != 2:
-        raise ValueError(
-            "Current artery/vein assignment "
-            "requires exactly 2 clusters."
-        )
-
-    c0, c1 = unique_clusters
-
-    idx0 = np.where(cluster_labels == c0)[0]
-    idx1 = np.where(cluster_labels == c1)[0]
-
-    signal0 = np.median(
-        signals[idx0],
-        axis=0,
-    )
-
-    signal1 = np.median(
-        signals[idx1],
-        axis=0,
-    )
-
-    period0 = int(
-        np.median(periods[idx0])
-    )
-
-    period1 = int(
-        np.median(periods[idx1])
-    )
-
-    peaks0 = pa.get_nb_of_positive_peaks(
-        signal0,
-        period0,
-    )
-
-    peaks1 = pa.get_nb_of_positive_peaks(
-        signal1,
-        period1,
-    )
-
-    mask0 = np.isin(
-        labeled_vessels,
-        idx0 + 1,
-    )
-
-    mask1 = np.isin(
-        labeled_vessels,
-        idx1 + 1,
-    )
-
-    if peaks0 > peaks1:
-
-        artery_mask = mask0
-        vein_mask = mask1
-
-        mask_labels = np.where(
-            cluster_labels == c0,
-            0,
-            1,
-        )
-
+    if np.max(correlation0) > np.max(correlation1):
+        artery_mask = np.zeros_like(labeled_vessels, dtype=bool)
+        vein_mask = np.zeros_like(labeled_vessels, dtype=bool)
+        artery_mask[np.isin(labeled_vessels, cluster0 + 1)] = True
+        vein_mask[np.isin(labeled_vessels, cluster1 + 1)] = True
     else:
+        artery_mask = np.zeros_like(labeled_vessels, dtype=bool)
+        vein_mask = np.zeros_like(labeled_vessels, dtype=bool)
+        artery_mask[np.isin(labeled_vessels, cluster1 + 1)] = True
+        vein_mask[np.isin(labeled_vessels, cluster0 + 1)] = True
 
-        artery_mask = mask1
-        vein_mask = mask0
-
-        mask_labels = np.where(
-            cluster_labels == c0,
-            1,
-            0,
-        )
-
-    mask_labels += 1
+    mask_labels = np.zeros_like(labeled_vessels, dtype=int)
+    mask_labels[artery_mask] = 1
+    mask_labels[vein_mask] = 2
 
     return (
         artery_mask,
