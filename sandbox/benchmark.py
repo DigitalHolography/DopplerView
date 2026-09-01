@@ -5,8 +5,11 @@ import pandas as pd
 import h5py
 import dopplerview.segmentation.pulse_analysis as pa
 import dopplerview.segmentation.signal_processing as sp
-import evaluation
-import clustering
+try:
+    from . import clustering, evaluation
+except ImportError:  # Notebook kernels started in the sandbox directory.
+    import clustering
+    import evaluation
 
 @dataclass
 class ExperimentConfig:
@@ -33,9 +36,6 @@ class ExperimentResult:
     vein_mask: np.ndarray
 
     metrics: dict
-
-import evaluation
-import clustering
 
 def run_clustering_pipeline(
     signals,
