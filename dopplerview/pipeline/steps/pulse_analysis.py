@@ -16,7 +16,7 @@ class PulseAnalysisStep(NestedStep):
         super().__init__()
             
 class PreArteryMaskStep(BaseStep):
-    requires = {"M0_ff_video", "M0_ff_image", "retinal_vessel_mask", "optic_disc_center"}
+    requires = {"M0_ff_video", "M0_ff_image", "retinal_vessel_mask", "optic_disc_center", "sampling_freq"}
     produces = {
         "labeled_vessels",
         "pre_artery_mask",
@@ -31,24 +31,16 @@ class PreArteryMaskStep(BaseStep):
 
     def _relevant_config(self, ctx):
         return {
-            "sampling_freq": ctx.holodoppler_config.get("sampling_freq", 37037),
-            "batch_stride": ctx.holodoppler_config.get("batch_stride", 256),
             "PreMaskMethod": ctx.dopplerview_config.get("Mask").get("PreMaskMethod", "clustering"),
             "CorrectBranchSignals": ctx.dopplerview_config.get("Mask").get("CorrectBranchSignals", True),
             }
 
     def run(self, ctx):
-        video = ctx.get("M0_ff_video")
-        vessel_mask = ctx.get("retinal_vessel_mask")
-        optic_disc_center = ctx.get("optic_disc_center")
-
-        fs = ctx.holodoppler_config.get("sampling_freq", 37037)
-        stride = ctx.holodoppler_config.get("batch_stride", 256)
-
-        sampling_frequency = pulse_analysis.get_effective_sampling_frequency(fs, stride)
+        video = ctx.require("M0_ff_video")
+        vessel_mask = ctx.require("retinal_vessel_mask")
+        optic_disc_center = ctx.require("optic_disc_center")
+        sampling_frequency = ctx.require("sampling_freq")
         
-        self.logger.info(f"    - Camera sampling frequency: {fs} Hz, batch stride: {stride}. Effective sampling frequency after accounting for batch stride: {sampling_frequency:.2f} Hz")
-
         # --- Step 1: Separate mask into branches ---
         if optic_disc_center is not None:
             labeled_vessels, _ = process_masks.get_labeled_vessels(vessel_mask, *optic_disc_center) 
@@ -168,13 +160,13 @@ class ComputeTemporalCuesStep(BaseStep):
         "LF_M0_ff",
         "HF_M0_ff",
         "band_ratio_ff",
+        "sampling_freq",
     }
     produces = {"correlation_M0", "diasys_image", "pre_arterial_pulse", "choroidal_pulse", "pre_arterial_pulse_filtered", "choroidal_pulse_filtered", "pre_arterial_pulse_cleaned", "pre_venous_pulse", "pre_venous_pulse_filtered", "M0_ff_image_cleaned", "beat_period", "systole_image", "diastole_image", "systole_index_list", "correlation_LF_M0_ff", "correlation_HF_M0_ff", "correlation_band_ratio_ff", "diasys_LF_M0_ff", "diasys_HF_M0_ff", "diasys_band_ratio_ff", "correlation_M0_clustering", "diasys_image_clustering", "correlation_M0_gradient", "diasys_image_gradient"}
     name = "temporal_cues"
 
     def _relevant_config(self, ctx):
-        return {"sampling_freq": ctx.holodoppler_config.get("sampling_freq", 37037),
-                "batch_stride": ctx.holodoppler_config.get("batch_stride", 256)}
+        return {}
 
     def run(self, ctx):
         video = ctx.require("M0_ff_video")
@@ -203,10 +195,7 @@ class ComputeTemporalCuesStep(BaseStep):
 
         # --- Filter pulses to remove high frequency noise ---
 
-        fs = ctx.holodoppler_config.get("sampling_freq", 37037)
-        stride = ctx.holodoppler_config.get("batch_stride", 256)
-
-        sampling_frequency = pulse_analysis.get_effective_sampling_frequency(fs, stride)
+        sampling_frequency = ctx.require("sampling_freq")
 
         arterial_pulse_filtered = signal_processing.get_filtered_pulse(arterial_pulse, sampling_frequency)
         venous_pulse_filtered = signal_processing.get_filtered_pulse(venous_pulse, sampling_frequency)

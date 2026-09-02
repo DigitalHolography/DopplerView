@@ -15,6 +15,8 @@ from sklearn.cluster import KMeans
 from dopplerview.segmentation import signal_processing
 from dopplerview.utils import image_utils
 
+import warnings
+
 import logging
 logger = logging.getLogger(__name__)
 

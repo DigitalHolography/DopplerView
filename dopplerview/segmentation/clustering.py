@@ -151,7 +151,7 @@ def run_clustering_pipeline(
         artery_mask = np.zeros_like(labeled_vessels, dtype=bool)
         vein_mask = np.zeros_like(labeled_vessels, dtype=bool)
 
-    return clustering.ClusteringResult(
+    return ClusteringResult(
         templates=templates,
         periods=periods,
         X=X,

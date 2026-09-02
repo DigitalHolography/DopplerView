@@ -87,7 +87,6 @@ class ChoroidalAVSegmentationStep(BaseStep):
 
     def _relevant_config(self, ctx):
         return {
-            "sampling_freq": ctx.holodoppler_config.get("sampling_freq", 37037),
             "ChoroidalSegmentationMethod": ctx.dopplerview_config.get("ChoroidalSegmentationMethod", "clustering"),
         }
     
@@ -185,7 +184,7 @@ class ChoroidalAVSegmentationStep(BaseStep):
         choroid_vessels = ctx.require("choroidal_vessel_mask")
         optic_disc_center = ctx.get("optic_disc_center")
         M0_ff_video = ctx.require("M0_ff_video")
-        sampling_freq = ctx.holodoppler_config.get("sampling_freq", 37037)
+        sampling_freq = ctx.require("sampling_freq")
         beat_period = ctx.get("beat_period")
         retinal_artery_mask = ctx.require("retinal_artery_mask")
         HF_M0_ff = ctx.require("HF_M0_ff")
@@ -204,7 +203,6 @@ class ChoroidalAVSegmentationStep(BaseStep):
 
         # --- Step 2: Cluster signals using complex Fourier embedding ---
         complex_fourier_embedding = partial(embedding.complex_fourier_embedding, n_harmonics=3)
-        component_names = ["real", "imag"]
         kmeans_2 = partial(clustering.kmeans_cluster, n_clusters=2)
 
         result_complex_fourier_choroid = clustering.run_clustering_pipeline(

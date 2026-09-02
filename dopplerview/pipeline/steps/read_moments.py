@@ -3,14 +3,18 @@ import numpy as np
 
 from dopplerview.pipeline.step import BaseStep
 from dopplerview.input_output.h5_file import read_bands
+from dopplerview.segmentation import pulse_analysis
 
 class ReadMomentsStep(BaseStep):
     requires = {"input_file"}
-    produces = {"moment0", "moment1", "moment2", "LF_M0", "HF_M0"}
+    produces = {"moment0", "moment1", "moment2", "LF_M0", "HF_M0", "sampling_freq"}
     name = "read_moments"
 
     def _relevant_config(self, ctx):
-        return {}
+        return {
+            "sampling_freq": ctx.holodoppler_config.get("sampling_freq"),
+            "batch_stride": ctx.holodoppler_config.get("batch_stride"),
+            }
 
     def read_holo(self, file_path):
         pass
@@ -71,3 +75,11 @@ class ReadMomentsStep(BaseStep):
             ctx.set("LF_M0", LF_M0)
         if HF_M0 is not None:
             ctx.set("HF_M0", HF_M0)
+
+        fs = ctx.holodoppler_config.get("sampling_freq")
+        stride = ctx.holodoppler_config.get("batch_stride")
+
+        sampling_frequency = pulse_analysis.get_effective_sampling_frequency(fs, stride)
+        self.logger.info(f"    - Camera sampling frequency: {fs} Hz, batch stride: {stride}. Effective sampling frequency after accounting for batch stride: {sampling_frequency:.2f} Hz")
+
+        ctx.set("sampling_freq", sampling_frequency)
