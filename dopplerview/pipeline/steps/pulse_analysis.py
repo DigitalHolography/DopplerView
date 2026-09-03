@@ -237,7 +237,7 @@ class ComputeTemporalCuesStep(BaseStep):
 
         # --- Compute correlation map with filtered pulses ---
 
-        correlation_artery = signal_processing.compute_correlation(video_cleaned, arterial_pulse_cleaned)
+        correlation_artery = signal_processing.compute_correlation(video_cleaned, arterial_pulse_cleaned, normalization_interval=None)
         ctx.set("correlation_M0", correlation_artery)
         ctx.output_manager.output("pulse_analysis", f"correlation map RGB", correlation_artery, "image", options={"blue_gray_red": True, "M0_ff_image": M0_ff_image_cleaned})
 
@@ -256,7 +256,7 @@ class ComputeTemporalCuesStep(BaseStep):
 
         LF_M0_ff = ctx.require("LF_M0_ff")
         if LF_M0_ff is not None:
-            correlation_LF_M0_ff = signal_processing.compute_correlation(LF_M0_ff, arterial_pulse_filtered)
+            correlation_LF_M0_ff = signal_processing.compute_correlation(LF_M0_ff, arterial_pulse_filtered, normalization_interval=None)
             M0_Systole_img, M0_Diastole_img = np.nanmean(LF_M0_ff[sysindexes], axis=0), np.nanmean(LF_M0_ff[diasindexes], axis=0)
             diasys_LF_M0_ff = M0_Systole_img - M0_Diastole_img
         else:
@@ -267,7 +267,7 @@ class ComputeTemporalCuesStep(BaseStep):
 
         HF_M0_ff = ctx.require("HF_M0_ff")
         if HF_M0_ff is not None:
-            correlation_HF_M0_ff = signal_processing.compute_correlation(HF_M0_ff, arterial_pulse_filtered)
+            correlation_HF_M0_ff = signal_processing.compute_correlation(HF_M0_ff, arterial_pulse_filtered, normalization_interval=None)
             M0_Systole_img, M0_Diastole_img = np.nanmean(HF_M0_ff[sysindexes], axis=0), np.nanmean(HF_M0_ff[diasindexes], axis=0)
             diasys_HF_M0_ff = M0_Systole_img - M0_Diastole_img
         else:
@@ -278,7 +278,7 @@ class ComputeTemporalCuesStep(BaseStep):
 
         band_ratio_ff = ctx.require("band_ratio_ff")
         if band_ratio_ff is not None:
-            correlation_band_ratio_ff = signal_processing.compute_correlation(band_ratio_ff, arterial_pulse_filtered)
+            correlation_band_ratio_ff = signal_processing.compute_correlation(band_ratio_ff, arterial_pulse_filtered, normalization_interval=None)
             M0_Systole_img, M0_Diastole_img = np.nanmean(band_ratio_ff[sysindexes], axis=0), np.nanmean(band_ratio_ff[diasindexes], axis=0)
             diasys_band_ratio_ff = M0_Systole_img - M0_Diastole_img
         else:
@@ -360,6 +360,7 @@ class ComputeTemporalCuesStep(BaseStep):
         correlation = signal_processing.compute_correlation(
             video_cleaned,
             arterial_pulse_cleaned,
+            normalization_interval=None
         )
         diasys, *_ = pulse_analysis.compute_diasys_image(
             video_cleaned,

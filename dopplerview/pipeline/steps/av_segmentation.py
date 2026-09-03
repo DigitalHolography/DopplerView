@@ -3,6 +3,8 @@ import dopplerview.segmentation.process_masks as process_masks
 import dopplerview.segmentation.pulse_analysis as pa
 import dopplerview.segmentation.clustering as clustering
 import dopplerview.segmentation.embedding as embedding
+import dopplerview.utils.image_utils as image_utils
+
 from functools import partial
 from skimage.morphology import dilation, opening, disk
 from skimage.measure import label
@@ -87,7 +89,7 @@ class ChoroidalAVSegmentationStep(BaseStep):
 
     def _relevant_config(self, ctx):
         return {
-            "ChoroidalSegmentationMethod": ctx.dopplerview_config.get("ChoroidalSegmentationMethod", "clustering"),
+            "ChoroidalSegmentationMethod": ctx.dopplerview_config["Mask"].get("ChoroidalSegmentationMethod", "clustering"),
         }
     
     def clean_vessel_mask(self, raw_mask, ctx):
@@ -114,7 +116,7 @@ class ChoroidalAVSegmentationStep(BaseStep):
 
         return clean_mask
     
-    def get_retinal_artery_mask_treshold(self, ctx):
+    def get_retinal_artery_mask_threshold(self, ctx):
         # If the retinal artery mask is valid, return it
         if ctx.require("retinal_artery_mask") is not None:
             if ctx.require("retinal_artery_mask").sum() > 0 and ctx.require("optic_disc_center") is not None:
@@ -127,7 +129,7 @@ class ChoroidalAVSegmentationStep(BaseStep):
 
         return retinal_artery_mask
     
-    def get_retinal_vein_mask_treshold(self, ctx):
+    def get_retinal_vein_mask_threshold(self, ctx):
         # If the retinal vein mask is valid, return it
         if ctx.require("retinal_vein_mask") is not None:
             if ctx.require("retinal_vein_mask").sum() > 0 and ctx.require("optic_disc_center") is not None:
@@ -135,7 +137,7 @@ class ChoroidalAVSegmentationStep(BaseStep):
 
         return np.zeros_like(ctx.require("M0_ff_image_cleaned"), dtype=np.uint8)
 
-    def get_masks_treshold(self, ctx):
+    def get_masks_threshold(self, ctx):
         # Get artery and vein masks based on the correlation of the M0 and its high frequencies with the retinal aterial signal.
         # The choroidal vessels can be identified as three types:
         # - arteries with positive correlation with the retinal arteries
@@ -145,29 +147,32 @@ class ChoroidalAVSegmentationStep(BaseStep):
         corr_M0 = ctx.require("correlation_M0")
         corr_HF = ctx.require("correlation_HF_M0_ff")
 
-        retinal_artery_mask = self.get_retinal_artery_mask(ctx)
-        retinal_vein_mask = self.get_retinal_vein_mask(ctx)
+        corr_HF = image_utils.normalize_image(corr_HF, -1, 1)
+        corr_M0 = image_utils.normalize_image(corr_M0, -1, 1)
+
+        retinal_artery_mask = self.get_retinal_artery_mask_threshold(ctx)
+        retinal_vein_mask = self.get_retinal_vein_mask_threshold(ctx)
         retinal_vessel_mask = dilation(retinal_artery_mask | retinal_vein_mask)
 
         self.logger.info("    - Identifying choroidal aliased arteries with -0.2 correlation threshold in high frequency signal and -0.25 for M0 correlation.")
-        pre_aliased_arteries = corr_HF < -0.2   # Identify aliased arteries based on high frequency correlation
+        pre_aliased_arteries = corr_HF < -0.47   # Identify aliased arteries based on high frequency correlation
         connected_arteries = process_masks.connect_components(
             pre_aliased_arteries,
             max_distance=5,
         )  # Connect disconnected aliased arteries that are close to each other
         large_arteries = opening(connected_arteries, disk(2))
-        anti_correlated_vessels = corr_M0 < -0.25
+        anti_correlated_vessels = corr_M0 < -0.3
         aliased_arteries = process_masks.keep_connected_components(anti_correlated_vessels, large_arteries) # Keep only the vessels that are connected to the aliased arteries
         choroidal_aliased_artery_mask = aliased_arteries & ~retinal_vessel_mask  # Remove retinal vessels
 
         self.logger.info("    - Identifying choroidal veins with -0.15 correlation threshold in M0 signal.")
-        pre_veins = corr_M0 < -0.15
+        pre_veins = corr_M0 < -0.3
         veins = process_masks.keep_connected_components(pre_veins, aliased_arteries, negative=True)   # Remove aliased arteries from the vein mask
         veins = process_masks.remove_small_vessels(label(veins), min_size=10) > 0
         choroidal_vein_mask = veins & ~retinal_vessel_mask  # Remove retinal vessels
 
         self.logger.info("    - Identifying choroidal arteries with 0.12 correlation threshold in M0 signal.")
-        arteries = corr_M0 > 0.12
+        arteries = corr_M0 > 0.24
         arteries = process_masks.remove_small_vessels(label(arteries), min_size=10) > 0
         choroidal_artery_mask = arteries & ~retinal_vessel_mask  # Remove retinal vessels
 
@@ -223,15 +228,16 @@ class ChoroidalAVSegmentationStep(BaseStep):
         pseudo_labeled_veins_choroid, _ = process_masks.get_labeled_vessels(pseudo_choroid_vein_mask, mask_optic_disc=True)
         choroid_artery_mask = result_complex_fourier_choroid.artery_mask
 
-        corr_stacks_2bands_pixel = pa.correlation_stack_per_pixel(retinal_artery_mask, [HF_M0_ff, LF_M0_ff], pseudo_labeled_veins_choroid, include_std=False)
-        agglo_2 = partial(clustering.agglomerative_cluster, n_clusters=2)
+        corr_stacks_2bands_pixel = embedding.correlation_stack_per_pixel(retinal_artery_mask, [HF_M0_ff, LF_M0_ff], pseudo_labeled_veins_choroid, include_std=False)
+        # agglo_2 = partial(clustering.agglomerative_cluster, n_clusters=2)
+        corr_2 = partial(clustering.correlation_clustering, thresholds=[0, -0.05])
 
         result_correlation_2bands_choroid = clustering.run_clustering_pipeline(
             corr_stacks_2bands_pixel,
             pseudo_labeled_veins_choroid,
             sampling_freq,
             embedding_func=None,
-            clustering_func=agglo_2,
+            clustering_func=corr_2,
             video=M0_ff_video,
             correct_signals=False,
             beat_period=beat_period,
@@ -247,13 +253,14 @@ class ChoroidalAVSegmentationStep(BaseStep):
     def run(self, ctx):
         # Implement choroidal artery vein segmentation logic based on ctx and self.dopplerview_config
         # For now, we will just set empty masks as placeholders
-        segmentation_method = ctx.dopplerview_config.get("ChoroidalSegmentationMethod", "clustering")
+        segmentation_method = ctx.dopplerview_config["Mask"].get("ChoroidalSegmentationMethod", "clustering")
+        self.logger.info(f"    - ChoroidalSegmentationMethod: {segmentation_method}")
         if segmentation_method == "clustering":
             self.logger.info("    - Segment choroidal arteries and veins using clustering of branch signals.")
             choroidal_artery_mask, choroidal_vein_mask, choroidal_aliased_artery_mask = self.get_masks_clustering(ctx)
         elif segmentation_method == "threshold":
             self.logger.info("    - Use retinal arterial correlation thresholding on different frequency bands for choroidal artery vein segmentation.")
-            choroidal_artery_mask, choroidal_vein_mask, choroidal_aliased_artery_mask = self.get_masks_treshold(ctx)
+            choroidal_artery_mask, choroidal_vein_mask, choroidal_aliased_artery_mask = self.get_masks_threshold(ctx)
         else:
             raise ValueError(f"Unknown ChoroidalSegmentationMethod: {segmentation_method}")
 

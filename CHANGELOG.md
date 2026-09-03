@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.9.0
+* Add new choroid artery/vein segmentation method, based on the clustering of labeled branches' signals
+
 ## 1.8.0
 * Introduce a shared model executor following an execution policy, to ensure that parallelization libraries (OpenCV, scipy), models and concurrent DAG steps don't over-use threads
 * Ensure DAG determinism

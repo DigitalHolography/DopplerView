@@ -1244,32 +1244,3 @@ def assign_corr_stack_to_av(corr_stack, cluster_labels, labeled_vessels, negativ
         )
 
     return artery_mask, vein_mask, mask_labels
-
-
-def correlation_stack_per_pixel(pre_artery_mask, video_list, labeled_vessels, include_std=False):
-    with warnings.catch_warnings(record=True) as w:
-        pre_artery_mask = pre_artery_mask.astype(bool)
-        pre_signal = signal_processing.get_pulse_from_mask(video_list[0], pre_artery_mask)
-        l = len(video_list)*2 if include_std else len(video_list)
-        branch_ids = np.unique(labeled_vessels)
-        branch_ids = branch_ids[branch_ids > 0]
-        n_branches = len(branch_ids)
-        correlations = np.zeros((n_branches, l))
-        for i in range(len(video_list)):
-            video = video_list[i]
-            correlation = signal_processing.compute_correlation(video, pre_signal)
-            for branch_index, vessel_id in enumerate(branch_ids):
-                vessel_mask = labeled_vessels == vessel_id
-                vessel_correlation = correlation[vessel_mask]
-                avg = np.nanmean(vessel_correlation)
-                if w != []:
-                    print(f"Warning: {w[-1].message}")
-                    print(f"Vessel ID: {vessel_id}, Video Index: {i}, Average Correlation: {avg}")
-                    w = []
-                if include_std:
-                    std = np.std(vessel_correlation)
-                    correlations[branch_index, i*2] = avg
-                    correlations[branch_index, i*2 + 1] = std
-                else:
-                    correlations[branch_index, i] = avg
-        return correlations

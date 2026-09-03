@@ -61,7 +61,7 @@ def test_run_benchmark_extracts_only_present_branch_ids(monkeypatch, tmp_path):
 def test_pipeline_rejects_signal_rows_not_matching_present_branches():
     labeled = np.array([[2, 0], [0, 5]])
     with pytest.raises(ValueError, match="one row per labeled branch"):
-        benchmark.run_clustering_pipeline(
+        clustering.run_clustering_pipeline(
             signals=np.ones((5, 8)),
             labeled_vessels=labeled,
             sampling_frequency=40,
@@ -75,7 +75,7 @@ def test_pipeline_rejects_signal_rows_not_matching_present_branches():
 def test_pipeline_rejects_wrong_number_of_cluster_labels():
     labeled = np.array([[2, 0], [0, 5]])
     with pytest.raises(ValueError, match="one label per branch"):
-        benchmark.run_clustering_pipeline(
+        clustering.run_clustering_pipeline(
             signals=np.ones((2, 8)),
             labeled_vessels=labeled,
             sampling_frequency=40,

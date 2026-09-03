@@ -49,7 +49,12 @@ def normalize_image(image_array, min_val=0, max_val=1):
     Returns:
         Normalized image array with values in the range [0, 1]
     """
-    return (image_array - image_array.min()) / (image_array.max() - image_array.min() + 1e-8)
+    xmin, xmax = image_array.min(), image_array.max()
+
+    if xmax == xmin:
+        return np.full_like(image_array, (min_val + max_val) / 2, dtype=float)
+
+    return min_val + (image_array - xmin) * (max_val - min_val) / (xmax - xmin)
 
 def normalize_to_uint8(arr):
     if arr.dtype == bool:

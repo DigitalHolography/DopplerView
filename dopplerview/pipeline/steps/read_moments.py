@@ -52,7 +52,7 @@ class ReadMomentsStep(BaseStep):
                 self.logger.info("    - Reading the LF_M0 and HF_M0 data")
                 bands = read_bands(f, generic_band_names=["LF_M0", "HF_M0"])
                 if len(bands) < 2:
-                    self.logger.info(f"Warning: {len(bands)} found in the HDF5 file. Expected at least 2 bands.")
+                    self.logger.warning(f"{len(bands)} found in the HDF5 file. Expected at least 2 bands.")
                 else:
                     self.logger.info(f"    - Using {bands[0][0]} as LF_M0 and {bands[1][0]} as HF_M0")
                     LF_M0 = np.squeeze(np.asarray(bands[0][1]))
@@ -63,12 +63,12 @@ class ReadMomentsStep(BaseStep):
                     lf_low, lf_high = map(int, bands[0][0].split("_")[-2:])
                     hf_low, hf_high = map(int, bands[1][0].split("_")[-2:])
                     if lf_high > 9000:
-                        self.logger.info(f"Warning: LF_M0 band has a high frequency of {lf_high} Hz, which is above the expected threshold of 9 kHz. Choroid segmentation may not work properly.")
+                        self.logger.warning(f"LF_M0 band has a high frequency of {lf_high} Hz, which is above the expected threshold of 9 kHz. Choroid segmentation may not work properly.")
                     if hf_low < 16000:
-                        self.logger.info(f"Warning: HF_M0 band has a low frequency of {hf_low} Hz, which is below the expected threshold of 16 kHz. Choroid segmentation may not work properly.")
+                        self.logger.warning(f"HF_M0 band has a low frequency of {hf_low} Hz, which is below the expected threshold of 16 kHz. Choroid segmentation may not work properly.")
 
         except Exception as e:
-            self.logger.info(f"ID: {type(e).__name__}")
+            self.logger.error(f"ID: {type(e).__name__}")
             raise
 
         return M0, M1, M2, LF_M0, HF_M0

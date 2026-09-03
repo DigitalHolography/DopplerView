@@ -30,6 +30,31 @@ def gmm_cluster(X, n_clusters=2):
     ).fit(X).predict(X)
 
 
+def correlation_clustering(corr_stacks, thresholds=[0,0]):
+    """
+    Cluster correlation stacks based on a threshold for each axis.
+
+    Parameters
+    ----------
+    corr_stacks : ndarray, shape (n_samples, n_features)
+        Correlation stacks for each sample.
+    thresholds : list of float
+        Thresholds for clustering. If a sample's correlation stack is below the threshold for a given axis, it is assigned to one cluster; otherwise, it is assigned to another cluster.
+
+    Returns
+    -------
+    cluster_labels : ndarray, shape (n_samples,)
+        Cluster labels for each sample.
+    """
+    cluster_labels = np.zeros(corr_stacks.shape[0], dtype=int)
+    for i in range(corr_stacks.shape[0]):
+        if all(corr_stacks[i] < thresholds):
+            cluster_labels[i] = 0
+        else:
+            cluster_labels[i] = 1
+    return cluster_labels
+
+
 @dataclass
 class ClusteringResult:
     templates: np.ndarray
