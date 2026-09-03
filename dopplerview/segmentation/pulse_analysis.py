@@ -1222,7 +1222,7 @@ def assign_corr_stack_to_av(corr_stack, cluster_labels, labeled_vessels, negativ
     correlation0 = np.median(corr_stack[cluster0], axis=0)
     correlation1 = np.median(corr_stack[cluster1], axis=0)
 
-    if np.max(correlation0) > np.max(correlation1):
+    if np.mean(correlation0) > np.mean(correlation1):
         artery_mask = np.zeros_like(labeled_vessels, dtype=bool)
         vein_mask = np.zeros_like(labeled_vessels, dtype=bool)
         artery_mask[np.isin(labeled_vessels, cluster0 + 1)] = True

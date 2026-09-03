@@ -225,7 +225,6 @@ class ChoroidalAVSegmentationStep(BaseStep):
 
         corr_stacks_2bands_pixel = pa.correlation_stack_per_pixel(retinal_artery_mask, [HF_M0_ff, LF_M0_ff], pseudo_labeled_veins_choroid, include_std=False)
         agglo_2 = partial(clustering.agglomerative_cluster, n_clusters=2)
-        component_names = ["HF_M0 correlation", "LF_M0 correlation"]
 
         result_correlation_2bands_choroid = clustering.run_clustering_pipeline(
             corr_stacks_2bands_pixel,
@@ -241,7 +240,7 @@ class ChoroidalAVSegmentationStep(BaseStep):
 
         choroid_aliased_artery_mask, choroid_vein_mask, mask_labels = pa.assign_corr_stack_to_av(result_correlation_2bands_choroid.X, result_correlation_2bands_choroid.cluster_labels, pseudo_labeled_veins_choroid, negative=True)
         result_correlation_2bands_choroid.artery_mask, result_correlation_2bands_choroid.vein_mask, result_correlation_2bands_choroid.mask_labels = choroid_aliased_artery_mask, choroid_vein_mask, mask_labels
-        ctx.output_manager.save_overlay(self.name, "clusterization_choroid_fourier_embedding", ctx.require("M0_ff_image_cleaned"), [choroid_aliased_artery_mask, choroid_vein_mask], colors=[(255, 0, 0), (0, 0, 255)])
+        ctx.output_manager.save_overlay(self.name, "clusterization_choroid_correlation", ctx.require("M0_ff_image_cleaned"), [choroid_aliased_artery_mask, choroid_vein_mask], colors=[(255, 0, 0), (0, 0, 255)])
 
         return choroid_artery_mask, choroid_vein_mask, choroid_aliased_artery_mask
 

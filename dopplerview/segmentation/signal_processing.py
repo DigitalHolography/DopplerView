@@ -190,7 +190,16 @@ def interpolate_outliers(video, signal, artery_mask, sampling_frequency):
     signal_filtered = get_filtered_pulse(signal, sampling_frequency=sampling_frequency)
     return video, signal_filtered
 
-def compute_correlation(video, signal):
+def normalize(x, low=-1, high=1):
+    x = np.asarray(x)
+    xmin, xmax = x.min(), x.max()
+
+    if xmax == xmin:
+        return np.full_like(x, (low + high) / 2, dtype=float)
+
+    return low + (x - xmin) * (high - low) / (xmax - xmin)
+
+def compute_correlation(video, signal, normalization_interval = [-1, 1]):
     """
     Compute the zero-lag correlation between the video signal and the average signal in the mask.
 
@@ -268,6 +277,8 @@ def compute_correlation(video, signal):
     defined = (counts >= 2) & (denominator > np.finfo(float).eps)
     correlation[defined] = covariance[defined] / denominator[defined]
     correlation[defined] = np.clip(correlation[defined], -1, 1)
+    if normalization_interval is not None:
+        correlation = normalize(correlation, low=normalization_interval[0], high=normalization_interval[1])
     return correlation
 
 def correlate_signal(signal, reference_signal):

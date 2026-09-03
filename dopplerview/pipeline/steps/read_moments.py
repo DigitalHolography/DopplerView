@@ -58,6 +58,15 @@ class ReadMomentsStep(BaseStep):
                     LF_M0 = np.squeeze(np.asarray(bands[0][1]))
                     HF_M0 = np.squeeze(np.asarray(bands[1][1]))
 
+                    # band name has the form band_low_high, e.g., band_0_1000, band_1000_2000, etc.
+                    # extract the low and high frequencies from the band names
+                    lf_low, lf_high = map(int, bands[0][0].split("_")[-2:])
+                    hf_low, hf_high = map(int, bands[1][0].split("_")[-2:])
+                    if lf_high > 9000:
+                        self.logger.info(f"Warning: LF_M0 band has a high frequency of {lf_high} Hz, which is above the expected threshold of 9 kHz. Choroid segmentation may not work properly.")
+                    if hf_low < 16000:
+                        self.logger.info(f"Warning: HF_M0 band has a low frequency of {hf_low} Hz, which is below the expected threshold of 16 kHz. Choroid segmentation may not work properly.")
+
         except Exception as e:
             self.logger.info(f"ID: {type(e).__name__}")
             raise

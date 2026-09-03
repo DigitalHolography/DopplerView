@@ -131,8 +131,8 @@ class ChoroidalVesselSegmentationStep(VesselSegmentationStep):
         vessel_mask = self.frangi_segmentation(ctx)
         retinal_vessel_mask = ctx.require("retinal_vessel_mask")
 
-        choroidal_vessel_mask = vessel_mask & ~retinal_vessel_mask
-        return choroidal_vessel_mask
+        # choroidal_vessel_mask = vessel_mask & ~retinal_vessel_mask
+        return vessel_mask
     
     def run(self, ctx):
         # ---- Segmentation ----
