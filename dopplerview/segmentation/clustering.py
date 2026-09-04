@@ -1,3 +1,4 @@
+import heapq
 import inspect
 from dataclasses import dataclass
 from typing import Optional
@@ -126,6 +127,108 @@ def agglomerative_cluster(X, n_clusters=2):
     return AgglomerativeClustering(
         n_clusters=n_clusters
     ).fit_predict(X)
+
+
+def weighted_agglomerative_cluster(
+    X,
+    n_clusters=2,
+    *,
+    sample_weight=None,
+    max_merge_cost=None,
+    robust_scale=False,
+    clip_quantiles=None,
+):
+    """Weighted Ward agglomeration with an optional merge-cost cutoff.
+
+    The Ward cost of merging clusters A and B is the increase in weighted
+    within-cluster squared error::
+
+        weight_A * weight_B / (weight_A + weight_B) * ||mean_A - mean_B||²
+
+    Specify either ``n_clusters`` or ``max_merge_cost``. The latter avoids
+    fixing the final number of clusters, but its scale depends on the embedding,
+    preprocessing, and normalized branch weights.
+    """
+    X = prepare_clustering_features(
+        X,
+        robust_scale=robust_scale,
+        clip_quantiles=clip_quantiles,
+    )
+    sample_weight = _validated_sample_weight(sample_weight, len(X))
+    weights = np.ones(len(X), dtype=float) if sample_weight is None else sample_weight
+
+    if max_merge_cost is not None:
+        if n_clusters is not None:
+            raise ValueError("specify n_clusters or max_merge_cost, not both")
+        if not np.isfinite(max_merge_cost) or max_merge_cost < 0:
+            raise ValueError("max_merge_cost must be finite and non-negative")
+    else:
+        if not isinstance(n_clusters, (int, np.integer)):
+            raise ValueError("n_clusters must be an integer")
+        if not 1 <= n_clusters <= len(X):
+            raise ValueError("n_clusters must lie between 1 and the sample count")
+
+    cluster_weights = {index: weights[index] for index in range(len(X))}
+    centroids = {index: X[index].copy() for index in range(len(X))}
+    members = {index: [index] for index in range(len(X))}
+    active = set(range(len(X)))
+    merge_heap = []
+
+    def ward_cost(left, right):
+        left_weight = cluster_weights[left]
+        right_weight = cluster_weights[right]
+        difference = centroids[left] - centroids[right]
+        return float(
+            left_weight
+            * right_weight
+            / (left_weight + right_weight)
+            * np.dot(difference, difference)
+        )
+
+    for left in range(len(X)):
+        for right in range(left + 1, len(X)):
+            heapq.heappush(merge_heap, (ward_cost(left, right), left, right))
+
+    next_cluster_id = len(X)
+    target_count = n_clusters if max_merge_cost is None else 1
+    while len(active) > target_count:
+        while merge_heap:
+            cost, left, right = heapq.heappop(merge_heap)
+            if left in active and right in active:
+                break
+        else:
+            break
+        if max_merge_cost is not None and cost > max_merge_cost:
+            break
+
+        merged_weight = cluster_weights[left] + cluster_weights[right]
+        merged_centroid = (
+            cluster_weights[left] * centroids[left]
+            + cluster_weights[right] * centroids[right]
+        ) / merged_weight
+        active.remove(left)
+        active.remove(right)
+        merged = next_cluster_id
+        next_cluster_id += 1
+        cluster_weights[merged] = merged_weight
+        centroids[merged] = merged_centroid
+        members[merged] = members[left] + members[right]
+        active.add(merged)
+
+        for other in active:
+            if other == merged:
+                continue
+            first, second = sorted((merged, other))
+            heapq.heappush(
+                merge_heap,
+                (ward_cost(first, second), first, second),
+            )
+
+    labels = np.empty(len(X), dtype=int)
+    ordered_clusters = sorted(active, key=lambda cluster: min(members[cluster]))
+    for label_id, cluster_id in enumerate(ordered_clusters):
+        labels[members[cluster_id]] = label_id
+    return labels
 
 
 def gmm_cluster(X, n_clusters=2):

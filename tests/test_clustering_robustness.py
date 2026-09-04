@@ -1,7 +1,60 @@
 import numpy as np
 import pytest
+from sklearn.metrics import adjusted_rand_score
 
 from dopplerview.segmentation import clustering
+
+
+def test_weighted_agglomerative_with_uniform_weights_matches_ward_partition():
+    X = np.array([[0.0], [0.2], [5.0], [5.2]])
+
+    expected = clustering.agglomerative_cluster(X, n_clusters=2)
+    actual = clustering.weighted_agglomerative_cluster(
+        X,
+        n_clusters=2,
+        sample_weight=np.ones(len(X)),
+    )
+
+    assert adjusted_rand_score(expected, actual) == 1.0
+
+
+def test_weighted_agglomerative_weights_change_the_merge_tree():
+    X = np.array([[0.0], [4.0], [5.0], [9.0]])
+
+    unweighted = clustering.weighted_agglomerative_cluster(X, n_clusters=2)
+    weighted = clustering.weighted_agglomerative_cluster(
+        X,
+        n_clusters=2,
+        sample_weight=np.array([10.0, 1.0, 1.0, 1.0]),
+    )
+
+    assert unweighted[0] == unweighted[1] == unweighted[2]
+    assert unweighted[3] != unweighted[0]
+    assert weighted[1] == weighted[2] == weighted[3]
+    assert weighted[0] != weighted[1]
+
+
+def test_weighted_agglomerative_merge_cost_can_infer_cluster_count():
+    X = np.array([[0.0], [0.1], [5.0], [5.1]])
+
+    labels = clustering.weighted_agglomerative_cluster(
+        X,
+        n_clusters=None,
+        max_merge_cost=0.01,
+    )
+
+    assert labels[0] == labels[1]
+    assert labels[2] == labels[3]
+    assert labels[0] != labels[2]
+
+
+def test_weighted_agglomerative_rejects_two_stopping_rules():
+    with pytest.raises(ValueError, match="n_clusters or max_merge_cost"):
+        clustering.weighted_agglomerative_cluster(
+            np.array([[0.0], [1.0]]),
+            n_clusters=2,
+            max_merge_cost=1.0,
+        )
 
 
 def test_branch_size_weights_follow_present_ids_and_sqrt_area():
