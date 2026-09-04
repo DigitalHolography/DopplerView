@@ -81,8 +81,10 @@ def project(X, use_pca=False, component_names=None, project_dim=None):
     
     return X_plot, xlabel, ylabel, zlabel
 
-def plot(ax, X_plot, labels, xlabel=None, ylabel=None, zlabel=None, title=None, label_names=None, colors=["tab:grey", "tab:red", "tab:blue", "tab:purple", "tab:green", "tab:orange", "tab:brown", "tab:pink", "tab:olive", "tab:cyan"]):
+def plot(ax, X_plot, labels, xlabel=None, ylabel=None, zlabel=None, title=None, label_names=None, ignore_labels=[0], colors=["tab:grey", "tab:red", "tab:blue", "tab:purple", "tab:green", "tab:orange", "tab:brown", "tab:pink", "tab:olive", "tab:cyan"]):
     for lab in np.unique(labels):
+        if lab in ignore_labels:
+            continue
         idx = labels == lab
 
         ax.scatter(
@@ -107,7 +109,7 @@ def plot(ax, X_plot, labels, xlabel=None, ylabel=None, zlabel=None, title=None, 
     ax.grid(alpha=0.3)
     return ax
 
-def plot_clustering(X, labels, title=None, use_pca=False, gt_labels=None, label_names=None, component_names=None, project_dim=None, colors=["tab:grey", "tab:red", "tab:blue", "tab:purple", "tab:green", "tab:orange", "tab:brown", "tab:pink", "tab:olive", "tab:cyan"]):
+def plot_clustering(X, labels, title=None, use_pca=False, gt_labels=None, label_names=None, component_names=None, project_dim=None, ignore_labels=[0], colors=["tab:grey", "tab:red", "tab:blue", "tab:purple", "tab:green", "tab:orange", "tab:brown", "tab:pink", "tab:olive", "tab:cyan"]):
     """
     Visualize clustering results for arbitrary feature dimensions.
 
@@ -139,7 +141,7 @@ def plot_clustering(X, labels, title=None, use_pca=False, gt_labels=None, label_
     fig=plt.figure(figsize=(13, 6)) if gt_labels is not None else plt.figure(figsize=(6, 6))
     subplot_args = 121 if gt_labels is not None else 111
     ax = fig.add_subplot(subplot_args, projection="3d") if X_plot.shape[1] == 3 else fig.add_subplot(subplot_args)
-    plot(ax, X_plot, labels, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel, title=title, colors=colors)
+    plot(ax, X_plot, labels, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel, title=title, ignore_labels=ignore_labels, colors=colors)
     if gt_labels is not None:
         gt_labels = np.asarray(gt_labels)
         ax_gt = fig.add_subplot(122, projection="3d") if X_plot.shape[1] == 3 else fig.add_subplot(122)
