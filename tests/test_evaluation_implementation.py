@@ -236,6 +236,20 @@ def test_evaluate_experiment_rejects_one_complete_mask_without_the_other():
         )
 
 
+def test_intrinsic_metrics_exclude_noise_and_report_abstention():
+    result = SimpleNamespace(
+        X=np.array([[0.0], [0.1], [5.0], [5.1], [100.0]]),
+        cluster_labels=np.array([0, 0, 1, 1, -1]),
+    )
+
+    metrics = evaluation.evaluate_experiment(result, decimals=None)
+
+    assert metrics["cluster_count"] == 2
+    assert metrics["noise_count"] == 1
+    assert metrics["noise_fraction"] == 0.2
+    assert metrics["silhouette"] > 0.9
+
+
 def test_correlation_assignment_uses_noncontiguous_branch_ids():
     labeled = np.array([[2, 2, 0], [0, 5, 5]])
     artery, vein, labels = evaluation.assign_clusters_to_correlation_stack(

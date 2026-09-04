@@ -1,33 +1,323 @@
-from sklearn.cluster import KMeans
-from sklearn.cluster import AgglomerativeClustering
-from sklearn.mixture import GaussianMixture
+import inspect
 from dataclasses import dataclass
-from typing import Callable
+from typing import Optional
 
 import numpy as np
+from sklearn.cluster import AgglomerativeClustering, KMeans
+from sklearn.mixture import BayesianGaussianMixture, GaussianMixture
+from sklearn.preprocessing import RobustScaler
+
 import dopplerview.segmentation.pulse_analysis as pa
 
-def kmeans_cluster(X, n_clusters=2):
-    return KMeans(
+try:
+    from sklearn.cluster import HDBSCAN
+except ImportError:  # HDBSCAN was added to scikit-learn in version 1.3.
+    HDBSCAN = None
+
+
+def _validated_features(X):
+    X = np.asarray(X, dtype=float)
+    if X.ndim != 2:
+        raise ValueError("X must be a two-dimensional feature matrix")
+    if len(X) < 2:
+        raise ValueError("X must contain at least two samples")
+    if not np.all(np.isfinite(X)):
+        raise ValueError("X must contain only finite values")
+    return X
+
+
+def _validated_sample_weight(sample_weight, n_samples):
+    if sample_weight is None:
+        return None
+    sample_weight = np.asarray(sample_weight, dtype=float)
+    if sample_weight.shape != (n_samples,):
+        raise ValueError("sample_weight must contain exactly one value per sample")
+    if not np.all(np.isfinite(sample_weight)) or np.any(sample_weight <= 0):
+        raise ValueError("sample_weight values must be finite and strictly positive")
+    return sample_weight
+
+
+def prepare_clustering_features(
+    X,
+    *,
+    robust_scale=False,
+    clip_quantiles=None,
+):
+    """Optionally winsorize and robustly scale an embedding.
+
+    Feature-wise processing is useful for heterogeneous correlation features, but
+    should be disabled for embeddings whose geometry must remain isotropic (for
+    example paired sine/cosine Fourier coordinates).
+    """
+    X = _validated_features(X).copy()
+    if clip_quantiles is not None:
+        if len(clip_quantiles) != 2:
+            raise ValueError("clip_quantiles must contain a lower and upper quantile")
+        low, high = clip_quantiles
+        if not 0 <= low < high <= 1:
+            raise ValueError("clip_quantiles must be increasing values in [0, 1]")
+        bounds_low, bounds_high = np.quantile(X, (low, high), axis=0)
+        X = np.clip(X, bounds_low, bounds_high)
+    if robust_scale:
+        X = RobustScaler(quantile_range=(25.0, 75.0)).fit_transform(X)
+    return X
+
+
+def branch_size_weights(
+    labeled_vessels,
+    *,
+    mode="sqrt_area",
+    clip_quantiles=(0.05, 0.95),
+    normalize=True,
+):
+    """Return one branch weight in ascending positive branch-ID order.
+
+    ``sqrt_area`` reduces the variance of mean signals from tiny branches without
+    letting a very large trunk dominate as strongly as raw pixel area would.
+    """
+    labeled_vessels = np.asarray(labeled_vessels)
+    if labeled_vessels.ndim != 2 or not np.issubdtype(labeled_vessels.dtype, np.integer):
+        raise ValueError("labeled_vessels must be a two-dimensional integer label image")
+    branch_ids, counts = np.unique(labeled_vessels, return_counts=True)
+    counts = counts[branch_ids > 0].astype(float)
+    branch_ids = branch_ids[branch_ids > 0]
+    if not len(branch_ids):
+        raise ValueError("labeled_vessels does not contain a positive branch ID")
+
+    if mode == "uniform":
+        weights = np.ones_like(counts)
+    elif mode == "area":
+        weights = counts
+    elif mode == "sqrt_area":
+        weights = np.sqrt(counts)
+    elif mode == "log_area":
+        weights = np.log1p(counts)
+    else:
+        raise ValueError("mode must be uniform, area, sqrt_area, or log_area")
+
+    if clip_quantiles is not None and len(weights) > 1:
+        if len(clip_quantiles) != 2:
+            raise ValueError("clip_quantiles must contain two values")
+        low, high = clip_quantiles
+        if not 0 <= low <= high <= 1:
+            raise ValueError("clip_quantiles must be ordered values in [0, 1]")
+        lower, upper = np.quantile(weights, (low, high))
+        weights = np.clip(weights, lower, upper)
+    if normalize:
+        weights = weights / np.mean(weights)
+    return weights
+
+
+def kmeans_cluster(X, n_clusters=2, sample_weight=None):
+    X = _validated_features(X)
+    sample_weight = _validated_sample_weight(sample_weight, len(X))
+    model = KMeans(
         n_clusters=n_clusters,
         init="k-means++",
         n_init=20,
         random_state=0,
         algorithm="lloyd",
-    ).fit_predict(X)
+    )
+    return model.fit(X, sample_weight=sample_weight).labels_
 
 
 def agglomerative_cluster(X, n_clusters=2):
+    X = _validated_features(X)
     return AgglomerativeClustering(
         n_clusters=n_clusters
     ).fit_predict(X)
 
 
 def gmm_cluster(X, n_clusters=2):
+    X = _validated_features(X)
     return GaussianMixture(
         n_components=n_clusters,
         random_state=0
     ).fit(X).predict(X)
+
+
+def trimmed_kmeans_cluster(
+    X,
+    n_clusters=2,
+    *,
+    trim_fraction=0.05,
+    sample_weight=None,
+    robust_scale=False,
+    clip_quantiles=None,
+    max_trim_iterations=20,
+    n_init=20,
+    random_state=0,
+):
+    """Weighted K-means that labels the farthest samples as noise (``-1``)."""
+    X = prepare_clustering_features(
+        X,
+        robust_scale=robust_scale,
+        clip_quantiles=clip_quantiles,
+    )
+    sample_weight = _validated_sample_weight(sample_weight, len(X))
+    if not 0 <= trim_fraction < 1:
+        raise ValueError("trim_fraction must lie in [0, 1)")
+    trim_count = int(np.floor(trim_fraction * len(X)))
+    retained_count = len(X) - trim_count
+    if retained_count < n_clusters:
+        raise ValueError("trim_fraction leaves fewer samples than clusters")
+    if not isinstance(max_trim_iterations, (int, np.integer)) or max_trim_iterations < 1:
+        raise ValueError("max_trim_iterations must be a positive integer")
+    if not isinstance(n_init, (int, np.integer)) or n_init < 1:
+        raise ValueError("n_init must be a positive integer")
+    if not isinstance(n_clusters, (int, np.integer)) or not 1 <= n_clusters <= retained_count:
+        raise ValueError("n_clusters must be between 1 and the retained sample count")
+
+    weights = np.ones(len(X)) if sample_weight is None else sample_weight
+    if trim_count == 0:
+        return KMeans(
+            n_clusters=n_clusters,
+            init="k-means++",
+            n_init=n_init,
+            random_state=random_state,
+            algorithm="lloyd",
+        ).fit(X, sample_weight=weights).labels_
+
+    rng = np.random.default_rng(random_state)
+    best_objective = np.inf
+    best_labels = None
+    best_retained = None
+
+    for _ in range(n_init):
+        centers = X[rng.choice(len(X), size=n_clusters, replace=False)].copy()
+        retained = np.ones(len(X), dtype=bool)
+
+        for _ in range(max_trim_iterations):
+            squared_distances = np.sum(
+                (X[:, None, :] - centers[None, :, :]) ** 2,
+                axis=2,
+            )
+            labels = np.argmin(squared_distances, axis=1)
+            residuals = squared_distances[np.arange(len(X)), labels]
+            next_retained = np.zeros(len(X), dtype=bool)
+            retained_indices = np.argsort(residuals, kind="stable")[:retained_count]
+            next_retained[retained_indices] = True
+
+            next_centers = centers.copy()
+            valid = True
+            for cluster_id in range(n_clusters):
+                members = next_retained & (labels == cluster_id)
+                if not np.any(members):
+                    valid = False
+                    break
+                next_centers[cluster_id] = np.average(
+                    X[members],
+                    axis=0,
+                    weights=weights[members],
+                )
+            if not valid:
+                break
+            converged = np.array_equal(next_retained, retained) and np.allclose(
+                next_centers,
+                centers,
+            )
+            retained = next_retained
+            centers = next_centers
+            if converged:
+                break
+        else:
+            valid = True
+
+        if not valid:
+            continue
+        squared_distances = np.sum(
+            (X[:, None, :] - centers[None, :, :]) ** 2,
+            axis=2,
+        )
+        labels = np.argmin(squared_distances, axis=1)
+        residuals = squared_distances[np.arange(len(X)), labels]
+        objective = float(np.sum(weights[retained] * residuals[retained]))
+        if objective < best_objective:
+            best_objective = objective
+            best_labels = labels.copy()
+            best_retained = retained.copy()
+
+    if best_labels is None:
+        raise RuntimeError("trimmed K-means could not initialize every cluster")
+    best_labels = best_labels.astype(int)
+    best_labels[~best_retained] = -1
+    return best_labels
+
+
+def hdbscan_cluster(
+    X,
+    *,
+    min_cluster_size=5,
+    min_samples=None,
+    cluster_selection_epsilon=0.0,
+    robust_scale=False,
+    clip_quantiles=None,
+    allow_single_cluster=False,
+):
+    """Infer density-based clusters and retain uncertain branches as noise."""
+    if HDBSCAN is None:
+        raise ImportError("hdbscan_cluster requires scikit-learn >= 1.3")
+    X = prepare_clustering_features(
+        X,
+        robust_scale=robust_scale,
+        clip_quantiles=clip_quantiles,
+    )
+    parameters = {
+        "min_cluster_size": min_cluster_size,
+        "min_samples": min_samples,
+        "cluster_selection_epsilon": cluster_selection_epsilon,
+        "allow_single_cluster": allow_single_cluster,
+    }
+    if "copy" in inspect.signature(HDBSCAN).parameters:
+        parameters["copy"] = False
+    return HDBSCAN(
+        **parameters,
+    ).fit_predict(X)
+
+
+def bayesian_gmm_cluster(
+    X,
+    *,
+    max_components=6,
+    min_component_weight=0.02,
+    weight_concentration_prior=0.1,
+    covariance_type="full",
+    robust_scale=False,
+    clip_quantiles=None,
+    random_state=0,
+):
+    """Infer an effective component count below ``max_components``.
+
+    Samples assigned to posterior components below ``min_component_weight`` are
+    labeled as noise. This is a finite variational approximation, not proof of the
+    true physiological class count.
+    """
+    X = prepare_clustering_features(
+        X,
+        robust_scale=robust_scale,
+        clip_quantiles=clip_quantiles,
+    )
+    if not isinstance(max_components, (int, np.integer)) or max_components < 1:
+        raise ValueError("max_components must be a positive integer")
+    if not 0 <= min_component_weight < 1:
+        raise ValueError("min_component_weight must lie in [0, 1)")
+    n_components = min(max_components, len(X))
+    model = BayesianGaussianMixture(
+        n_components=n_components,
+        covariance_type=covariance_type,
+        weight_concentration_prior_type="dirichlet_process",
+        weight_concentration_prior=weight_concentration_prior,
+        n_init=5,
+        max_iter=1000,
+        random_state=random_state,
+    ).fit(X)
+    original_labels = model.predict(X)
+    active_components = np.flatnonzero(model.weights_ >= min_component_weight)
+    mapping = {component: index for index, component in enumerate(active_components)}
+    return np.array(
+        [mapping.get(component, -1) for component in original_labels],
+        dtype=int,
+    )
 
 
 def correlation_clustering(corr_stacks, thresholds=[0,0]):
@@ -68,6 +358,32 @@ class ClusteringResult:
     artery_mask: np.ndarray
     vein_mask: np.ndarray
 
+    branch_ids: Optional[np.ndarray] = None
+    sample_weight: Optional[np.ndarray] = None
+    outlier_mask: Optional[np.ndarray] = None
+
+
+def _cluster_with_optional_weights(clustering_func, X, sample_weight):
+    if sample_weight is None:
+        return clustering_func(X)
+    try:
+        parameters = inspect.signature(clustering_func).parameters.values()
+    except (TypeError, ValueError) as error:
+        raise TypeError(
+            "cannot determine whether clustering_func supports sample_weight"
+        ) from error
+    supports_weights = any(
+        parameter.name == "sample_weight"
+        or parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters
+    )
+    if not supports_weights:
+        raise TypeError(
+            "branch weights were requested, but clustering_func does not accept "
+            "sample_weight"
+        )
+    return clustering_func(X, sample_weight=sample_weight)
+
 def run_clustering_pipeline(
     signals,
     labeled_vessels,
@@ -77,7 +393,11 @@ def run_clustering_pipeline(
     video,
     correct_signals=False,
     beat_period=None,
-    assign_to_av=True
+    assign_to_av=True,
+    sample_weight=None,
+    branch_weight_mode=None,
+    branch_weight_clip_quantiles=(0.05, 0.95),
+    noise_policy="error",
 ):
     """
     Complete clustering pipeline.
@@ -108,6 +428,17 @@ def run_clustering_pipeline(
     branch_ids = branch_ids[branch_ids > 0]
     if len(signals) != len(branch_ids):
         raise ValueError("signals must contain exactly one row per labeled branch")
+    if sample_weight is not None and branch_weight_mode is not None:
+        raise ValueError("provide sample_weight or branch_weight_mode, not both")
+    if branch_weight_mode is not None:
+        sample_weight = branch_size_weights(
+            labeled_vessels,
+            mode=branch_weight_mode,
+            clip_quantiles=branch_weight_clip_quantiles,
+        )
+    sample_weight = _validated_sample_weight(sample_weight, len(branch_ids))
+    if noise_policy not in {"error", "unassigned"}:
+        raise ValueError("noise_policy must be 'error' or 'unassigned'")
 
     if embedding_func is not None:
         if correct_signals:
@@ -156,21 +487,60 @@ def run_clustering_pipeline(
         templates = None
         periods = np.asarray([beat_period] * len(signals))
 
-    cluster_labels = clustering_func(X)
+    cluster_labels = _cluster_with_optional_weights(
+        clustering_func,
+        X,
+        sample_weight,
+    )
     cluster_labels = np.asarray(cluster_labels)
     if cluster_labels.ndim != 1 or len(cluster_labels) != len(branch_ids):
         raise ValueError("clustering must return exactly one label per branch")
-    if np.unique(cluster_labels).size == 2:
-        cluster_labels = pa.canonicalize_binary_cluster_labels(cluster_labels, X)
+    if not np.issubdtype(cluster_labels.dtype, np.integer):
+        raise ValueError("clustering labels must be integers")
+    outlier_mask = cluster_labels < 0
+    non_outlier_clusters = np.unique(cluster_labels[~outlier_mask])
+    if non_outlier_clusters.size == 2:
+        canonical = pa.canonicalize_binary_cluster_labels(
+            cluster_labels[~outlier_mask],
+            X[~outlier_mask],
+        )
+        cluster_labels = cluster_labels.copy()
+        cluster_labels[~outlier_mask] = canonical
 
     if assign_to_av:
-        (artery_mask, vein_mask, mask_labels,) = pa.assign_clusters_to_av(
-            cluster_labels,
-            video,
-            periods,
-            labeled_vessels,
-            sampling_freq=sampling_frequency
-        )
+        if np.any(outlier_mask) and noise_policy == "error":
+            raise ValueError(
+                "clustering returned noise labels; use noise_policy='unassigned' "
+                "or assign_to_av=False"
+            )
+        if non_outlier_clusters.size != 2:
+            raise ValueError(
+                "artery/vein assignment requires exactly two non-noise clusters"
+            )
+        if np.any(outlier_mask):
+            retained_branch_ids = branch_ids[~outlier_mask]
+            retained_vessels = np.where(
+                np.isin(labeled_vessels, retained_branch_ids),
+                labeled_vessels,
+                0,
+            )
+            artery_mask, vein_mask, retained_mask_labels = pa.assign_clusters_to_av(
+                cluster_labels[~outlier_mask],
+                video,
+                periods[~outlier_mask],
+                retained_vessels,
+                sampling_freq=sampling_frequency,
+            )
+            mask_labels = np.zeros_like(cluster_labels, dtype=int)
+            mask_labels[~outlier_mask] = retained_mask_labels
+        else:
+            artery_mask, vein_mask, mask_labels = pa.assign_clusters_to_av(
+                cluster_labels,
+                video,
+                periods,
+                labeled_vessels,
+                sampling_freq=sampling_frequency,
+            )
     else:
         mask_labels = np.zeros_like(cluster_labels, dtype=int)
         artery_mask = np.zeros_like(labeled_vessels, dtype=bool)
@@ -184,4 +554,7 @@ def run_clustering_pipeline(
         mask_labels=mask_labels,
         artery_mask=artery_mask,
         vein_mask=vein_mask,
+        branch_ids=branch_ids,
+        sample_weight=sample_weight,
+        outlier_mask=outlier_mask,
     )

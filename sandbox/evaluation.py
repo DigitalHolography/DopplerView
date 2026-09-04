@@ -547,20 +547,31 @@ def evaluate_experiment(
         if X.ndim != 2 or len(X) != len(cluster_labels):
             raise ValueError("result.X and cluster_labels must have matching rows")
 
+        assigned = cluster_labels >= 0
+        assigned_labels = cluster_labels[assigned]
+        assigned_X = X[assigned]
+        cluster_count = np.unique(assigned_labels).size
+        noise_count = int(np.count_nonzero(~assigned))
         metrics.update(
             {
+                "cluster_count": int(cluster_count),
+                "noise_count": noise_count,
+                "noise_fraction": noise_count / len(cluster_labels),
                 "silhouette": np.nan,
                 "davies_bouldin": np.nan,
                 "calinski_harabasz": np.nan,
             }
         )
-        cluster_count = np.unique(cluster_labels).size
-        if 1 < cluster_count < len(cluster_labels):
+        if 1 < cluster_count < len(assigned_labels):
             metrics.update(
                 {
-                    "silhouette": silhouette_score(X, cluster_labels),
-                    "davies_bouldin": davies_bouldin_score(X, cluster_labels),
-                    "calinski_harabasz": calinski_harabasz_score(X, cluster_labels),
+                    "silhouette": silhouette_score(assigned_X, assigned_labels),
+                    "davies_bouldin": davies_bouldin_score(
+                        assigned_X, assigned_labels
+                    ),
+                    "calinski_harabasz": calinski_harabasz_score(
+                        assigned_X, assigned_labels
+                    ),
                 }
             )
 
