@@ -1,7 +1,9 @@
 import numpy as np
+import pytest
 
 from sandbox import evaluation
 from dopplerview.segmentation import process_masks, pulse_analysis
+from dopplerview.utils import image_utils
 
 
 def test_branch_signal_rows_follow_present_noncontiguous_ids():
@@ -108,3 +110,28 @@ def test_branch_differences_use_compact_label_order():
 
     assert not np.any(differences[labeled_vessels == 2])
     assert np.all(differences[labeled_vessels == 5] == 5)
+
+
+def test_label_overlay_maps_compact_classes_to_present_branch_ids():
+    image = np.zeros((2, 4), dtype=np.uint8)
+    labeled_vessels = np.array([[2, 2, 0, 0], [0, 5, 5, 0]])
+    overlay = image_utils.overlay_with_labels(
+        image,
+        labeled_vessels,
+        classes=np.array([1, 2]),
+        colors={1: [255, 0, 0], 2: [0, 0, 255]},
+    )
+
+    assert np.all(overlay[labeled_vessels == 2] == [255, 0, 0])
+    assert np.all(overlay[labeled_vessels == 5] == [0, 0, 255])
+    assert np.all(overlay[labeled_vessels == 0] == 0)
+
+
+def test_label_overlay_rejects_incomplete_branch_class_vector():
+    labeled_vessels = np.array([[2, 0], [0, 5]])
+    with pytest.raises(ValueError, match="one value per positive branch ID"):
+        image_utils.overlay_with_labels(
+            np.zeros_like(labeled_vessels),
+            labeled_vessels,
+            classes=np.array([1]),
+        )

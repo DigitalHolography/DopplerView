@@ -102,6 +102,12 @@ def hd95_score(pred, gt, spacing=None):
 
 def exclusive_known_masks(known_positive_masks):
     """Remove pixels annotated as more than one class from incomplete labels."""
+    masks, _, _ = _partition_known_masks(known_positive_masks)
+    return masks
+
+
+def _partition_known_masks(known_positive_masks):
+    """Return exclusive positives, ambiguous pixels, and genuinely unlabeled pixels."""
     if not known_positive_masks:
         raise ValueError("known_positive_masks cannot be empty")
 
@@ -115,7 +121,8 @@ def exclusive_known_masks(known_positive_masks):
 
     overlap_count = np.sum(np.stack(list(masks.values())), axis=0)
     unambiguous = overlap_count == 1
-    return {name: mask & unambiguous for name, mask in masks.items()}
+    exclusive = {name: mask & unambiguous for name, mask in masks.items()}
+    return exclusive, overlap_count > 1, overlap_count == 0
 
 
 def _dilated_skeleton(mask, tolerance):
@@ -137,6 +144,26 @@ def _positive_recall_and_contamination(pred, positive, known_negative):
     return recall, contamination
 
 
+def _known_precision_and_f1(pred, positive, known_negative, recall):
+    """Precision restricted to annotated positives and annotated negatives."""
+    true_positive = np.count_nonzero(pred & positive)
+    known_false_positive = np.count_nonzero(pred & known_negative)
+    precision = _safe_fraction(true_positive, true_positive + known_false_positive)
+    if np.isnan(precision) or np.isnan(recall):
+        f1 = np.nan
+    elif precision + recall == 0:
+        f1 = 0.0
+    else:
+        f1 = 2.0 * precision * recall / (precision + recall)
+    return precision, f1
+
+
+def _nanmean_or_nan(values):
+    values = np.asarray(values, dtype=float)
+    finite = np.isfinite(values)
+    return float(np.mean(values[finite])) if np.any(finite) else np.nan
+
+
 def _branch_sets(masks, labeled_vessels, branch_overlap_threshold):
     branch_ids = np.unique(labeled_vessels)
     branch_ids = branch_ids[branch_ids > 0]
@@ -155,6 +182,7 @@ def evaluate_positive_unlabeled_masks(
     predicted_masks,
     known_positive_masks,
     labeled_vessels=None,
+    evaluation_mask=None,
     skeleton_tolerance=1,
     branch_overlap_threshold=0.5,
 ):
@@ -162,7 +190,10 @@ def evaluate_positive_unlabeled_masks(
 
     For every class, annotated-positive recall measures coverage of that class's
     exclusive annotations. Contamination measures coverage of exclusive annotations
-    belonging to all other classes. Undefined metrics have value ``numpy.nan``.
+    belonging to all other classes. ``known_precision`` is precision restricted to
+    these annotated positive/negative pixels; it is not population precision.
+    ``unlabeled_prediction_rate`` is descriptive, not an error rate. Undefined
+    metrics have value ``numpy.nan``.
     """
     if set(predicted_masks) != set(known_positive_masks):
         raise ValueError("predicted and known-positive masks must use the same classes")
@@ -171,7 +202,9 @@ def evaluate_positive_unlabeled_masks(
     if not 0 < branch_overlap_threshold <= 1:
         raise ValueError("branch_overlap_threshold must lie in (0, 1]")
 
-    known = exclusive_known_masks(known_positive_masks)
+    known, ambiguous_pixels, unlabeled_pixels = _partition_known_masks(
+        known_positive_masks
+    )
     predicted = {
         name: _as_bool_mask(mask, f"predicted_masks[{name!r}]")
         for name, mask in predicted_masks.items()
@@ -180,8 +213,30 @@ def evaluate_positive_unlabeled_masks(
     if any(mask.shape != expected_shape for mask in predicted.values()):
         raise ValueError("predicted and known-positive masks must have the same shape")
 
-    metrics = {}
+    annotated_pixels = ambiguous_pixels | np.any(
+        np.stack(list(known.values())), axis=0
+    )
+    if evaluation_mask is None:
+        if labeled_vessels is None:
+            evaluation_mask = np.ones(expected_shape, dtype=bool)
+        else:
+            labeled_vessels_array = np.asarray(labeled_vessels)
+            if labeled_vessels_array.shape != expected_shape:
+                raise ValueError("labeled_vessels must have the same shape as the masks")
+            evaluation_mask = (labeled_vessels_array > 0) | annotated_pixels
+    else:
+        evaluation_mask = _as_bool_mask(evaluation_mask, "evaluation_mask")
+        if evaluation_mask.shape != expected_shape:
+            raise ValueError("evaluation_mask must have the same shape as the masks")
+        if np.any(annotated_pixels & ~evaluation_mask):
+            raise ValueError("evaluation_mask must include every annotated pixel")
+
+    unlabeled_pixels &= evaluation_mask
+    evaluable_pixels = evaluation_mask & ~ambiguous_pixels
+    metrics = {"evaluation_pixel_count": int(np.count_nonzero(evaluable_pixels))}
+
     for name, pred in predicted.items():
+        pred = pred & evaluation_mask
         positive = known[name]
         other_known_masks = [
             mask for other, mask in known.items() if other != name
@@ -198,6 +253,29 @@ def evaluate_positive_unlabeled_masks(
         )
         metrics[f"positive_recall_{name}"] = recall
         metrics[f"contamination_{name}"] = contamination
+        known_precision, known_f1 = _known_precision_and_f1(
+            pred,
+            positive,
+            known_negative,
+            recall,
+        )
+        metrics[f"known_precision_{name}"] = known_precision
+        metrics[f"known_f1_{name}"] = known_f1
+        metrics[f"unlabeled_prediction_rate_{name}"] = _safe_fraction(
+            np.count_nonzero(pred & unlabeled_pixels),
+            np.count_nonzero(unlabeled_pixels),
+        )
+        metrics[f"prediction_rate_{name}"] = _safe_fraction(
+            np.count_nonzero(pred & evaluable_pixels),
+            np.count_nonzero(evaluable_pixels),
+        )
+        metrics[f"known_positive_count_{name}"] = int(np.count_nonzero(positive))
+        metrics[f"known_negative_count_{name}"] = int(
+            np.count_nonzero(known_negative)
+        )
+        metrics[f"predicted_count_{name}"] = int(
+            np.count_nonzero(pred & evaluable_pixels)
+        )
 
         pred_skeleton = _dilated_skeleton(pred, skeleton_tolerance)
         positive_skeleton = skeletonize(positive)
@@ -211,6 +289,14 @@ def evaluate_positive_unlabeled_masks(
         )
         metrics[f"skeleton_positive_recall_{name}"] = skeleton_recall
         metrics[f"skeleton_contamination_{name}"] = skeleton_contamination
+        skeleton_precision, skeleton_f1 = _known_precision_and_f1(
+            pred_skeleton,
+            positive_skeleton,
+            negative_skeleton,
+            skeleton_recall,
+        )
+        metrics[f"skeleton_known_precision_{name}"] = skeleton_precision
+        metrics[f"skeleton_known_f1_{name}"] = skeleton_f1
 
     if labeled_vessels is not None:
         labeled_vessels = np.asarray(labeled_vessels)
@@ -238,20 +324,88 @@ def evaluate_positive_unlabeled_masks(
         known_branches = {
             name: branches - ambiguous for name, branches in known_branches.items()
         }
+        all_branches = set(int(branch_id) for branch_id in np.unique(labeled_vessels))
+        all_branches.discard(0)
+        known_branch_union = set().union(*known_branches.values())
+        unlabeled_branches = all_branches - known_branch_union - ambiguous
+        evaluable_branches = all_branches - ambiguous
 
         for name, pred_branches in predicted_branches.items():
             positive_branches = known_branches[name]
             negative_branches = set().union(
                 *(branches for other, branches in known_branches.items() if other != name)
             )
-            metrics[f"branch_positive_recall_{name}"] = _safe_fraction(
+            branch_recall = _safe_fraction(
                 len(pred_branches & positive_branches),
                 len(positive_branches),
             )
-            metrics[f"branch_contamination_{name}"] = _safe_fraction(
+            branch_contamination = _safe_fraction(
                 len(pred_branches & negative_branches),
                 len(negative_branches),
             )
+            branch_true_positive = len(pred_branches & positive_branches)
+            branch_known_false_positive = len(pred_branches & negative_branches)
+            branch_precision = _safe_fraction(
+                branch_true_positive,
+                branch_true_positive + branch_known_false_positive,
+            )
+            if np.isnan(branch_precision) or np.isnan(branch_recall):
+                branch_f1 = np.nan
+            elif branch_precision + branch_recall == 0:
+                branch_f1 = 0.0
+            else:
+                branch_f1 = (
+                    2.0
+                    * branch_precision
+                    * branch_recall
+                    / (branch_precision + branch_recall)
+                )
+            metrics[f"branch_positive_recall_{name}"] = branch_recall
+            metrics[f"branch_contamination_{name}"] = branch_contamination
+            metrics[f"branch_known_precision_{name}"] = branch_precision
+            metrics[f"branch_known_f1_{name}"] = branch_f1
+            metrics[f"branch_unlabeled_prediction_rate_{name}"] = _safe_fraction(
+                len(pred_branches & unlabeled_branches),
+                len(unlabeled_branches),
+            )
+            metrics[f"branch_prediction_rate_{name}"] = _safe_fraction(
+                len(pred_branches & evaluable_branches),
+                len(evaluable_branches),
+            )
+            metrics[f"known_positive_branch_count_{name}"] = len(positive_branches)
+            metrics[f"known_negative_branch_count_{name}"] = len(negative_branches)
+            metrics[f"predicted_branch_count_{name}"] = len(
+                pred_branches & evaluable_branches
+            )
+
+    class_names = tuple(predicted)
+    metric_families = [
+        "positive_recall",
+        "contamination",
+        "known_precision",
+        "known_f1",
+        "unlabeled_prediction_rate",
+        "prediction_rate",
+        "skeleton_positive_recall",
+        "skeleton_contamination",
+        "skeleton_known_precision",
+        "skeleton_known_f1",
+    ]
+    if labeled_vessels is not None:
+        metric_families.extend(
+            [
+                "branch_positive_recall",
+                "branch_contamination",
+                "branch_known_precision",
+                "branch_known_f1",
+                "branch_unlabeled_prediction_rate",
+                "branch_prediction_rate",
+            ]
+        )
+    for family in metric_families:
+        metrics[f"{family}_macro"] = _nanmean_or_nan(
+            [metrics[f"{family}_{name}"] for name in class_names]
+        )
 
     return metrics
 
@@ -303,34 +457,7 @@ def _round_metrics(metrics, decimals):
     }
 
 
-def evaluate_experiment(
-    result,
-    gt_branch_labels,
-    gt_artery_mask,
-    gt_vein_mask,
-    decimals=2,
-):
-    """Evaluate clustering, annotated branches, and complete retinal masks."""
-    X = np.asarray(result.X)
-    cluster_labels = np.asarray(result.cluster_labels)
-    if X.ndim != 2 or len(X) != len(cluster_labels):
-        raise ValueError("result.X and cluster_labels must have matching rows")
-
-    metrics = {
-        "silhouette": np.nan,
-        "davies_bouldin": np.nan,
-        "calinski_harabasz": np.nan,
-    }
-    cluster_count = np.unique(cluster_labels).size
-    if 1 < cluster_count < len(cluster_labels):
-        metrics.update(
-            {
-                "silhouette": silhouette_score(X, cluster_labels),
-                "davies_bouldin": davies_bouldin_score(X, cluster_labels),
-                "calinski_harabasz": calinski_harabasz_score(X, cluster_labels),
-            }
-        )
-
+def _evaluate_annotated_branches(result, gt_branch_labels):
     gt_branch_labels = np.asarray(gt_branch_labels)
     pred_branch_labels = np.asarray(result.mask_labels)
     if gt_branch_labels.ndim != 1 or pred_branch_labels.shape != gt_branch_labels.shape:
@@ -338,28 +465,26 @@ def evaluate_experiment(
     annotated = gt_branch_labels > 0
     if not np.any(annotated):
         raise ValueError("at least one branch must have a positive ground-truth label")
+
     gt = gt_branch_labels[annotated]
     pred = pred_branch_labels[annotated]
     class_labels = np.unique(gt)
-
-    metrics.update(
-        {
-            "annotated_branch_count": int(np.count_nonzero(annotated)),
-            "ARI": adjusted_rand_score(gt, pred),
-            "NMI": normalized_mutual_info_score(gt, pred),
-            "accuracy": accuracy_score(gt, pred),
-            "balanced_accuracy": balanced_accuracy_score(gt, pred),
-            "precision": precision_score(
-                gt, pred, labels=class_labels, average="macro", zero_division=0
-            ),
-            "recall": recall_score(
-                gt, pred, labels=class_labels, average="macro", zero_division=0
-            ),
-            "f1": f1_score(
-                gt, pred, labels=class_labels, average="macro", zero_division=0
-            ),
-        }
-    )
+    metrics = {
+        "annotated_branch_count": int(np.count_nonzero(annotated)),
+        "ARI": adjusted_rand_score(gt, pred),
+        "NMI": normalized_mutual_info_score(gt, pred),
+        "accuracy": accuracy_score(gt, pred),
+        "balanced_accuracy": balanced_accuracy_score(gt, pred),
+        "precision": precision_score(
+            gt, pred, labels=class_labels, average="macro", zero_division=0
+        ),
+        "recall": recall_score(
+            gt, pred, labels=class_labels, average="macro", zero_division=0
+        ),
+        "f1": f1_score(
+            gt, pred, labels=class_labels, average="macro", zero_division=0
+        ),
+    }
     for class_label in class_labels:
         suffix = str(class_label)
         metrics[f"precision_class_{suffix}"] = precision_score(
@@ -371,7 +496,11 @@ def evaluate_experiment(
         metrics[f"f1_class_{suffix}"] = f1_score(
             gt, pred, labels=[class_label], average="macro", zero_division=0
         )
+    return metrics
 
+
+def _evaluate_complete_masks(result, gt_artery_mask, gt_vein_mask):
+    metrics = {}
     for name, pred_mask, gt_mask in (
         ("artery", result.artery_mask, gt_artery_mask),
         ("vein", result.vein_mask, gt_vein_mask),
@@ -385,6 +514,107 @@ def evaluate_experiment(
         metrics[f"{metric_name}_mean"] = np.mean(
             [metrics[f"{metric_name}_artery"], metrics[f"{metric_name}_vein"]]
         )
+    return metrics
+
+
+def evaluate_experiment(
+    result=None,
+    gt_branch_labels=None,
+    gt_artery_mask=None,
+    gt_vein_mask=None,
+    decimals=2,
+    *,
+    pu_predicted_masks=None,
+    pu_known_positive_masks=None,
+    pu_labeled_vessels=None,
+    pu_evaluation_mask=None,
+    pu_skeleton_tolerance=1,
+    pu_branch_overlap_threshold=0.5,
+):
+    """Evaluate an experiment using whichever evidence is available.
+
+    Complete retinal masks can be supplied through ``gt_artery_mask`` and
+    ``gt_vein_mask``. Incomplete choroidal annotations must instead be supplied
+    through ``pu_known_positive_masks``; their metrics are prefixed with ``pu_``.
+    This distinction prevents unlabeled choroid pixels from being silently treated
+    as negatives. Three-class PU evaluation requires an explicit
+    ``pu_predicted_masks`` mapping.
+    """
+    metrics = {}
+    if result is not None:
+        X = np.asarray(result.X)
+        cluster_labels = np.asarray(result.cluster_labels)
+        if X.ndim != 2 or len(X) != len(cluster_labels):
+            raise ValueError("result.X and cluster_labels must have matching rows")
+
+        metrics.update(
+            {
+                "silhouette": np.nan,
+                "davies_bouldin": np.nan,
+                "calinski_harabasz": np.nan,
+            }
+        )
+        cluster_count = np.unique(cluster_labels).size
+        if 1 < cluster_count < len(cluster_labels):
+            metrics.update(
+                {
+                    "silhouette": silhouette_score(X, cluster_labels),
+                    "davies_bouldin": davies_bouldin_score(X, cluster_labels),
+                    "calinski_harabasz": calinski_harabasz_score(X, cluster_labels),
+                }
+            )
+
+    if gt_branch_labels is not None:
+        if result is None:
+            raise ValueError("result is required for branch-label evaluation")
+        metrics.update(_evaluate_annotated_branches(result, gt_branch_labels))
+
+    complete_masks_supplied = (
+        gt_artery_mask is not None,
+        gt_vein_mask is not None,
+    )
+    if any(complete_masks_supplied) and not all(complete_masks_supplied):
+        raise ValueError("gt_artery_mask and gt_vein_mask must be supplied together")
+    if all(complete_masks_supplied):
+        if result is None:
+            raise ValueError("result is required for complete-mask evaluation")
+        metrics.update(_evaluate_complete_masks(result, gt_artery_mask, gt_vein_mask))
+
+    if pu_predicted_masks is not None and pu_known_positive_masks is None:
+        raise ValueError(
+            "pu_known_positive_masks is required when pu_predicted_masks is supplied"
+        )
+    if pu_known_positive_masks is not None:
+        if pu_predicted_masks is None:
+            if result is None:
+                raise ValueError(
+                    "result or pu_predicted_masks is required for PU evaluation"
+                )
+            available_masks = {
+                "artery": getattr(result, "artery_mask", None),
+                "vein": getattr(result, "vein_mask", None),
+            }
+            if not set(pu_known_positive_masks).issubset(available_masks) or any(
+                available_masks[name] is None for name in pu_known_positive_masks
+            ):
+                raise ValueError(
+                    "pu_predicted_masks is required for classes not exposed by result"
+                )
+            pu_predicted_masks = {
+                name: available_masks[name] for name in pu_known_positive_masks
+            }
+        pu_metrics = evaluate_positive_unlabeled_masks(
+            pu_predicted_masks,
+            pu_known_positive_masks,
+            labeled_vessels=pu_labeled_vessels,
+            evaluation_mask=pu_evaluation_mask,
+            skeleton_tolerance=pu_skeleton_tolerance,
+            branch_overlap_threshold=pu_branch_overlap_threshold,
+        )
+        metrics.update({f"pu_{name}": value for name, value in pu_metrics.items()})
+
+    if not metrics:
+        raise ValueError("no evaluation inputs were supplied")
     return _round_metrics(metrics, decimals)
 
 

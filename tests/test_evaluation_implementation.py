@@ -75,6 +75,8 @@ def test_positive_unlabeled_metrics_ignore_ambiguous_annotation_pixels():
     assert metrics["contamination_artery"] == 1.0
     assert metrics["positive_recall_vein"] == 1.0
     assert metrics["contamination_vein"] == 0.0
+    assert metrics["known_precision_artery"] == 0.5
+    assert metrics["known_precision_vein"] == 1.0
 
 
 def test_positive_unlabeled_metrics_report_undefined_empty_denominators():
@@ -90,6 +92,67 @@ def test_positive_unlabeled_metrics_report_undefined_empty_denominators():
     assert metrics["positive_recall_artery"] == 1.0
     assert np.isnan(metrics["contamination_artery"])
     assert np.isnan(metrics["positive_recall_vein"])
+
+
+def test_pu_metrics_expose_trivial_predict_everything_behavior():
+    known_artery = np.zeros((3, 3), dtype=bool)
+    known_vein = np.zeros((3, 3), dtype=bool)
+    known_artery[0, 0] = True
+    known_vein[0, 1] = True
+    predicted_everywhere = np.ones((3, 3), dtype=bool)
+
+    metrics = evaluation.evaluate_positive_unlabeled_masks(
+        {"artery": predicted_everywhere, "vein": predicted_everywhere},
+        {"artery": known_artery, "vein": known_vein},
+        skeleton_tolerance=0,
+    )
+
+    assert metrics["positive_recall_artery"] == 1.0
+    assert metrics["contamination_artery"] == 1.0
+    assert metrics["known_precision_artery"] == 0.5
+    assert metrics["unlabeled_prediction_rate_artery"] == 1.0
+    assert metrics["prediction_rate_artery"] == 1.0
+    assert metrics["positive_recall_macro"] == 1.0
+    assert metrics["contamination_macro"] == 1.0
+
+
+def test_pu_evaluation_domain_excludes_irrelevant_background():
+    known_artery = np.zeros((4, 4), dtype=bool)
+    known_vein = np.zeros((4, 4), dtype=bool)
+    known_artery[0, 0] = True
+    known_vein[0, 1] = True
+    evaluation_mask = np.zeros((4, 4), dtype=bool)
+    evaluation_mask[0, :3] = True
+    predicted_artery = np.zeros((4, 4), dtype=bool)
+    predicted_artery[0, 0] = True
+    predicted_artery[0, 2] = True
+    predicted_artery[3, 3] = True
+
+    metrics = evaluation.evaluate_positive_unlabeled_masks(
+        {"artery": predicted_artery, "vein": known_vein},
+        {"artery": known_artery, "vein": known_vein},
+        evaluation_mask=evaluation_mask,
+        skeleton_tolerance=0,
+    )
+
+    assert metrics["evaluation_pixel_count"] == 3
+    assert metrics["unlabeled_prediction_rate_artery"] == 1.0
+    assert metrics["prediction_rate_artery"] == pytest.approx(2 / 3)
+    assert metrics["predicted_count_artery"] == 2
+
+
+def test_pu_evaluation_domain_must_retain_all_annotations():
+    artery = np.zeros((2, 2), dtype=bool)
+    vein = np.zeros((2, 2), dtype=bool)
+    artery[0, 0] = True
+    domain = np.zeros((2, 2), dtype=bool)
+
+    with pytest.raises(ValueError, match="include every annotated pixel"):
+        evaluation.evaluate_positive_unlabeled_masks(
+            {"artery": artery, "vein": vein},
+            {"artery": artery, "vein": vein},
+            evaluation_mask=domain,
+        )
 
 
 def test_branch_pu_metrics_remove_branches_annotated_as_multiple_classes():
@@ -113,6 +176,64 @@ def test_branch_pu_metrics_remove_branches_annotated_as_multiple_classes():
     assert metrics["branch_contamination_artery"] == 0.0
     assert metrics["branch_positive_recall_vein"] == 1.0
     assert metrics["branch_contamination_vein"] == 0.0
+    assert metrics["branch_known_precision_macro"] == 1.0
+
+
+def test_evaluate_experiment_adds_three_class_pu_metrics_without_fake_dice():
+    shape = (3, 3)
+    known = {
+        "artery": np.zeros(shape, dtype=bool),
+        "aliased_artery": np.zeros(shape, dtype=bool),
+        "vein": np.zeros(shape, dtype=bool),
+    }
+    known["artery"][0, 0] = True
+    known["aliased_artery"][1, 1] = True
+    known["vein"][2, 2] = True
+    predicted = {name: mask.copy() for name, mask in known.items()}
+    metrics = evaluation.evaluate_experiment(
+        pu_predicted_masks=predicted,
+        pu_known_positive_masks=known,
+        decimals=None,
+    )
+
+    assert metrics["pu_positive_recall_macro"] == 1.0
+    assert metrics["pu_contamination_macro"] == 0.0
+    assert metrics["pu_known_precision_macro"] == 1.0
+    assert metrics["pu_unlabeled_prediction_rate_macro"] == 0.0
+    assert "dice_mean" not in metrics
+    assert "silhouette" not in metrics
+
+
+def test_evaluate_experiment_can_derive_two_class_pu_predictions_from_result():
+    artery = np.array([[1, 0], [0, 0]], dtype=bool)
+    vein = np.array([[0, 1], [0, 0]], dtype=bool)
+    result = SimpleNamespace(
+        X=np.array([[0.0], [1.0]]),
+        cluster_labels=np.array([0, 1]),
+        artery_mask=artery,
+        vein_mask=vein,
+    )
+
+    metrics = evaluation.evaluate_experiment(
+        result,
+        pu_known_positive_masks={"artery": artery, "vein": vein},
+        decimals=None,
+    )
+
+    assert metrics["pu_positive_recall_macro"] == 1.0
+    assert metrics["pu_known_precision_macro"] == 1.0
+
+
+def test_evaluate_experiment_rejects_one_complete_mask_without_the_other():
+    result = SimpleNamespace(
+        X=np.array([[0.0], [1.0]]),
+        cluster_labels=np.array([0, 1]),
+    )
+    with pytest.raises(ValueError, match="must be supplied together"):
+        evaluation.evaluate_experiment(
+            result,
+            gt_artery_mask=np.zeros((2, 2), dtype=bool),
+        )
 
 
 def test_correlation_assignment_uses_noncontiguous_branch_ids():

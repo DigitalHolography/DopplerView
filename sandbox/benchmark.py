@@ -7,6 +7,9 @@ import dopplerview.segmentation.signal_processing as sp
 from . import evaluation
 from dopplerview.segmentation import clustering
 
+# Keep the benchmark entry point patchable and backward-compatible with notebooks.
+run_clustering_pipeline = clustering.run_clustering_pipeline
+
 @dataclass
 class ExperimentConfig:
     input_name: str

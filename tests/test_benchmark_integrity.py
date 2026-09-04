@@ -4,7 +4,7 @@ import h5py
 import numpy as np
 import pytest
 
-from dopplerview.segmentation import pulse_analysis
+from dopplerview.segmentation import clustering, pulse_analysis
 from sandbox import benchmark, evaluation
 
 

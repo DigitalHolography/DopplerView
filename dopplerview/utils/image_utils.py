@@ -308,6 +308,19 @@ def overlay_with_labels(image, label_mask, classes, colors=None):
     Returns:
     - overlay_image: 3D numpy array representing the RGB overlay image.
     """
+    label_mask = np.asarray(label_mask)
+    classes = np.asarray(classes)
+    if classes.ndim != 1:
+        raise ValueError("classes must be a one-dimensional array")
+
+    branch_ids = np.unique(label_mask)
+    branch_ids = branch_ids[branch_ids > 0]
+    if len(classes) != len(branch_ids):
+        raise ValueError(
+            "classes must contain one value per positive branch ID "
+            f"({len(classes)} values for {len(branch_ids)} branches)"
+        )
+
     # Create an RGB version of the grayscale image
     overlay_image = np.stack([image] * 3, axis=-1)
 
@@ -318,10 +331,8 @@ def overlay_with_labels(image, label_mask, classes, colors=None):
 
     # Overlay each class with its corresponding color
     for cls in np.unique(classes):
-        branch_indices = np.where(classes == cls)[0] + 1
-        branch_mask = np.zeros_like(label_mask, dtype=bool)
-        for idx in branch_indices:
-            branch_mask[label_mask == idx] = True
+        class_branch_ids = branch_ids[classes == cls]
+        branch_mask = np.isin(label_mask, class_branch_ids)
         overlay_image[branch_mask] = colors[cls]
 
     return overlay_image
