@@ -191,15 +191,20 @@ def interpolate_outliers(video, signal, artery_mask, sampling_frequency):
     return video, signal_filtered
 
 def normalize(x, low=-1, high=1):
-    x = np.asarray(x)
-    xmin, xmax = x.min(), x.max()
+    x = np.asarray(x, dtype=float)
+    finite = np.isfinite(x)
+    if not np.any(finite):
+        return np.full_like(x, np.nan, dtype=float)
+    xmin, xmax = np.min(x[finite]), np.max(x[finite])
 
     if xmax == xmin:
-        return np.full_like(x, (low + high) / 2, dtype=float)
+        result = np.full_like(x, np.nan, dtype=float)
+        result[finite] = (low + high) / 2
+        return result
 
     return low + (x - xmin) * (high - low) / (xmax - xmin)
 
-def compute_correlation(video, signal, normalization_interval = [-1, 1]):
+def compute_correlation(video, signal, normalization_interval=None):
     """
     Compute the zero-lag correlation between the video signal and the average signal in the mask.
 
@@ -208,7 +213,9 @@ def compute_correlation(video, signal, normalization_interval = [-1, 1]):
         signal (np.ndarray): 1D temporal reference signal of length T
 
     Returns:
-        R (np.ndarray): 2D correlation map of shape (H, W)
+        R (np.ndarray): 2D Pearson-correlation map of shape (H, W). Constant
+            or insufficiently sampled pixels are ``NaN``. Optional min-max
+            normalization is applied only when ``normalization_interval`` is set.
     """
     video = np.asarray(video)
     signal = np.asarray(signal)

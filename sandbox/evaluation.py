@@ -17,6 +17,13 @@ from sklearn.metrics import (
     silhouette_score,
 )
 
+from .partial_branch_evaluation import (
+    PartialBranchTargets,
+    build_partial_branch_targets,
+    evaluate_partial_branch_clustering,
+)
+from .signal_evaluation import evaluate_mask_signal_similarity
+
 
 def _as_bool_mask(mask, name):
     mask = np.asarray(mask)
@@ -530,6 +537,15 @@ def evaluate_experiment(
     pu_evaluation_mask=None,
     pu_skeleton_tolerance=1,
     pu_branch_overlap_threshold=0.5,
+    partial_branch_targets=None,
+    partial_branch_weights=None,
+    signal_videos=None,
+    signal_predicted_masks=None,
+    signal_reference_masks=None,
+    signal_sampling_frequency=None,
+    signal_beat_period=None,
+    signal_frame_mask=None,
+    signal_exclude_reference_pixels=True,
 ):
     """Evaluate an experiment using whichever evidence is available.
 
@@ -623,6 +639,43 @@ def evaluate_experiment(
             branch_overlap_threshold=pu_branch_overlap_threshold,
         )
         metrics.update({f"pu_{name}": value for name, value in pu_metrics.items()})
+
+    if partial_branch_targets is not None:
+        if result is None:
+            raise ValueError("result is required for partial branch evaluation")
+        metrics.update(
+            evaluate_partial_branch_clustering(
+                result.cluster_labels,
+                partial_branch_targets,
+                branch_ids=getattr(result, "branch_ids", None),
+                sample_weight=partial_branch_weights,
+            )
+        )
+
+    signal_inputs = (
+        signal_videos,
+        signal_predicted_masks,
+        signal_reference_masks,
+        signal_sampling_frequency,
+        signal_beat_period,
+    )
+    if any(value is not None for value in signal_inputs):
+        if not all(value is not None for value in signal_inputs):
+            raise ValueError(
+                "signal videos, masks, sampling frequency, and beat period "
+                "must be supplied together"
+            )
+        metrics.update(
+            evaluate_mask_signal_similarity(
+                signal_videos,
+                signal_predicted_masks,
+                signal_reference_masks,
+                sampling_frequency=signal_sampling_frequency,
+                beat_period=signal_beat_period,
+                frame_mask=signal_frame_mask,
+                exclude_reference_pixels=signal_exclude_reference_pixels,
+            )
+        )
 
     if not metrics:
         raise ValueError("no evaluation inputs were supplied")

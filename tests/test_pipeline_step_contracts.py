@@ -137,6 +137,7 @@ def test_temporal_cues_sets_conditional_outputs_on_short_recording(monkeypatch):
             "LF_M0_ff": None,
             "HF_M0_ff": None,
             "band_ratio_ff": None,
+            "sampling_freq": 40,
         }
     )
     monkeypatch.setattr(
@@ -152,7 +153,7 @@ def test_temporal_cues_sets_conditional_outputs_on_short_recording(monkeypatch):
     monkeypatch.setattr(
         pulse_step_module.signal_processing,
         "compute_correlation",
-        lambda input_video, _pulse: np.zeros(input_video.shape[1:]),
+        lambda input_video, _pulse, **_kwargs: np.zeros(input_video.shape[1:]),
     )
     monkeypatch.setattr(
         pulse_step_module.pulse_analysis,
@@ -195,9 +196,10 @@ def test_both_pre_mask_method_keeps_clustering_as_canonical(monkeypatch):
     ctx = DummyContext(
         {
             "M0_ff_video": video,
-            "M0_ff_image": np.zeros((2, 2), dtype=float),
-            "retinal_vessel_mask": labeled_vessels > 0,
-            "optic_disc_center": None,
+                "M0_ff_image": np.zeros((2, 2), dtype=float),
+                "retinal_vessel_mask": labeled_vessels > 0,
+                "optic_disc_center": None,
+                "sampling_freq": 40,
         }
     )
     ctx.dopplerview_config["Mask"] = {
@@ -258,6 +260,7 @@ def test_both_method_outputs_clustering_and_gradient_temporal_cues(monkeypatch):
             "LF_M0_ff": None,
             "HF_M0_ff": None,
             "band_ratio_ff": None,
+            "sampling_freq": 40,
         }
     )
     ctx.dopplerview_config["Mask"]["PreMaskMethod"] = "both"
@@ -274,7 +277,7 @@ def test_both_method_outputs_clustering_and_gradient_temporal_cues(monkeypatch):
     monkeypatch.setattr(
         pulse_step_module.signal_processing,
         "compute_correlation",
-        lambda input_video, pulse: np.full(input_video.shape[1:], pulse[0]),
+        lambda input_video, pulse, **_kwargs: np.full(input_video.shape[1:], pulse[0]),
     )
     monkeypatch.setattr(
         pulse_step_module.pulse_analysis,

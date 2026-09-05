@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from sandbox import embedding
+from dopplerview.segmentation import embedding
 
 
 def _pairwise_distances(values):
