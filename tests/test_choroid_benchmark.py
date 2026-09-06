@@ -3,6 +3,7 @@ import pytest
 
 from sandbox.choroid_benchmark import (
     constraints_from_partial_targets,
+    map_clusters_by_correlation_physiology,
     map_clusters_to_classes,
     run_single_sample_benchmark,
     stratified_partial_label_split,
@@ -47,6 +48,51 @@ def test_constraints_and_mapping_use_selected_training_branches():
     np.testing.assert_array_equal(mapped, np.repeat([0, 1, 2], 4))
 
 
+def test_hungarian_mapping_is_one_to_one_and_leaves_surplus_cluster_unmapped():
+    _, targets = _targets()
+    selected = np.ones(12, dtype=bool)
+    clusters = np.array([9, 9, 9, 8, 3, 3, 3, 3, 7, 7, 7, 7])
+
+    mapped = map_clusters_to_classes(clusters, targets, selected)
+
+    assert np.all(mapped[clusters == 9] == 0)
+    assert np.all(mapped[clusters == 8] == -1)
+    assert np.all(mapped[clusters == 3] == 1)
+    assert np.all(mapped[clusters == 7] == 2)
+    assigned_classes = [
+        np.unique(mapped[clusters == cluster_id]).item()
+        for cluster_id in np.unique(clusters)
+        if np.any(mapped[clusters == cluster_id] >= 0)
+    ]
+    assert len(assigned_classes) == len(set(assigned_classes))
+
+
+def test_correlation_physiology_mapping_names_three_signatures_and_rejects_extra():
+    clusters = np.repeat([17, 4, 12, 99], 2)
+    correlations = np.array(
+        [
+            [0.8, 0.7, 0.6],
+            [0.7, 0.8, 0.7],
+            [0.05, -0.6, -0.7],
+            [0.10, -0.5, -0.6],
+            [-0.8, -0.7, -0.6],
+            [-0.7, -0.8, -0.7],
+            [0.2, 0.0, -0.1],
+            [0.1, 0.1, -0.2],
+        ]
+    )
+
+    result = map_clusters_by_correlation_physiology(clusters, correlations)
+
+    assert result.cluster_to_class == {
+        4: "vein",
+        12: "aliased_artery",
+        17: "artery",
+    }
+    assert np.all(result.mapped_labels[clusters == 99] == -1)
+    assert result.similarity_matrix.shape == (4, 3)
+
+
 def test_single_sample_benchmark_runs_required_euclidean_families(tmp_path):
     _, targets = _targets()
     rng = np.random.default_rng(1)
@@ -83,6 +129,32 @@ def test_single_sample_benchmark_runs_required_euclidean_families(tmp_path):
     assert csv_path.is_file()
     saved = np.genfromtxt(csv_path, delimiter=",", names=True, dtype=None, encoding="utf-8")
     assert len(saved) == len(result.table)
+
+
+def test_benchmark_reports_label_free_physiology_mapping(tmp_path):
+    _, targets = _targets()
+    correlations = np.repeat(
+        [[0.8, 0.7, 0.6], [0.0, -0.6, -0.7], [-0.8, -0.7, -0.6]],
+        4,
+        axis=0,
+    )
+    result = run_single_sample_benchmark(
+        {"correlation_3band": correlations},
+        targets,
+        cluster_counts=(3,),
+        include_adaptive=False,
+        candidate_keys={"correlation_3band/kmeans_k3"},
+        deployment_correlation_features=correlations,
+        csv_path=tmp_path / "physiology.csv",
+        random_state=2,
+    )
+
+    row = result.table.iloc[0]
+    assert row["heldout_physiology_macro_f1"] == 1.0
+    assert row["heldout_physiology_mapped_coverage"] == 1.0
+    assert set(result.physiology_mapped_class_labels) == {
+        "correlation_3band/kmeans_k3"
+    }
 
 
 def test_csv_is_checkpointed_before_a_later_method_is_interrupted(

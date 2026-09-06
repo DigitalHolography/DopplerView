@@ -7,6 +7,7 @@ from time import perf_counter
 
 import numpy as np
 import pandas as pd
+from scipy.optimize import linear_sum_assignment
 from sklearn.cluster import AgglomerativeClustering, KMeans
 from sklearn.metrics import accuracy_score, f1_score, recall_score
 from sklearn.mixture import GaussianMixture
@@ -35,6 +36,20 @@ class SingleSampleBenchmarkResult:
     constraint_branch_ids: np.ndarray
     evaluation_branch_ids: np.ndarray
     csv_path: Path | None = None
+    physiology_mapped_class_labels: dict | None = None
+
+
+@dataclass(frozen=True)
+class CorrelationPhysiologyMapping:
+    """Diagnostic result of label-free correlation-profile assignment."""
+
+    mapped_labels: np.ndarray
+    cluster_ids: np.ndarray
+    class_names: tuple
+    cluster_centroids: np.ndarray
+    class_prototypes: np.ndarray
+    similarity_matrix: np.ndarray
+    cluster_to_class: dict
 
 
 @dataclass(frozen=True)
@@ -101,7 +116,13 @@ def _masked_targets(targets, selected):
 
 
 def map_clusters_to_classes(cluster_labels, targets, fit_mask, sample_weight=None):
-    """Map every cluster to its weighted-majority class using training labels only."""
+    """One-to-one Hungarian cluster alignment using training labels only.
+
+    The score of a cluster/class pair is the sum of branch weights multiplied
+    by partial-label confidence.  Only positive-evidence assignments are kept;
+    noise, clusters without evidence, and surplus clusters remain ``UNLABELED``.
+    This function is intended for evaluation alignment, not deployment.
+    """
     cluster_labels = np.asarray(cluster_labels)
     fit_mask = np.asarray(fit_mask, dtype=bool) & targets.labeled_mask
     if cluster_labels.shape != targets.labels.shape or fit_mask.shape != targets.labels.shape:
@@ -113,18 +134,165 @@ def map_clusters_to_classes(cluster_labels, targets, fit_mask, sample_weight=Non
     )
     if weights.shape != cluster_labels.shape:
         raise ValueError("sample_weight must contain one value per branch")
+    cluster_ids = np.unique(cluster_labels[cluster_labels >= 0])
     mapped = np.full(len(cluster_labels), UNLABELED, dtype=int)
-    for cluster_id in np.unique(cluster_labels[cluster_labels >= 0]):
+    if not len(cluster_ids):
+        return mapped
+    scores = np.zeros((len(cluster_ids), len(targets.class_names)), dtype=float)
+    for row, cluster_id in enumerate(cluster_ids):
         evidence = fit_mask & (cluster_labels == cluster_id)
         if not np.any(evidence):
             continue
-        scores = np.bincount(
+        scores[row] = np.bincount(
             targets.labels[evidence],
             weights=weights[evidence] * targets.confidence[evidence],
             minlength=len(targets.class_names),
         )
-        mapped[cluster_labels == cluster_id] = int(np.argmax(scores))
+    rows, classes = linear_sum_assignment(-scores)
+    for row, class_label in zip(rows, classes):
+        if scores[row, class_label] > 0:
+            mapped[cluster_labels == cluster_ids[row]] = int(class_label)
     return mapped
+
+
+def _weighted_feature_median(values, weights):
+    """Return a feature-wise weighted median."""
+    medians = np.empty(values.shape[1], dtype=float)
+    for feature in range(values.shape[1]):
+        order = np.argsort(values[:, feature], kind="stable")
+        ordered_values = values[order, feature]
+        ordered_weights = weights[order]
+        cutoff = 0.5 * np.sum(ordered_weights)
+        medians[feature] = ordered_values[
+            np.searchsorted(np.cumsum(ordered_weights), cutoff, side="left")
+        ]
+    return medians
+
+
+def map_clusters_by_correlation_physiology(
+    cluster_labels,
+    correlation_features,
+    *,
+    sample_weight=None,
+    class_names=("artery", "vein", "aliased_artery"),
+    class_prototypes=None,
+    feature_weights=(2.0, 1.0, 1.0),
+    min_similarity=0.0,
+    min_profile_norm=0.1,
+):
+    """Name anonymous clusters without choroidal labels using HF/M0/LF signs.
+
+    Rows of ``correlation_features`` must be raw Pearson correlations ordered
+    as HF, M0, and LF relative to the retinal arterial signal.  The default
+    prototypes encode provisional physiological hypotheses::
+
+        artery          (+1, +1, +1)
+        vein             (0, -1, -1)
+        aliased artery   (-1, -1, -1)
+
+    Cluster profiles are feature-wise weighted medians.  Weighted cosine
+    similarities to the prototypes form a rectangular assignment matrix, and
+    Hungarian matching selects at most one cluster per class.  Surplus clusters,
+    matches below ``min_similarity``, and near-zero profiles below
+    ``min_profile_norm`` remain ``UNLABELED``.
+
+    These prototypes are deliberately configurable: they are a testable
+    physiological prior, not a learned or clinically validated classifier.
+    """
+    cluster_labels = np.asarray(cluster_labels, dtype=int)
+    correlation_features = np.asarray(correlation_features, dtype=float)
+    if correlation_features.ndim != 2 or correlation_features.shape[1] != 3:
+        raise ValueError("correlation_features must have shape (n_branches, 3)")
+    if cluster_labels.shape != (len(correlation_features),):
+        raise ValueError("cluster_labels and correlation_features must align")
+    if not np.all(np.isfinite(correlation_features)):
+        raise ValueError("correlation_features must be finite raw correlations")
+
+    weights = (
+        np.ones(len(cluster_labels), dtype=float)
+        if sample_weight is None
+        else np.asarray(sample_weight, dtype=float)
+    )
+    if weights.shape != cluster_labels.shape:
+        raise ValueError("sample_weight must contain one value per branch")
+    if not np.all(np.isfinite(weights)) or np.any(weights <= 0):
+        raise ValueError("sample_weight must contain positive finite values")
+
+    class_names = tuple(class_names)
+    if class_prototypes is None:
+        default_prototypes = {
+            "artery": (1.0, 1.0, 1.0),
+            "vein": (0.0, -1.0, -1.0),
+            "aliased_artery": (-1.0, -1.0, -1.0),
+        }
+        try:
+            class_prototypes = [default_prototypes[name] for name in class_names]
+        except KeyError as error:
+            raise ValueError(
+                "custom class_names require matching class_prototypes"
+            ) from error
+    prototypes = np.asarray(class_prototypes, dtype=float)
+    if prototypes.shape != (len(class_names), 3):
+        raise ValueError("class_prototypes must have shape (n_classes, 3)")
+    feature_weights = np.asarray(feature_weights, dtype=float)
+    if feature_weights.shape != (3,) or np.any(feature_weights < 0):
+        raise ValueError("feature_weights must contain three non-negative values")
+    if not np.any(feature_weights > 0):
+        raise ValueError("at least one feature weight must be positive")
+    if not np.isfinite(min_similarity) or not -1 <= min_similarity <= 1:
+        raise ValueError("min_similarity must lie in [-1, 1]")
+    if not np.isfinite(min_profile_norm) or min_profile_norm < 0:
+        raise ValueError("min_profile_norm must be finite and non-negative")
+
+    cluster_ids = np.unique(cluster_labels[cluster_labels >= 0])
+    mapped = np.full(len(cluster_labels), UNLABELED, dtype=int)
+    if not len(cluster_ids):
+        empty = np.empty((0, 3), dtype=float)
+        return CorrelationPhysiologyMapping(
+            mapped, cluster_ids, class_names, empty, prototypes, empty, {}
+        )
+
+    centroids = np.vstack(
+        [
+            _weighted_feature_median(
+                correlation_features[cluster_labels == cluster_id],
+                weights[cluster_labels == cluster_id],
+            )
+            for cluster_id in cluster_ids
+        ]
+    )
+    scale = np.sqrt(feature_weights)
+    weighted_centroids = centroids * scale
+    weighted_prototypes = prototypes * scale
+    centroid_norms = np.linalg.norm(weighted_centroids, axis=1, keepdims=True)
+    prototype_norms = np.linalg.norm(weighted_prototypes, axis=1, keepdims=True).T
+    denominator = centroid_norms * prototype_norms
+    similarities = np.divide(
+        weighted_centroids @ weighted_prototypes.T,
+        denominator,
+        out=np.full((len(cluster_ids), len(class_names)), -1.0),
+        where=denominator > np.finfo(float).eps,
+    )
+
+    rows, classes = linear_sum_assignment(-similarities)
+    cluster_to_class = {}
+    for row, class_label in zip(rows, classes):
+        if (
+            similarities[row, class_label] >= min_similarity
+            and centroid_norms[row, 0] >= min_profile_norm
+        ):
+            cluster_id = int(cluster_ids[row])
+            mapped[cluster_labels == cluster_id] = int(class_label)
+            cluster_to_class[cluster_id] = class_names[class_label]
+    return CorrelationPhysiologyMapping(
+        mapped,
+        cluster_ids,
+        class_names,
+        centroids,
+        prototypes,
+        similarities,
+        cluster_to_class,
+    )
 
 
 def _predicted_masks(mapped_labels, targets, labeled_vessels):
@@ -312,6 +480,7 @@ def run_single_sample_benchmark(
     threshold_labelings=None,
     cluster_counts=(2, 3),
     branch_weights=None,
+    deployment_correlation_features=None,
     labeled_vessels=None,
     signal_videos=None,
     signal_reference_masks=None,
@@ -352,6 +521,14 @@ def run_single_sample_benchmark(
         branch_weights = np.asarray(branch_weights, dtype=float)
         if branch_weights.shape != (n_branches,):
             raise ValueError("branch_weights must contain one value per branch")
+    if deployment_correlation_features is not None:
+        deployment_correlation_features = np.asarray(
+            deployment_correlation_features, dtype=float
+        )
+        if deployment_correlation_features.shape != (n_branches, 3):
+            raise ValueError(
+                "deployment_correlation_features must have shape (n_branches, 3)"
+            )
 
     constraint_mask, evaluation_mask = stratified_partial_label_split(
         partial_targets,
@@ -422,6 +599,7 @@ def run_single_sample_benchmark(
     rows = []
     label_results = {}
     mapped_results = {}
+    physiology_mapped_results = {}
     resolved_csv_path = None
     if csv_path is not None:
         resolved_csv_path = Path(csv_path).expanduser().resolve()
@@ -537,6 +715,46 @@ def run_single_sample_benchmark(
                     ),
                 }
             )
+            if deployment_correlation_features is not None:
+                physiology_mapping = map_clusters_by_correlation_physiology(
+                    labels,
+                    deployment_correlation_features,
+                    sample_weight=branch_weights,
+                    class_names=partial_targets.class_names,
+                )
+                physiology_mapped = physiology_mapping.mapped_labels
+                physiology_mapped_results[key] = physiology_mapped
+                physiology_held_out = physiology_mapped[evaluation_mask]
+                row.update(
+                    {
+                        "heldout_physiology_accuracy": accuracy_score(
+                            held_out_true, physiology_held_out
+                        ),
+                        "heldout_physiology_balanced_accuracy": recall_score(
+                            held_out_true,
+                            physiology_held_out,
+                            labels=classes,
+                            average="macro",
+                            zero_division=0,
+                        ),
+                        "heldout_physiology_macro_f1": f1_score(
+                            held_out_true,
+                            physiology_held_out,
+                            labels=classes,
+                            average="macro",
+                            zero_division=0,
+                        ),
+                        "heldout_weighted_physiology_accuracy": accuracy_score(
+                            held_out_true,
+                            physiology_held_out,
+                            sample_weight=held_out_weights,
+                        ),
+                        "heldout_physiology_mapped_coverage": np.average(
+                            physiology_held_out >= 0,
+                            weights=held_out_weights,
+                        ),
+                    }
+                )
             if use_signal_metrics:
                 predicted_masks = _predicted_masks(
                     mapped, partial_targets, np.asarray(labeled_vessels)
@@ -622,4 +840,5 @@ def run_single_sample_benchmark(
         constraint_branch_ids=partial_targets.branch_ids[constraint_mask],
         evaluation_branch_ids=partial_targets.branch_ids[evaluation_mask],
         csv_path=resolved_csv_path,
+        physiology_mapped_class_labels=physiology_mapped_results,
     )
