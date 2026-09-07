@@ -39,3 +39,5 @@ Thumbs.db
 # Data
 *.h5
 *.csv
+
+tmp/

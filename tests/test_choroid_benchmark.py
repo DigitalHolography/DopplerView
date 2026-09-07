@@ -1,7 +1,14 @@
+import json
+from pathlib import Path
+
 import numpy as np
 import pytest
 
 from sandbox.choroid_benchmark import (
+    BenchmarkCandidate,
+    BenchmarkEmbeddingView,
+    BenchmarkPrediction,
+    class_masks_to_branch_labels,
     constraints_from_partial_targets,
     map_clusters_by_correlation_physiology,
     map_clusters_to_classes,
@@ -10,6 +17,25 @@ from sandbox.choroid_benchmark import (
 )
 from sandbox.partial_branch_evaluation import build_partial_branch_targets
 import sandbox.choroid_benchmark as benchmark_module
+
+
+def test_choroid_notebook_code_cells_are_valid_python():
+    notebook_path = (
+        Path(__file__).resolve().parents[1]
+        / "sandbox"
+        / "choroid_segmentation.ipynb"
+    )
+    notebook = json.loads(notebook_path.read_text(encoding="utf-8"))
+    for cell in notebook["cells"]:
+        if cell["cell_type"] != "code":
+            continue
+        source = "".join(cell["source"])
+        source = "\n".join(
+            line
+            for line in source.splitlines()
+            if not line.lstrip().startswith(("%", "!"))
+        )
+        compile(source, f"{notebook_path.name}:{cell['id']}", "exec")
 
 
 def _targets():
@@ -115,7 +141,10 @@ def test_single_sample_benchmark_runs_required_euclidean_families(tmp_path):
     assert {
         "kmeans_k3",
         "gmm_k3",
-        "hierarchical_ward_k3",
+        "agglomerative_ward_k3",
+        "agglomerative_average_k3",
+        "agglomerative_complete_k3",
+        "agglomerative_single_k3",
         "trimmed_kmeans_k3",
         "cop_kmeans_k3",
         "threshold_manual_grid",
@@ -186,3 +215,145 @@ def test_csv_is_checkpointed_before_a_later_method_is_interrupted(
         csv_path, delimiter=",", names=True, dtype=None, encoding="utf-8"
     )
     assert checkpoint["method"].item() == "kmeans_k3"
+
+
+def test_class_masks_are_returned_to_original_branch_alignment():
+    branch_map, _ = _targets()
+    masks = {
+        "artery": np.isin(branch_map, [1, 2, 3, 4]),
+        "vein": np.isin(branch_map, [5, 6, 7, 8]),
+        "aliased_artery": np.isin(branch_map, [9, 10, 11]),
+    }
+
+    labels = class_masks_to_branch_labels(branch_map, masks)
+
+    np.testing.assert_array_equal(labels, [0] * 4 + [1] * 4 + [2] * 3 + [-1])
+
+
+def test_custom_two_step_candidate_saves_visualization_and_arrays(tmp_path):
+    branch_map, targets = _targets()
+    X = np.repeat([[-3.0, 0.0], [0.0, 3.0], [3.0, 0.0]], 4, axis=0)
+    expected = np.repeat([8, 3, 5], 4)
+    # Deliberately disagree with the method-native masks: this verifies that
+    # two-step artifacts preserve their exact pixel support instead of
+    # reconstructing whole branches from the evaluation labels.
+    semantic = np.zeros(12, dtype=int)
+    method_masks = {
+        "artery": np.isin(branch_map, [1, 2, 3, 4]),
+        "vein": np.isin(branch_map, [5, 6, 7, 8]),
+        "aliased_artery": np.isin(branch_map, [9, 10, 11, 12]),
+    }
+    time = np.arange(24)
+    pulse = np.sin(2 * np.pi * time / 6)
+    video = 10 + pulse[:, None, None] * branch_map[None, :, :]
+    references = {}
+    for class_label, class_name in enumerate(targets.class_names):
+        references[class_name] = branch_map == (1 + 4 * class_label)
+
+    candidate = BenchmarkCandidate(
+        name="fourier_then_correlation",
+        representation="two_step",
+        X=None,
+        run=lambda _X, **_: BenchmarkPrediction(
+            cluster_labels=expected,
+            deployment_labels=semantic,
+            embedding_views=(
+                BenchmarkEmbeddingView(
+                    "stage 1",
+                    X,
+                    np.repeat([0, 1, 1], 4),
+                    masks=(
+                        ("artery", np.isin(branch_map, [1, 2, 3, 4])),
+                        ("remaining candidates", np.isin(branch_map, np.arange(5, 13))),
+                    ),
+                ),
+                BenchmarkEmbeddingView(
+                    "stage 2",
+                    X[4:],
+                    np.repeat([0, 1], 4),
+                    component_names=("HF correlation", "LF correlation"),
+                    partial_labels=targets.labels[4:],
+                    masks=(
+                        ("vein", np.isin(branch_map, [5, 6, 7, 8])),
+                        ("aliased artery", np.isin(branch_map, [9, 10, 11, 12])),
+                    ),
+                ),
+            ),
+            class_masks=method_masks,
+        ),
+        subsample_safe=False,
+    )
+    output = tmp_path / "visualizations"
+    result = run_single_sample_benchmark(
+        {},
+        targets,
+        custom_candidates=(candidate,),
+        cluster_counts=(),
+        include_adaptive=False,
+        labeled_vessels=branch_map,
+        signal_videos={"HF": video, "M0": video, "LF": video},
+        signal_reference_masks=references,
+        sampling_frequency=100,
+        beat_period=6,
+        visualization_image=branch_map.astype(float),
+        visualization_dir=output,
+        csv_path=tmp_path / "metrics.csv",
+    )
+
+    assert result.table.loc[0, "deployment_mapping"] == "method_assignment"
+    artifact_directory = output / "two_step_fourier_then_correlation"
+    assert (artifact_directory / "1st_step" / "clusters.png").is_file()
+    assert (artifact_directory / "1st_step" / "masks.png").is_file()
+    assert (artifact_directory / "2nd_step" / "clusters.png").is_file()
+    assert (artifact_directory / "2nd_step" / "masks.png").is_file()
+    assert (artifact_directory / "final_overlays.png").is_file()
+    assert (artifact_directory / "signals.png").is_file()
+    assert not (artifact_directory / "clustering.png").exists()
+    assert not (artifact_directory / "diagnostic.png").exists()
+    arrays = np.load(artifact_directory / "labels_and_masks.npz")
+    np.testing.assert_array_equal(arrays["cluster_labels"], expected)
+    np.testing.assert_array_equal(arrays["semantic_labels"], semantic)
+    assert arrays["mask_artery"].sum() == 4
+    assert arrays["mask_vein"].sum() == 4
+    assert arrays["mask_aliased_artery"].sum() == 4
+
+
+def test_three_real_embedding_components_are_not_projected():
+    X = np.arange(15, dtype=float).reshape(5, 3)
+
+    coordinates, names, use_3d = benchmark_module._embedding_projection(
+        X, ("HF correlation", "M0 correlation", "LF correlation")
+    )
+
+    np.testing.assert_array_equal(coordinates, X)
+    assert names == ("HF correlation", "M0 correlation", "LF correlation")
+    assert use_3d
+
+
+def test_adjacent_cluster_ids_use_distinct_categorical_colors():
+    assert benchmark_module.CLUSTER_COLORS[0] == "tab:red"
+    assert benchmark_module.CLUSTER_COLORS[1] == "tab:blue"
+
+
+def test_custom_two_step_candidates_can_run_before_builtin_methods():
+    _, targets = _targets()
+    X = np.repeat([[-3.0], [0.0], [3.0]], 4, axis=0)
+    candidate = BenchmarkCandidate(
+        name="two_step_first",
+        representation="two_step",
+        X=None,
+        run=lambda _X, **_: np.repeat([0, 1, 2], 4),
+        subsample_safe=False,
+    )
+
+    result = run_single_sample_benchmark(
+        {"one_step": X},
+        targets,
+        custom_candidates=(candidate,),
+        custom_candidates_first=True,
+        cluster_counts=(3,),
+        include_adaptive=False,
+        candidate_keys={"two_step/two_step_first", "one_step/kmeans_k3"},
+    )
+
+    assert result.table["representation"].tolist() == ["two_step", "one_step"]
