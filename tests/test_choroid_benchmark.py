@@ -10,8 +10,11 @@ from sandbox.choroid_benchmark import (
     BenchmarkPrediction,
     class_masks_to_branch_labels,
     constraints_from_partial_targets,
+    load_cluster_archive,
     map_clusters_by_correlation_physiology,
     map_clusters_to_classes,
+    reevaluate_cluster_archive,
+    reevaluate_cluster_archives,
     run_single_sample_benchmark,
     stratified_partial_label_split,
 )
@@ -74,23 +77,17 @@ def test_constraints_and_mapping_use_selected_training_branches():
     np.testing.assert_array_equal(mapped, np.repeat([0, 1, 2], 4))
 
 
-def test_hungarian_mapping_is_one_to_one_and_leaves_surplus_cluster_unmapped():
+def test_partial_mapping_assigns_each_cluster_independently():
     _, targets = _targets()
     selected = np.ones(12, dtype=bool)
-    clusters = np.array([9, 9, 9, 8, 3, 3, 3, 3, 7, 7, 7, 7])
+    clusters = np.array([9, 9, 8, 8, 3, 3, 3, 3, 7, 7, 7, 7])
 
     mapped = map_clusters_to_classes(clusters, targets, selected)
 
     assert np.all(mapped[clusters == 9] == 0)
-    assert np.all(mapped[clusters == 8] == -1)
+    assert np.all(mapped[clusters == 8] == 0)
     assert np.all(mapped[clusters == 3] == 1)
     assert np.all(mapped[clusters == 7] == 2)
-    assigned_classes = [
-        np.unique(mapped[clusters == cluster_id]).item()
-        for cluster_id in np.unique(clusters)
-        if np.any(mapped[clusters == cluster_id] >= 0)
-    ]
-    assert len(assigned_classes) == len(set(assigned_classes))
 
 
 def test_correlation_physiology_mapping_names_three_signatures_and_rejects_extra():
@@ -134,6 +131,8 @@ def test_single_sample_benchmark_runs_required_euclidean_families(tmp_path):
         cluster_counts=(3,),
         include_adaptive=False,
         random_state=2,
+        temporal_protocol="clean-all-valid",
+        signal_cleaning_summary={"valid_cycle_count": 3, "fallback_used": False},
         csv_path=csv_path,
     )
 
@@ -154,6 +153,9 @@ def test_single_sample_benchmark_runs_required_euclidean_families(tmp_path):
     assert kmeans["heldout_partial_ARI"] == 1.0
     assert kmeans["heldout_mapped_macro_f1"] == 1.0
     assert "heldout_partial_mapped_macro_f1_resubstitution" not in result.table
+    assert set(result.table["temporal_protocol"]) == {"clean-all-valid"}
+    assert set(result.table["signal_cleaning_valid_cycle_count"]) == {3}
+    assert not result.table["signal_cleaning_fallback_used"].any()
     assert result.csv_path == csv_path.resolve()
     assert csv_path.is_file()
     saved = np.genfromtxt(csv_path, delimiter=",", names=True, dtype=None, encoding="utf-8")
@@ -181,6 +183,7 @@ def test_benchmark_reports_label_free_physiology_mapping(tmp_path):
     row = result.table.iloc[0]
     assert row["heldout_physiology_macro_f1"] == 1.0
     assert row["heldout_physiology_mapped_coverage"] == 1.0
+    assert row["semantic_mapping"] == "partial_ground_truth_majority"
     assert set(result.physiology_mapped_class_labels) == {
         "correlation_3band/kmeans_k3"
     }
@@ -215,6 +218,82 @@ def test_csv_is_checkpointed_before_a_later_method_is_interrupted(
         csv_path, delimiter=",", names=True, dtype=None, encoding="utf-8"
     )
     assert checkpoint["method"].item() == "kmeans_k3"
+
+
+def test_cluster_archive_is_independent_of_visualization_and_can_be_reevaluated(
+    tmp_path,
+):
+    _, targets = _targets()
+    X = np.repeat([[-3.0], [0.0], [3.0]], 4, axis=0)
+    weights = np.linspace(1.0, 2.0, len(X))
+    archive_directory = tmp_path / "clusters"
+
+    original = run_single_sample_benchmark(
+        {"embedding": X},
+        targets,
+        cluster_counts=(3,),
+        include_adaptive=False,
+        candidate_keys={"embedding/kmeans_k3"},
+        branch_weights=weights,
+        cluster_archive_dir=archive_directory,
+    )
+
+    archive_path = archive_directory / "embedding_kmeans_k3" / "clusters.npz"
+    assert archive_path.is_file()
+    assert "artifact_directory" not in original.table
+    archive = load_cluster_archive(archive_path)
+    np.testing.assert_array_equal(archive["branch_ids"], targets.branch_ids)
+    np.testing.assert_array_equal(
+        archive["cluster_labels"], original.cluster_labels["embedding/kmeans_k3"]
+    )
+    np.testing.assert_array_equal(archive["branch_weights"], weights)
+
+    reevaluated = reevaluate_cluster_archive(archive_path, targets)
+
+    assert reevaluated.table.loc[0, "heldout_partial_weighted_ARI"] == pytest.approx(
+        original.table.loc[0, "heldout_partial_weighted_ARI"]
+    )
+    assert "runtime_seconds" not in reevaluated.table
+
+    updated_csv = tmp_path / "updated_metrics.csv"
+    updated_table = reevaluate_cluster_archives(
+        archive_directory,
+        targets,
+        csv_path=updated_csv,
+    )
+    assert len(updated_table) == 1
+    assert updated_csv.is_file()
+    assert updated_table.loc[0, "heldout_partial_weighted_ARI"] == pytest.approx(
+        original.table.loc[0, "heldout_partial_weighted_ARI"]
+    )
+
+
+def test_legacy_visualization_archive_can_be_loaded_and_reevaluated(tmp_path):
+    branch_map, targets = _targets()
+    method_directory = tmp_path / "legacy_visualizations" / "old_method"
+    method_directory.mkdir(parents=True)
+    archive_path = method_directory / "labels_and_masks.npz"
+    semantic = np.repeat([0, 1, 2], 4)
+    np.savez_compressed(
+        archive_path,
+        branch_ids=targets.branch_ids,
+        cluster_labels=np.repeat([8, 3, 5], 4),
+        semantic_labels=semantic,
+        mask_artery=np.isin(branch_map, [1, 2, 3, 4]),
+        mask_vein=np.isin(branch_map, [5, 6, 7, 8]),
+        mask_aliased_artery=np.isin(branch_map, [9, 10, 11, 12]),
+    )
+
+    archive = load_cluster_archive(archive_path)
+    assert archive["schema_version"] == 0
+    assert archive["temporal_leakage"] is True
+    result = reevaluate_cluster_archive(
+        archive_path,
+        targets,
+        labeled_vessels=branch_map,
+    )
+
+    assert result.table.loc[0, "heldout_physiology_macro_f1"] == 1.0
 
 
 def test_class_masks_are_returned_to_original_branch_alignment():
@@ -284,6 +363,7 @@ def test_custom_two_step_candidate_saves_visualization_and_arrays(tmp_path):
         subsample_safe=False,
     )
     output = tmp_path / "visualizations"
+    archive_output = tmp_path / "clusters"
     result = run_single_sample_benchmark(
         {},
         targets,
@@ -297,6 +377,7 @@ def test_custom_two_step_candidate_saves_visualization_and_arrays(tmp_path):
         beat_period=6,
         visualization_image=branch_map.astype(float),
         visualization_dir=output,
+        cluster_archive_dir=archive_output,
         csv_path=tmp_path / "metrics.csv",
     )
 
@@ -316,6 +397,11 @@ def test_custom_two_step_candidate_saves_visualization_and_arrays(tmp_path):
     assert arrays["mask_artery"].sum() == 4
     assert arrays["mask_vein"].sum() == 4
     assert arrays["mask_aliased_artery"].sum() == 4
+    archive = load_cluster_archive(
+        archive_output / "two_step_fourier_then_correlation" / "clusters.npz"
+    )
+    for name, mask in method_masks.items():
+        np.testing.assert_array_equal(archive["class_masks"][name], mask)
 
 
 def test_three_real_embedding_components_are_not_projected():

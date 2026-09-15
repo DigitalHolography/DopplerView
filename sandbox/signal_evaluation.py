@@ -4,6 +4,8 @@ import numpy as np
 from scipy.signal import coherence
 from scipy.stats import spearmanr
 
+from .signal_preprocessing import interpolate_artifact_samples
+
 
 def alternating_cycle_split(n_frames, beat_period, *, first_cycle=0):
     """Return disjoint boolean masks containing alternating complete cycles."""
@@ -26,7 +28,37 @@ def alternating_cycle_split(n_frames, beat_period, *, first_cycle=0):
     return train, evaluation
 
 
-def _mask_signal(video, mask, frame_mask):
+def cycle_templates_from_frame_mask(signals, frame_mask, beat_period, *, reducer="mean"):
+    """Aggregate complete selected cycles into one template per signal.
+
+    ``frame_mask`` is expected to select whole cycles produced for the same
+    ``beat_period``.  Rejecting incomplete selections here catches stale masks
+    left in a notebook after loading a different acquisition.
+    """
+    signals = np.asarray(signals, dtype=float)
+    frame_mask = np.asarray(frame_mask, dtype=bool)
+    if signals.ndim != 2:
+        raise ValueError("signals must be a branch-by-time array")
+    if frame_mask.shape != (signals.shape[1],):
+        raise ValueError("frame_mask must contain one value per signal frame")
+    if not isinstance(beat_period, (int, np.integer)) or beat_period < 2:
+        raise ValueError("beat_period must be an integer of at least two samples")
+
+    selected = signals[:, frame_mask]
+    if selected.shape[1] == 0 or selected.shape[1] % beat_period:
+        raise ValueError(
+            "frame_mask must select one or more complete cycles for the current "
+            "beat_period; recompute the cycle split after loading each measure"
+        )
+    cycles = selected.reshape(selected.shape[0], -1, beat_period)
+    if reducer == "mean":
+        return np.mean(cycles, axis=1)
+    if reducer == "median":
+        return np.median(cycles, axis=1)
+    raise ValueError("reducer must be either 'mean' or 'median'")
+
+
+def _mask_signal(video, mask, frame_mask, artifact_mask=None):
     video = np.asarray(video, dtype=float)
     mask = np.asarray(mask, dtype=bool)
     if video.ndim != 3 or mask.shape != video.shape[1:]:
@@ -34,6 +66,11 @@ def _mask_signal(video, mask, frame_mask):
     if not np.any(mask):
         return None
     signal = np.mean(video[:, mask], axis=1)
+    if artifact_mask is not None:
+        artifact_mask = np.asarray(artifact_mask, dtype=bool)
+        if artifact_mask.shape != (len(video),):
+            raise ValueError("artifact_mask must contain one value per video frame")
+        signal = interpolate_artifact_samples(signal, artifact_mask)
     if frame_mask is not None:
         if frame_mask.shape != (len(video),):
             raise ValueError("frame_mask must contain one value per video frame")
@@ -168,6 +205,7 @@ def evaluate_mask_signal_similarity(
     sampling_frequency,
     beat_period,
     frame_mask=None,
+    artifact_mask=None,
     exclude_reference_pixels=True,
     max_lag_fraction=0.25,
 ):
@@ -192,6 +230,10 @@ def evaluate_mask_signal_similarity(
     reference_union = np.any(np.stack(list(references.values())), axis=0)
     if frame_mask is not None:
         frame_mask = np.asarray(frame_mask, dtype=bool)
+    if artifact_mask is not None:
+        artifact_mask = np.asarray(artifact_mask, dtype=bool)
+        if artifact_mask.shape != (len(first_video),):
+            raise ValueError("artifact_mask must contain one value per video frame")
 
     metrics = {}
     metric_groups = {}
@@ -205,8 +247,12 @@ def evaluate_mask_signal_similarity(
             if exclude_reference_pixels:
                 predicted_mask = predicted_mask & ~reference_union
             reference_mask = references[class_name]
-            predicted_signal = _mask_signal(video, predicted_mask, frame_mask)
-            reference_signal = _mask_signal(video, reference_mask, frame_mask)
+            predicted_signal = _mask_signal(
+                video, predicted_mask, frame_mask, artifact_mask
+            )
+            reference_signal = _mask_signal(
+                video, reference_mask, frame_mask, artifact_mask
+            )
             prefix = f"signal_{video_name}_{class_name}_"
             metrics[f"{prefix}predicted_pixel_count"] = int(np.count_nonzero(predicted_mask))
             metrics[f"{prefix}reference_pixel_count"] = int(np.count_nonzero(reference_mask))

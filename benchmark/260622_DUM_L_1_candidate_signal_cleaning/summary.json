@@ -1,0 +1,20 @@
+{
+  "measure": "260622_DUM_L_1",
+  "h5_path": "D:\\dataset_choroid\\260622_DUM_L_1\\260622_DUM_L_1_DV.h5",
+  "mask_source": "candidate",
+  "mask_paths": [],
+  "sampling_frequency": 144.67578125,
+  "n_frames": 640,
+  "initial_beat_period": 136,
+  "beat_period": 167,
+  "phase_offset": 125,
+  "anchor_polarity": "negative",
+  "anchor_count": 5,
+  "artifact_frame_count": 39,
+  "artifact_frame_fraction": 0.0609375,
+  "cycle_count": 3,
+  "valid_cycle_count": 2,
+  "valid_cycle_fraction": 0.6666666666666666,
+  "fit_frame_count": 314,
+  "fallback_used": false
+}

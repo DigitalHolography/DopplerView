@@ -32,6 +32,8 @@ from .signal_evaluation import evaluate_mask_signal_similarity
 
 logger = logging.getLogger(__name__)
 
+CLUSTER_ARCHIVE_SCHEMA_VERSION = 1
+
 CLUSTER_COLORS = (
     "tab:red",
     "tab:blue",
@@ -166,12 +168,12 @@ def _masked_targets(targets, selected):
 
 
 def map_clusters_to_classes(cluster_labels, targets, fit_mask, sample_weight=None):
-    """One-to-one Hungarian cluster alignment using training labels only.
+    """Map each cluster independently to its partial-label majority class.
 
-    The score of a cluster/class pair is the sum of branch weights multiplied
-    by partial-label confidence.  Only positive-evidence assignments are kept;
-    noise, clusters without evidence, and surplus clusters remain ``UNLABELED``.
-    This function is intended for evaluation alignment, not deployment.
+    This restores the original mask-to-partial-ground-truth behavior: several
+    clusters may map to the same semantic class, and a cluster is left
+    ``UNLABELED`` only when the fitting annotations provide no evidence for it.
+    Evidence is weighted by branch weight and partial-label confidence.
     """
     cluster_labels = np.asarray(cluster_labels)
     fit_mask = np.asarray(fit_mask, dtype=bool) & targets.labeled_mask
@@ -184,24 +186,17 @@ def map_clusters_to_classes(cluster_labels, targets, fit_mask, sample_weight=Non
     )
     if weights.shape != cluster_labels.shape:
         raise ValueError("sample_weight must contain one value per branch")
-    cluster_ids = np.unique(cluster_labels[cluster_labels >= 0])
     mapped = np.full(len(cluster_labels), UNLABELED, dtype=int)
-    if not len(cluster_ids):
-        return mapped
-    scores = np.zeros((len(cluster_ids), len(targets.class_names)), dtype=float)
-    for row, cluster_id in enumerate(cluster_ids):
+    for cluster_id in np.unique(cluster_labels[cluster_labels >= 0]):
         evidence = fit_mask & (cluster_labels == cluster_id)
         if not np.any(evidence):
             continue
-        scores[row] = np.bincount(
+        scores = np.bincount(
             targets.labels[evidence],
             weights=weights[evidence] * targets.confidence[evidence],
             minlength=len(targets.class_names),
         )
-    rows, classes = linear_sum_assignment(-scores)
-    for row, class_label in zip(rows, classes):
-        if scores[row, class_label] > 0:
-            mapped[cluster_labels == cluster_ids[row]] = int(class_label)
+        mapped[cluster_labels == cluster_id] = int(np.argmax(scores))
     return mapped
 
 
@@ -372,6 +367,226 @@ def _validated_class_masks(class_masks, targets, labeled_vessels):
     if np.any(overlap_count > 1):
         raise ValueError("class_masks must be mutually exclusive")
     return masks
+
+
+def _save_cluster_archive(
+    output_directory,
+    key,
+    candidate,
+    prediction,
+    partial_targets,
+    *,
+    branch_weights=None,
+    deployment_correlation_features=None,
+    offline_mapped_labels=None,
+    physiology_mapped_labels=None,
+    semantic_labels=None,
+):
+    """Atomically save the branch partition needed for later re-evaluation."""
+    method_directory = Path(output_directory) / _safe_output_name(key)
+    method_directory.mkdir(parents=True, exist_ok=True)
+    archive_path = method_directory / "clusters.npz"
+    temporary_path = archive_path.with_suffix(archive_path.suffix + ".tmp")
+
+    class_names = np.asarray(partial_targets.class_names, dtype=str)
+    class_masks = prediction.class_masks
+    if class_masks is None:
+        mask_stack = np.empty((0, 0, 0), dtype=bool)
+    else:
+        mask_stack = np.stack(
+            [np.asarray(class_masks[name], dtype=bool) for name in partial_targets.class_names]
+        )
+
+    def optional_vector(values, dtype):
+        return (
+            np.empty(0, dtype=dtype)
+            if values is None
+            else np.asarray(values, dtype=dtype)
+        )
+
+    correlation_features = (
+        np.empty((0, 3), dtype=float)
+        if deployment_correlation_features is None
+        else np.asarray(deployment_correlation_features, dtype=float)
+    )
+    try:
+        with temporary_path.open("wb") as stream:
+            np.savez_compressed(
+                stream,
+                schema_version=np.asarray(CLUSTER_ARCHIVE_SCHEMA_VERSION),
+                key=np.asarray(key),
+                representation=np.asarray(candidate.representation),
+                method=np.asarray(candidate.name),
+                temporal_leakage=np.asarray(candidate.temporal_leakage),
+                class_names=class_names,
+                branch_ids=np.asarray(partial_targets.branch_ids, dtype=int),
+                cluster_labels=np.asarray(prediction.cluster_labels, dtype=int),
+                deployment_labels=optional_vector(
+                    prediction.deployment_labels, int
+                ),
+                offline_mapped_labels=optional_vector(offline_mapped_labels, int),
+                physiology_mapped_labels=optional_vector(
+                    physiology_mapped_labels, int
+                ),
+                semantic_labels=optional_vector(semantic_labels, int),
+                branch_weights=optional_vector(branch_weights, float),
+                deployment_correlation_features=correlation_features,
+                native_class_masks=mask_stack,
+            )
+        temporary_path.replace(archive_path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+    return archive_path
+
+
+def load_cluster_archive(path):
+    """Load a current archive or a legacy visualization label archive."""
+    path = Path(path).expanduser().resolve()
+    with np.load(path, allow_pickle=False) as archive:
+        files = set(archive.files)
+        legacy_required = {"branch_ids", "cluster_labels", "semantic_labels"}
+        if "schema_version" not in files:
+            if not legacy_required <= files:
+                missing = legacy_required - files
+                raise ValueError(
+                    f"legacy cluster archive is missing fields: {sorted(missing)}"
+                )
+            preferred_names = ("artery", "vein", "aliased_artery")
+            class_names = tuple(
+                name for name in preferred_names if f"mask_{name}" in files
+            )
+            if not class_names:
+                raise ValueError("legacy cluster archive does not contain class masks")
+            class_masks = {
+                name: np.asarray(archive[f"mask_{name}"], dtype=bool)
+                for name in class_names
+            }
+
+            representation = "legacy_visualization_archive"
+            method = path.parent.name
+            temporal_leakage = True  # Conservative when no matching CSV is found.
+            artifact_path = str(path.parent).casefold()
+            for csv_path in path.parent.parent.glob("*.csv"):
+                try:
+                    table = pd.read_csv(csv_path)
+                except Exception:
+                    continue
+                if "artifact_directory" not in table or not len(table):
+                    continue
+                matches = table["artifact_directory"].astype(str).map(
+                    lambda value: str(Path(value).expanduser().resolve()).casefold()
+                    == artifact_path
+                )
+                if np.any(matches):
+                    row = table.loc[matches].iloc[0]
+                    representation = str(row["representation"])
+                    method = str(row["method"])
+                    leakage_value = row.get("temporal_leakage", True)
+                    temporal_leakage = (
+                        leakage_value
+                        if isinstance(leakage_value, (bool, np.bool_))
+                        else str(leakage_value).strip().lower() == "true"
+                    )
+                    break
+
+            semantic_labels = np.asarray(archive["semantic_labels"], dtype=int)
+            return {
+                "path": path,
+                "schema_version": 0,
+                "key": f"{representation}/{method}",
+                "representation": representation,
+                "method": method,
+                "temporal_leakage": bool(temporal_leakage),
+                "class_names": class_names,
+                "branch_ids": np.asarray(archive["branch_ids"], dtype=int),
+                "cluster_labels": np.asarray(archive["cluster_labels"], dtype=int),
+                "deployment_labels": semantic_labels,
+                "offline_mapped_labels": np.empty(0, dtype=int),
+                "physiology_mapped_labels": semantic_labels.copy(),
+                "semantic_labels": semantic_labels,
+                "branch_weights": np.empty(0, dtype=float),
+                "deployment_correlation_features": np.empty((0, 3), dtype=float),
+                "class_masks": class_masks,
+            }
+
+        required = {
+            "schema_version",
+            "key",
+            "representation",
+            "method",
+            "temporal_leakage",
+            "class_names",
+            "branch_ids",
+            "cluster_labels",
+            "deployment_labels",
+            "offline_mapped_labels",
+            "physiology_mapped_labels",
+            "semantic_labels",
+            "branch_weights",
+            "deployment_correlation_features",
+            "native_class_masks",
+        }
+        missing = required - files
+        if missing:
+            raise ValueError(f"cluster archive is missing fields: {sorted(missing)}")
+        version = int(np.asarray(archive["schema_version"]).item())
+        if version != CLUSTER_ARCHIVE_SCHEMA_VERSION:
+            raise ValueError(
+                f"unsupported cluster archive schema {version}; "
+                f"expected {CLUSTER_ARCHIVE_SCHEMA_VERSION}"
+            )
+        class_names = tuple(str(name) for name in archive["class_names"])
+        mask_stack = np.asarray(archive["native_class_masks"], dtype=bool)
+        if mask_stack.size and mask_stack.shape[0] != len(class_names):
+            raise ValueError("native class masks do not match archived class names")
+        class_masks = (
+            None
+            if not mask_stack.size
+            else {name: mask_stack[index] for index, name in enumerate(class_names)}
+        )
+        return {
+            "path": path,
+            "schema_version": version,
+            "key": str(np.asarray(archive["key"]).item()),
+            "representation": str(np.asarray(archive["representation"]).item()),
+            "method": str(np.asarray(archive["method"]).item()),
+            "temporal_leakage": bool(
+                np.asarray(archive["temporal_leakage"]).item()
+            ),
+            "class_names": class_names,
+            "branch_ids": np.asarray(archive["branch_ids"], dtype=int),
+            "cluster_labels": np.asarray(archive["cluster_labels"], dtype=int),
+            "deployment_labels": np.asarray(archive["deployment_labels"], dtype=int),
+            "offline_mapped_labels": np.asarray(
+                archive["offline_mapped_labels"], dtype=int
+            ),
+            "physiology_mapped_labels": np.asarray(
+                archive["physiology_mapped_labels"], dtype=int
+            ),
+            "semantic_labels": np.asarray(archive["semantic_labels"], dtype=int),
+            "branch_weights": np.asarray(archive["branch_weights"], dtype=float),
+            "deployment_correlation_features": np.asarray(
+                archive["deployment_correlation_features"], dtype=float
+            ),
+            "class_masks": class_masks,
+        }
+
+
+def _remap_archived_class_labels(labels, source_names, target_names):
+    labels = np.asarray(labels, dtype=int)
+    if not len(labels):
+        return None
+    source_names = tuple(source_names)
+    target_names = tuple(target_names)
+    if set(source_names) != set(target_names):
+        raise ValueError(
+            "updated targets must contain the same semantic class names as the archive"
+        )
+    remapped = np.full(labels.shape, UNLABELED, dtype=int)
+    target_indices = {name: index for index, name in enumerate(target_names)}
+    for source_index, name in enumerate(source_names):
+        remapped[labels == source_index] = target_indices[name]
+    return remapped
 
 
 def class_masks_to_branch_labels(
@@ -982,6 +1197,9 @@ def run_single_sample_benchmark(
     sampling_frequency=None,
     beat_period=None,
     signal_frame_mask=None,
+    signal_artifact_mask=None,
+    temporal_protocol="unspecified",
+    signal_cleaning_summary=None,
     constraint_fraction=0.5,
     random_state=0,
     stability_runs=0,
@@ -989,6 +1207,7 @@ def run_single_sample_benchmark(
     include_adaptive=True,
     candidate_keys=None,
     csv_path=None,
+    cluster_archive_dir=None,
     visualization_dir=None,
     visualization_image=None,
     soft_dtw_max_pairwise_samples=96,
@@ -997,10 +1216,14 @@ def run_single_sample_benchmark(
 ):
     """Benchmark method families on one sample without consuming held-out labels.
 
+    ``temporal_protocol`` and ``signal_cleaning_summary`` record preprocessing
+    performed before this function received its already-built embeddings.
     Expensive execution is explicit: pass ``stability_runs >= 2`` to enable
     repeated subsampling. The default Soft-DTW candidate uses a 96-branch
     CLARA-style medoid search and 32-sample templates. Set either limit to
-    ``None`` only for deliberately small exact experiments.
+    ``None`` only for deliberately small exact experiments. Set
+    ``cluster_archive_dir`` to save each successful partition progressively,
+    independently of visualization, for later ground-truth re-evaluation.
     """
     if (
         not embeddings
@@ -1137,6 +1360,24 @@ def run_single_sample_benchmark(
                 raise ValueError(
                     "visualization_image and labeled_vessels must have matching spatial shapes"
                 )
+    resolved_cluster_archive_dir = None
+    if cluster_archive_dir is not None:
+        resolved_cluster_archive_dir = (
+            Path(cluster_archive_dir).expanduser().resolve()
+        )
+        resolved_cluster_archive_dir.mkdir(parents=True, exist_ok=True)
+
+    if not isinstance(temporal_protocol, str) or not temporal_protocol:
+        raise ValueError("temporal_protocol must be a non-empty string")
+    if signal_cleaning_summary is not None and not isinstance(
+        signal_cleaning_summary, dict
+    ):
+        raise TypeError("signal_cleaning_summary must be a dictionary or None")
+    cleaning_metadata = {
+        f"signal_cleaning_{name}": value
+        for name, value in (signal_cleaning_summary or {}).items()
+        if np.isscalar(value) or value is None
+    }
 
     rows = []
     label_results = {}
@@ -1167,6 +1408,8 @@ def run_single_sample_benchmark(
             "method": candidate.name,
             "representation": candidate.representation,
             "temporal_leakage": candidate.temporal_leakage,
+            "temporal_protocol": temporal_protocol,
+            **cleaning_metadata,
         }
         method_weights = branch_weights if "weighted" in candidate.name else None
         logger.info(
@@ -1216,6 +1459,24 @@ def run_single_sample_benchmark(
             )
             row["clustering_seconds"] = perf_counter() - start
             label_results[key] = labels
+            if resolved_cluster_archive_dir is not None:
+                archive_path = _save_cluster_archive(
+                    resolved_cluster_archive_dir,
+                    key,
+                    candidate,
+                    prediction,
+                    partial_targets,
+                    branch_weights=branch_weights,
+                    deployment_correlation_features=deployment_correlation_features,
+                )
+                row["cluster_archive_path"] = str(archive_path)
+                logger.info(
+                    "[%d/%d] Archived cluster labels for %s to %s",
+                    candidate_index,
+                    len(candidates),
+                    key,
+                    archive_path,
+                )
 
             all_metrics = evaluate_partial_branch_clustering(
                 labels,
@@ -1332,13 +1593,31 @@ def run_single_sample_benchmark(
                         ),
                     }
                 )
+            # Method-native assignments remain authoritative for two-step
+            # pipelines. Anonymous one-step clusters are displayed and used for
+            # signal comparisons with the partial-ground-truth mapping. Keep
+            # correlation-prototype labels as a separate research diagnostic.
             semantic_labels = (
-                deployment_labels
-                if deployment_labels is not None
-                else physiology_mapped
-                if physiology_mapped is not None
-                else mapped
+                deployment_labels if deployment_labels is not None else mapped
             )
+            row["semantic_mapping"] = (
+                "method_assignment"
+                if deployment_labels is not None
+                else "partial_ground_truth_majority"
+            )
+            if resolved_cluster_archive_dir is not None:
+                _save_cluster_archive(
+                    resolved_cluster_archive_dir,
+                    key,
+                    candidate,
+                    prediction,
+                    partial_targets,
+                    branch_weights=branch_weights,
+                    deployment_correlation_features=deployment_correlation_features,
+                    offline_mapped_labels=mapped,
+                    physiology_mapped_labels=physiology_mapped,
+                    semantic_labels=semantic_labels,
+                )
             if use_signal_metrics:
                 predicted_masks = (
                     class_masks
@@ -1356,6 +1635,7 @@ def run_single_sample_benchmark(
                     sampling_frequency=sampling_frequency,
                     beat_period=beat_period,
                     frame_mask=signal_frame_mask,
+                    artifact_mask=signal_artifact_mask,
                     exclude_reference_pixels=True,
                 )
                 row.update(signal_metrics)
@@ -1467,3 +1747,184 @@ def run_single_sample_benchmark(
         csv_path=resolved_csv_path,
         physiology_mapped_class_labels=physiology_mapped_results,
     )
+
+
+def reevaluate_cluster_archive(
+    archive_path,
+    partial_targets,
+    *,
+    branch_weights=None,
+    labeled_vessels=None,
+    signal_videos=None,
+    signal_reference_masks=None,
+    sampling_frequency=None,
+    beat_period=None,
+    signal_frame_mask=None,
+    signal_artifact_mask=None,
+    temporal_protocol="unspecified",
+    signal_cleaning_summary=None,
+    constraint_fraction=0.5,
+    random_state=0,
+    csv_path=None,
+):
+    """Recompute label and optional signal metrics without reclustering.
+
+    ``partial_targets`` should be rebuilt from the revised masks. The archive's
+    anonymous cluster labels are always reused. Method-native semantic labels
+    are matched by class name, while one-step physiological labels are
+    recomputed from the archived raw HF/M0/LF correlation features.
+
+    Runtime and resampling-stability metrics cannot be reconstructed from one
+    saved partition and are intentionally absent from the returned row.
+    """
+    archive = load_cluster_archive(archive_path)
+    if not np.array_equal(archive["branch_ids"], partial_targets.branch_ids):
+        raise ValueError(
+            "archive branch_ids do not match the updated partial targets; "
+            "use the same labeled-vessel branch map"
+        )
+
+    archived_weights = archive["branch_weights"]
+    if branch_weights is None and len(archived_weights):
+        branch_weights = archived_weights
+
+    deployment_labels = _remap_archived_class_labels(
+        archive["deployment_labels"],
+        archive["class_names"],
+        partial_targets.class_names,
+    )
+    correlation_features = archive["deployment_correlation_features"]
+    if not len(correlation_features):
+        correlation_features = None
+
+    class_masks = None
+    if archive["class_masks"] is not None and labeled_vessels is not None:
+        if set(archive["class_masks"]) != set(partial_targets.class_names):
+            raise ValueError(
+                "updated targets must contain the same semantic class names as "
+                "the archived native masks"
+            )
+        class_masks = {
+            name: archive["class_masks"][name]
+            for name in partial_targets.class_names
+        }
+
+    prediction = BenchmarkPrediction(
+        cluster_labels=archive["cluster_labels"],
+        deployment_labels=deployment_labels,
+        class_masks=class_masks,
+    )
+    candidate = BenchmarkCandidate(
+        name=archive["method"],
+        representation=archive["representation"],
+        X=None,
+        run=lambda _X, **_: prediction,
+        subsample_safe=False,
+        temporal_leakage=archive["temporal_leakage"],
+    )
+    result = run_single_sample_benchmark(
+        {},
+        partial_targets,
+        custom_candidates=(candidate,),
+        cluster_counts=(),
+        branch_weights=branch_weights,
+        deployment_correlation_features=correlation_features,
+        labeled_vessels=labeled_vessels,
+        signal_videos=signal_videos,
+        signal_reference_masks=signal_reference_masks,
+        sampling_frequency=sampling_frequency,
+        beat_period=beat_period,
+        signal_frame_mask=signal_frame_mask,
+        signal_artifact_mask=signal_artifact_mask,
+        temporal_protocol=temporal_protocol,
+        signal_cleaning_summary=signal_cleaning_summary,
+        constraint_fraction=constraint_fraction,
+        random_state=random_state,
+        include_adaptive=False,
+    )
+    table = result.table.drop(
+        columns=["clustering_seconds", "evaluation_seconds", "runtime_seconds"],
+        errors="ignore",
+    )
+    resolved_csv_path = None
+    if csv_path is not None:
+        resolved_csv_path = Path(csv_path).expanduser().resolve()
+        resolved_csv_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path = resolved_csv_path.with_suffix(
+            resolved_csv_path.suffix + ".tmp"
+        )
+        try:
+            table.to_csv(temporary_path, index=False)
+            temporary_path.replace(resolved_csv_path)
+        finally:
+            temporary_path.unlink(missing_ok=True)
+    return replace(result, table=table, csv_path=resolved_csv_path)
+
+
+def reevaluate_cluster_archives(
+    archive_directory,
+    partial_targets,
+    *,
+    csv_path=None,
+    include_legacy=True,
+    **evaluation_kwargs,
+):
+    """Re-evaluate every method archive in a sample directory progressively."""
+    archive_directory = Path(archive_directory).expanduser().resolve()
+    archive_paths = list(archive_directory.rglob("clusters.npz"))
+    if include_legacy:
+        archive_paths.extend(
+            path
+            for path in archive_directory.rglob("labels_and_masks.npz")
+            if not (path.parent / "clusters.npz").exists()
+        )
+    archive_paths = sorted(set(archive_paths))
+    if not archive_paths:
+        raise ValueError(f"no cluster archives found in {archive_directory}")
+
+    resolved_csv_path = None
+    if csv_path is not None:
+        resolved_csv_path = Path(csv_path).expanduser().resolve()
+        resolved_csv_path.parent.mkdir(parents=True, exist_ok=True)
+
+    rows = []
+    for index, archive_path in enumerate(archive_paths, start=1):
+        logger.info(
+            "[%d/%d] Re-evaluating %s",
+            index,
+            len(archive_paths),
+            archive_path,
+        )
+        try:
+            result = reevaluate_cluster_archive(
+                archive_path,
+                partial_targets,
+                **evaluation_kwargs,
+            )
+            row = result.table.iloc[0].to_dict()
+            row["cluster_archive_path"] = str(archive_path)
+        except Exception as error:
+            try:
+                archive = load_cluster_archive(archive_path)
+                row = {
+                    "representation": archive["representation"],
+                    "method": archive["method"],
+                    "cluster_archive_path": str(archive_path),
+                }
+            except Exception:
+                row = {"cluster_archive_path": str(archive_path)}
+            row["error"] = f"{type(error).__name__}: {error}"
+            logger.error("Could not re-evaluate %s: %s", archive_path, error)
+        rows.append(row)
+
+        if resolved_csv_path is not None:
+            temporary_path = resolved_csv_path.with_suffix(
+                resolved_csv_path.suffix + ".tmp"
+            )
+            try:
+                pd.DataFrame(rows).to_csv(temporary_path, index=False)
+                temporary_path.replace(resolved_csv_path)
+            finally:
+                temporary_path.unlink(missing_ok=True)
+    logger.info("Re-evaluated %d cluster archives", len(rows))
+    return pd.DataFrame(rows)

@@ -545,6 +545,7 @@ def evaluate_experiment(
     signal_sampling_frequency=None,
     signal_beat_period=None,
     signal_frame_mask=None,
+    signal_artifact_mask=None,
     signal_exclude_reference_pixels=True,
 ):
     """Evaluate an experiment using whichever evidence is available.
@@ -673,6 +674,7 @@ def evaluate_experiment(
                 sampling_frequency=signal_sampling_frequency,
                 beat_period=signal_beat_period,
                 frame_mask=signal_frame_mask,
+                artifact_mask=signal_artifact_mask,
                 exclude_reference_pixels=signal_exclude_reference_pixels,
             )
         )
