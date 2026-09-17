@@ -33,12 +33,12 @@ from scipy.signal import find_peaks
 
 # 原始 AVI 视频所在文件夹
 INPUT_DIR = Path(
-    r"D:\video_masked"
+    r"D:\D:\N2T\videos_2"
 )
 
 # 所有处理结果的总输出文件夹
 OUTPUT_DIR = Path(
-    r"D:\video_masked\output"
+    r"D:\D:\N2T\videos_2\output"
 )
 
 

@@ -1,5 +1,13 @@
 # N2N research scripts
 
+To collect selected recordings from mapped drives, see
+[Collect LDH videos](COLLECTING.md) and `collect_videos.py` (AVI copy or lossless
+`moment0ff` extraction from H5).
+
+For a configurable implementation of the article with lossless outputs and tests,
+see [Reproducing Noise2Time](REPRODUCING.md) and `noise2time.py`. The historical
+experiments below remain available for provenance and comparison.
+
 This directory contains experimental preprocessing, self-supervised video-denoising, and comparison scripts for laser Doppler holography (LDH) videos. They are standalone research programs, not commands exposed by the `dopplerview` package.
 
 Most scripts have no command-line interface. Configure the absolute paths and experiment constants near the top (and, for some trainers, model paths near the bottom), then run the file from the repository root.

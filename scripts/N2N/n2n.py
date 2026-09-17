@@ -31,15 +31,15 @@ import torch.nn as nn
 # ============================================================
 
 VIDEO_DIR = Path(
-    r"C:\Users\Novovorontsovka\Downloads\LDH_pipeline_output\05_trimmed_videos"
+    r"D:\N2T\videos_2\output\05_trimmed_videos"
 )
 
 BRIGHTNESS_DIR = Path(
-    r"C:\Users\Novovorontsovka\Downloads\LDH_pipeline_output\04_brightness_tables"
+    r"D:\N2T\videos_2\output\04_brightness_tables"
 )
 
 VESSEL_MASK_DIR = Path(
-    r"C:\Users\Novovorontsovka\Downloads\LDH_pipeline_output\03_vessel_masks"
+    r"D:\N2T\videos_2\output\03_vessel_masks"
 )
 
 # 只接受 512×512 视频；其他尺寸直接跳过。
@@ -1677,7 +1677,7 @@ if DEVICE.type == "cuda":
     )
 
 LEARNING_RATE = 5e-5
-EPOCHS = 250
+EPOCHS = 50
 
 # 每个 epoch 抽取 8000 条 10-frame source sequence 来训练。
 # 抽样时保证每个通过尺寸检查的视频至少贡献 1 条 sequence。
@@ -2635,13 +2635,13 @@ def train_model(
 # ============================================================
 
 MODEL_SAVE_PATH = Path(
-    r"C:\Users\Novovorontsovka\Downloads\model\best_block32_convlstm_vessel_protection_200videos_batch2_8000.pth"
+    r"D:\N2T\runs\n2n_yang\model\best_block32_convlstm_vessel_protection_200videos_batch2_8000.pth"
 )
 
 # 每个 epoch 结束后保存当时模型的 state_dict。
 # 之后可以直接拿任意一个 epoch_xxx.pth 做推理。
 EPOCH_MODEL_DIR = Path(
-    r"C:\Users\Novovorontsovka\Downloads\model\epoch_models_block32_vessel_protection_200videos_batch2_8000"
+    r"D:\N2T\runs\n2n_yang\model\epoch_models_block32_vessel_protection_200videos_batch2_8000"
 )
 
 model = train_model(
