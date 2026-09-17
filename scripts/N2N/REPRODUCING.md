@@ -304,8 +304,21 @@ source-array hash, FPS, and the copied prefix.
 
 ## 4. Recreate the quantitative metrics
 
-Provide independently selected binary vessel/background NPY masks, each `(H,W)`.
+Provide independently selected binary vessel/background NPY or PNG masks, each `(H,W)`.
 They must be nonempty, disjoint, and inside the circular field of view.
+
+Handmade PNG masks are supported directly by `--vessel-mask` and
+`--background-mask`. Black pixels are excluded; any nonzero grayscale value or
+color channel selects the pixel. Fully transparent pixels are ignored, including
+hidden color values. Thus use white (or colored) vessels on black, not black
+vessels on white, and supply a mask rather than annotations over the original
+image. Nonzero antialiased edge pixels are included. Image dimensions and pixel
+alignment must match the prepared video; masks are never automatically resized
+or inverted. NPY and PNG masks can be mixed in the same command.
+
+```powershell
+python scripts/N2N/noise2time.py evaluate --record "D:/N2T/prepared/measure_HD_M0" --denoised "D:/N2T/results/measure/denoised.npy" --vessel-mask "D:/N2T/masks/vessels.png" --background-mask "D:/N2T/masks/background.npy" --output "D:/N2T/measure_metrics.json"
+```
 
 ```powershell
 python scripts/N2N/noise2time.py evaluate --record "D:/N2T/prepared/video01" --denoised "D:/N2T/video01_denoised.npy" --vessel-mask "D:/N2T/masks/video01_vessel.npy" --background-mask "D:/N2T/masks/video01_background.npy" --output "D:/N2T/video01_metrics.json"

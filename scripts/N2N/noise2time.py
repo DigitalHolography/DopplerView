@@ -25,6 +25,8 @@ import torch
 from torch import nn
 from tqdm import tqdm
 
+import warnings
+
 
 @dataclass
 class Config:
@@ -726,6 +728,36 @@ def denoise(args):
           + f"; omit first {cfg.history} copied frames from metrics")
 
 
+def load_evaluation_mask(path, expected_shape):
+    """Load a binary NPY or PNG mask without changing polarity."""
+    path = Path(path)
+    if path.suffix.lower() == ".npy":
+        values = np.load(path, allow_pickle=False)
+        if values.ndim != 2 or values.dtype.kind not in "buif" or not np.isfinite(values).all():
+            raise ValueError(f"Mask must be a finite numeric 2D array: {path}")
+        mask = values != 0
+    elif path.suffix.lower() == ".png":
+        # imdecode supports Unicode paths on Windows via NumPy file reading.
+        encoded = np.fromfile(path, dtype=np.uint8)
+        values = cv2.imdecode(encoded, cv2.IMREAD_UNCHANGED) if encoded.size else None
+        if values is None:
+            raise ValueError(f"Cannot decode PNG mask: {path}")
+        if values.ndim == 2:
+            mask = values != 0
+        elif values.ndim == 3 and values.shape[2] in (3, 4):
+            mask = np.any(values[..., :3] != 0, axis=2)
+            if values.shape[2] == 4:
+                mask &= values[..., 3] != 0  # Ignore fully transparent pixels.
+        else:
+            raise ValueError(f"Unsupported PNG mask dimensions: {path}")
+    else:
+        raise ValueError(f"Mask must be .npy or .png: {path}")
+    if mask.shape != tuple(expected_shape):
+        mask = cv2.resize(mask.astype(np.uint8), tuple(reversed(expected_shape)), interpolation=cv2.INTER_NEAREST).astype(bool)
+        warnings.warn(f"Mask {path} resized to match ROI shape {expected_shape}")
+    return mask
+
+
 def evaluate(args):
     record = Record(args.record)
     restored = np.load(args.denoised, mmap_mode="r", allow_pickle=False)
@@ -734,12 +766,23 @@ def evaluate(args):
         raise ValueError("Output does not correspond to this source array")
     if restored.shape != record.frames.shape or not np.isfinite(restored).all():
         raise ValueError("Output dimensions/values invalid")
-    vessel = np.load(args.vessel_mask, allow_pickle=False).astype(bool)
-    background = np.load(args.background_mask, allow_pickle=False).astype(bool)
-    if (vessel.shape != record.roi.shape or background.shape != record.roi.shape
-            or not vessel.any() or not background.any() or np.any(vessel & background)
-            or np.any((vessel | background) & ~record.roi)):
-        raise ValueError("Masks must be nonempty, disjoint, and inside the ROI")
+    vessel = load_evaluation_mask(args.vessel_mask, record.roi.shape)
+    background = load_evaluation_mask(args.background_mask, record.roi.shape)
+    if (not vessel.any()):
+        raise ValueError("Vessel mask must be non-empty")
+    if (not background.any()):
+        raise ValueError("Background mask must be non-empty")
+    if (np.any(vessel & background)):
+        vessel &= ~(vessel & background)
+        background &= ~(vessel & background)
+        warnings.warn("Vessel and background masks must be non-overlapping")
+    print(f"Vessel mask: {vessel.sum()} pixels; background mask: {background.sum()} pixels")
+    print(f"ROI mask: {record.roi.sum()} pixels; vessel & background overlap: {(vessel & background).sum()} pixels")
+    warnings.warn("Vessel/background masks must be non-empty, non-overlapping, and match ROI shape")
+
+    vessel &= record.roi
+    background &= record.roi
+
     first = metadata["copied_prefix"]
     original = record.frames[first:]
     denoised = restored[first:]
@@ -766,6 +809,7 @@ def evaluate(args):
                   amplitude_ratio=amplitudes[1]/amplitudes[0] if amplitudes[0] > 1e-12 else None,
                   vessel_mean_original=float(before.mean()), vessel_mean_denoised=float(after.mean()),
                   vessel_mask_sha256=sha256(args.vessel_mask), background_mask_sha256=sha256(args.background_mask),
+                  mask_interpretation="Nonzero pixels selected; for PNG any nonzero color channel with nonzero alpha when present",
                   caveat="No clean reference: these are fluctuation and waveform diagnostics, not accuracy scores")
     if Path(args.output).exists():
         raise FileExistsError(args.output)
@@ -826,8 +870,8 @@ def main(argv=None):
     p = commands.add_parser("evaluate", help="Calculate the article's per-recording metrics")
     p.add_argument("--record", required=True)
     p.add_argument("--denoised", required=True)
-    p.add_argument("--vessel-mask", required=True)
-    p.add_argument("--background-mask", required=True)
+    p.add_argument("--vessel-mask", required=True, help="NPY or PNG mask: nonzero pixels select vessels; black is excluded")
+    p.add_argument("--background-mask", required=True, help="NPY or PNG mask: nonzero pixels select background")
     p.add_argument("--min-hz", type=float, default=.5)
     p.add_argument("--max-hz", type=float, default=3.)
     p.add_argument("--output", required=True)
