@@ -37,6 +37,12 @@
         "Choroid": {}
     },
     "analysis": {
+        "correlation_M0": "correlation_M0",
+        "correlation_LF_M0": "correlation_LF_M0_ff",
+        "correlation_HF_M0": "correlation_HF_M0_ff",
+        "diasys_M0": "diasys_image",
+        "diasys_LF_M0": "diasys_LF_M0_ff",
+        "diasys_HF_M0": "diasys_HF_M0_ff",
         "retinal_velocity_array": "retinal_vessel_velocity",
         "retinal_artery_velocity_signal": "retinal_artery_velocity_signal",
         "retinal_vein_velocity_signal": "retinal_vein_velocity_signal",

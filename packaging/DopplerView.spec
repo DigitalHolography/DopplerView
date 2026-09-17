@@ -13,6 +13,7 @@ datas += collect_data_files("onnxruntime")
 datas += collect_data_files("huggingface_hub")
 datas += collect_data_files("scipy")
 datas += collect_data_files("skimage")
+datas += collect_data_files("sv_ttk")
 
 # metadata (important for lazy loaders)
 datas += copy_metadata("imageio")
@@ -26,6 +27,7 @@ datas += copy_metadata("onnxruntime")
 hiddenimports = [
     # tkinter
     "tkinterdnd2",
+    "sv_ttk",
     # scipy — force eager loading to fix _distn_infrastructure NameError
     "scipy",
     "scipy.stats",
@@ -41,10 +43,10 @@ hiddenimports = [
     "scipy.linalg._decomp_update",
     "scipy.sparse.csgraph",
     "scipy.sparse.linalg",
-    'scipy._lib.array_api_compat',
-    'scipy._lib.array_api_compat.numpy',
-    'scipy._lib.array_api_compat.numpy.fft',
-    'scipy._lib.array_api_compat.numpy.linalg',
+    'scipy._external.array_api_compat',
+    'scipy._external.array_api_compat.numpy',
+    'scipy._external.array_api_compat.numpy.fft',
+    'scipy._external.array_api_compat.numpy.linalg',
     # skimage — force-import modules loaded lazily via lazy_loader
     "skimage",
     "skimage.filters",
@@ -78,6 +80,7 @@ hiddenimports = [
     "pandas",
     "yaml",
     "tqdm",
+    "psutil",
 ]
 
 hiddenimports += collect_submodules("scipy.stats")
@@ -110,7 +113,9 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name="DopplerView",
-    console=True,
+    # GUI executable: do not open a console window. Runtime output is written
+    # to AppData and mirrored in the application's Logs panel.
+    console=False,
     icon=os.path.join(ROOT, "DopplerView.ico"),
     debug=False,
     bootloader_ignore_signals=False,

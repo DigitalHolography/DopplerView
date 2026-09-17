@@ -4,9 +4,15 @@ Supports .pt (state_dict recommended) and .onnx.
 """
 
 from abc import ABC, abstractmethod
+import logging
+import time
 import numpy as np
 from dopplerview.utils.image_utils import normalize_to_uint8
+from dopplerview.utils.runtime_metrics import emit_metric, process_snapshot
 import cv2
+
+
+logger = logging.getLogger(__name__)
 
 class BaseModelWrapper(ABC):
     def __init__(self, spec, model_path):
@@ -14,10 +20,47 @@ class BaseModelWrapper(ABC):
         self.model_path = str(model_path)
 
     def predict(self, image: np.ndarray) -> np.ndarray:
+        total_started = time.perf_counter()
+        memory_started = process_snapshot()
+        preprocess_started = time.perf_counter()
         x = self._preprocess(image)
+        preprocess_s = time.perf_counter() - preprocess_started
+        inference_started = time.perf_counter()
         y = self._forward(x)
+        inference_s = time.perf_counter() - inference_started
+        postprocess_started = time.perf_counter()
         y = self._postprocess(y)
+        postprocess_s = time.perf_counter() - postprocess_started
+        memory_finished = process_snapshot()
+        emit_metric(
+            "inference",
+            model=getattr(self.spec, "name", "unknown"),
+            backend=self.backend_name(),
+            provider=self.provider_name(),
+            input_shape="x".join(str(size) for size in image.shape),
+            preprocess_s=preprocess_s,
+            inference_s=inference_s,
+            postprocess_s=postprocess_s,
+            total_s=time.perf_counter() - total_started,
+            process_rss_delta_mb=(
+                memory_finished["rss_mb"] - memory_started["rss_mb"]
+            ),
+            process_threads=memory_finished["process_threads"],
+        )
+        logger.info(
+            "[Model] %s inference on %s: %.3fs (total %.3fs)",
+            getattr(self.spec, "name", "unknown"),
+            self.provider_name(),
+            inference_s,
+            time.perf_counter() - total_started,
+        )
         return y
+
+    def backend_name(self):
+        return type(self).__name__
+
+    def provider_name(self):
+        return "unknown"
     
     def prepare_input(self, ctx):
         channels = []
@@ -66,9 +109,19 @@ class BaseModelWrapper(ABC):
     def _forward(self, x):
         pass
 class TorchModelWrapper(BaseModelWrapper):
-    def __init__(self, spec, model_path, device=None):
+    def __init__(self, spec, model_path, device=None, execution_policy=None):
         import torch
         super().__init__(spec, model_path)
+
+        if (
+            execution_policy is not None
+            and execution_policy.native_threads_per_task is not None
+        ):
+            torch.set_num_threads(execution_policy.native_threads_per_task)
+            try:
+                torch.set_num_interop_threads(1)
+            except RuntimeError:
+                pass
 
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -91,6 +144,16 @@ class TorchModelWrapper(BaseModelWrapper):
         self.model.to(self.device)
         self.model.eval()
 
+        emit_metric(
+            "model_loaded",
+            model=getattr(self.spec, "name", "unknown"),
+            backend=self.backend_name(),
+            provider=self.provider_name(),
+        )
+
+    def provider_name(self):
+        return str(self.device)
+
     def _forward(self, x):
         import torch
         with torch.no_grad():
@@ -100,7 +163,7 @@ class TorchModelWrapper(BaseModelWrapper):
 
 
 class ONNXModelWrapper(BaseModelWrapper):
-    def __init__(self, spec, model_path):
+    def __init__(self, spec, model_path, execution_policy=None):
         import onnxruntime as ort
         super().__init__(spec, model_path)
 
@@ -110,8 +173,28 @@ class ONNXModelWrapper(BaseModelWrapper):
             else ["CPUExecutionProvider"]
         )
 
-        self.session = ort.InferenceSession(self.model_path, providers=providers)
+        session_options = ort.SessionOptions()
+        if (
+            execution_policy is not None
+            and execution_policy.native_threads_per_task is not None
+        ):
+            session_options.intra_op_num_threads = execution_policy.native_threads_per_task
+            session_options.inter_op_num_threads = 1
+        self.session = ort.InferenceSession(
+            self.model_path,
+            sess_options=session_options,
+            providers=providers,
+        )
         self.input_name = self.session.get_inputs()[0].name
+        emit_metric(
+            "model_loaded",
+            model=getattr(self.spec, "name", "unknown"),
+            backend=self.backend_name(),
+            provider=self.provider_name(),
+        )
+
+    def provider_name(self):
+        return ",".join(self.session.get_providers())
 
     def _forward(self, x):
         b, c, h, w = self.session.get_inputs()[0].shape

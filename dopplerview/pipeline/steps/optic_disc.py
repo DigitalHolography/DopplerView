@@ -6,9 +6,10 @@ from dopplerview.segmentation import process_masks
 import numpy as np
 
 class OpticDiscSegmentationStep(BaseStep):
-    requires = {"M0_ff_image", "M1_ff_image"}
+    requires = {"M0_ff_image", "M1_image"}
     produces = {"optic_disc_mask", "optic_disc_center", "optic_disc_width", "optic_disc_height"}
     name = "optic_disc_segmentation"
+    model_tasks = {"optic_disc_detection"}
 
     def _relevant_config(self, ctx):
         params = ctx.dopplerview_config["Mask"]
@@ -36,7 +37,7 @@ class OpticDiscSegmentationStep(BaseStep):
         ctx.output_manager.save_optic_disc_detections(self.name, "optic_disc_detection", boxes, scale_x, scale_y, ctx)
         
         # Keep detections above confidence threshold
-        if bestbox[4] < 0.2:
+        if bestbox[4] < 0.3:
             raise ValueError(
                 "No confident bounding box found."
             )
@@ -54,7 +55,7 @@ class OpticDiscSegmentationStep(BaseStep):
         return (x_center, y_center), diameter_x, diameter_y
     
     def moment1_detection(self, ctx):
-        M1 = ctx.require("M1_ff_image")
+        M1 = ctx.require("M1_image")
         # Implement optic disc detection using M1 moments
         y_center, x_center = np.unravel_index(np.argmax(M1), M1.shape)
         diameter_x = diameter_y = 100  # Example diameter, adjust as needed

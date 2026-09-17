@@ -15,6 +15,19 @@ class ReadMomentsStep(BaseStep):
     def read_holo(self, file_path):
         pass
 
+    def _read_required_moment(self, h5_file, names):
+        last_error = KeyError(names)
+        for name in names:
+            if name not in h5_file:
+                continue
+            try:
+                return np.squeeze(np.asarray(h5_file[name][()]))
+            except Exception as exc:
+                last_error = exc
+        message = f"Cannot read {names} from '{h5_file.filename}'"
+        self.logger.error(message)
+        raise RuntimeError(message) from last_error
+
     def read_hdf5(self, file_path):
         self.logger.info(f"    - Reading the HDF5 file: {file_path}")
         M0, M1, M2, LF_M0, HF_M0 = None, None, None, None, None
@@ -23,23 +36,14 @@ class ReadMomentsStep(BaseStep):
             with h5py.File(file_path, "r") as f:
                 self.logger.info(f"    - Available datasets in the HDF5 file: {list(f.keys())}")
 
-                try:
-                    self.logger.info("    - Reading the M0 data")
-                    M0 = np.squeeze(np.array(f["moment0"][()]))
-                except:
-                    self.logger.info("Warning: moment0 dataset not found")
+                self.logger.info("    - Reading the M0 data")
+                M0 = self._read_required_moment(f, ["moment0", "M0"])
 
-                try:
-                    self.logger.info("    - Reading the M1 data")
-                    M1 = np.squeeze(np.array(f["moment1"][()]))
-                except:
-                    self.logger.info("Warning: moment1 dataset not found")
+                self.logger.info("    - Reading the M1 data")
+                M1 = self._read_required_moment(f, ["moment1", "M1"])
 
-                try :
-                    self.logger.info("    - Reading the M2 data")
-                    M2 = np.squeeze(np.array(f["moment2"][()]))
-                except:
-                    self.logger.info("Warning: moment2 dataset not found")
+                self.logger.info("    - Reading the M2 data")
+                M2 = self._read_required_moment(f, ["moment2", "M2"])
 
                 self.logger.info("    - Reading the LF_M0 and HF_M0 data")
                 bands = read_bands(f, generic_band_names=["LF_M0", "HF_M0"])
@@ -47,8 +51,8 @@ class ReadMomentsStep(BaseStep):
                     self.logger.info(f"Warning: {len(bands)} found in the HDF5 file. Expected at least 2 bands.")
                 else:
                     self.logger.info(f"    - Using {bands[0][0]} as LF_M0 and {bands[1][0]} as HF_M0")
-                    LF_M0 = np.squeeze(np.array(bands[0][1]))
-                    HF_M0 = np.squeeze(np.array(bands[1][1]))
+                    LF_M0 = np.squeeze(np.asarray(bands[0][1]))
+                    HF_M0 = np.squeeze(np.asarray(bands[1][1]))
 
         except Exception as e:
             self.logger.info(f"ID: {type(e).__name__}")

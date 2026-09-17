@@ -120,6 +120,9 @@ dopplerview /path/to/measure.holo --config config.json
 *  `-d, --debug`           Enable debug mode. In this mode, steps outputs are read from the cache.h5 (C:\\Users\\*user_name*\\.cache\\dopplerview\\cache\\*measure_name*\\cache.h5), and   
                         only targeted steps are re-run. This is useful for debugging specific       
                         steps without having to re-run the entire pipeline.
+*  `--execution-profile {default,sequential_reference}`
+                        Execution policy. The sequential reference profile forces DAG and
+                        internal operation worker counts to one for performance baselines.
 
 ### Example
 
@@ -127,6 +130,8 @@ dopplerview /path/to/measure.holo --config config.json
 dopplerview ./data/patient_01 \
     --config ./configs/default.json \
 ```
+
+
 ---
 
 # Project Structure
@@ -167,6 +172,35 @@ It controls:
 
 Fingerprinting ensures that changing configuration only recomputes affected steps.
 
+Runtime parallelism is configured separately from scientific parameters:
+
+```json
+"Execution": {
+  "NumberOfWorkers": 0.5,
+  "DagConcurrency": "auto"
+}
+```
+
+`NumberOfWorkers` accepts a fixed count, `-1` for all available CPUs, `-2` for
+all but one, or a fraction such as `0.5`. All internally parallel steps share
+one bounded executor, so their combined Python worker count cannot exceed this
+resolved capacity. Execution settings do not invalidate scientific caches.
+Independent DAG branches run concurrently with an automatic bound of two
+steps. `DagConcurrency` can be set to a fixed count, `-1`,
+`-2`, or a CPU fraction; the resolved value is capped at the CPUs available to
+the process. Setting it to `1` explicitly selects serial DAG execution.
+Native libraries and inference runtimes select a machine-appropriate thread
+count automatically. Advanced diagnostics can force a fixed value with
+`NativeThreadsPerTaskOverride`; the sequential reference profile always uses
+one native thread.
+
+The GUI exposes **Number of workers** and **DAG concurrency** under **Settings**.
+The worker control selects an exact integer from 1 to the current machine's
+available CPU capacity; portable values such as `-1` and `0.5` remain available
+in JSON configuration files. GUI values are runtime-only overrides, are
+reapplied after local per-measure configuration is loaded, and do not modify
+the configuration file or scientific cache identity.
+
 See `WORKFLOW.md` for details on how configuration impacts execution.
 
 ---
@@ -196,10 +230,10 @@ It also creates an `output` folder, with the content produced by each step, depe
 # Documentation
 
 * Architecture and execution model → `WORKFLOW.md`
-* How to add steps or models → `CONTRIBUTING.md`
+* How to add steps, make a release, run the testuite → `CONTRIBUTING.md`
 
 ---
 
 # License
 
-GPL-3
+Apache-2

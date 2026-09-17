@@ -18,7 +18,7 @@ nnwnet_av_corr_diasys:
   input_norm: minmax
   output_activation: argmax
   revision: main
-  input_channels: ["M0_ff_image_cleaned", "correlation", "diasys_image"]
+  input_channels: ["M0_ff_image_cleaned", "correlation_M0", "diasys_image"]
   input_shape: [512, 512]
   output_shape: [512, 512]
 
