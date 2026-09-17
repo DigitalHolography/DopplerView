@@ -758,6 +758,53 @@ def load_evaluation_mask(path, expected_shape):
     return mask
 
 
+def evaluate_regional(args, record, restored, metadata):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("noise2time_report", Path(__file__).with_name("noise2time_report.py"))
+    report = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(report)
+    if args.vessel_mask:
+        raise ValueError("Use either --vessel-mask or the three regional vessel masks")
+    paths = dict(retinal_artery=args.retinal_artery_mask, retinal_vein=args.retinal_vein_mask,
+                 choroidal=args.choroidal_masks)
+    if not all(paths.values()):
+        raise ValueError("Regional evaluation requires retinal artery, retinal vein and choroidal masks")
+    if args.background_mask or args.background_masks:
+        raise ValueError("Regional background is automatic; omit --background-mask/--background-masks")
+    raw, provenance = {}, {}
+    for name, sources in paths.items():
+        raw[name] = np.zeros(record.roi.shape, bool)
+        provenance[name] = []
+        for source in sources:
+            with warnings.catch_warnings(record=True) as notices:
+                warnings.simplefilter("always")
+                raw[name] |= load_evaluation_mask(source, record.roi.shape)
+            messages = [str(notice.message) for notice in notices]
+            for message in messages:
+                warnings.warn(message)
+            provenance[name].append(dict(path=str(Path(source).resolve()), sha256=sha256(source), warnings=messages))
+    raw["background"] = report.derive_background(raw, record.roi, args.background_dilation_radius)
+    provenance["background"] = dict(
+        method="ROI & ~(dilate(original retinal artery | original retinal vein) | original choroidal)",
+        retinal_dilation_radius_pixels=args.background_dilation_radius,
+        kernel="Euclidean disk", choroidal_dilated=False,
+        source_masks="Original input unions before overlap removal; dilation before ROI clipping")
+    first = metadata.get("copied_prefix")
+    if not isinstance(first, int) or not 0 <= first < len(restored):
+        raise ValueError("Invalid copied_prefix in denoised metadata")
+    destination = Path(args.output)
+    if destination.exists():
+        raise FileExistsError(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    metadata = dict(metadata, denoised_sha256=sha256(args.denoised),
+                    denoised_path=str(Path(args.denoised).resolve()))
+    with tempfile.TemporaryDirectory(prefix=".evaluation-", dir=destination.parent) as staging:
+        output = Path(staging)/"report"
+        report.build_report(record, restored, metadata, raw, provenance, args, output)
+        output.rename(destination)
+    print(f"Saved evaluation report: {destination/'report.html'}")
+
+
 def evaluate(args):
     record = Record(args.record)
     restored = np.load(args.denoised, mmap_mode="r", allow_pickle=False)
@@ -766,6 +813,11 @@ def evaluate(args):
         raise ValueError("Output does not correspond to this source array")
     if restored.shape != record.frames.shape or not np.isfinite(restored).all():
         raise ValueError("Output dimensions/values invalid")
+    if any(getattr(args, key, None) for key in
+           ("retinal_artery_mask", "retinal_vein_mask", "choroidal_masks", "background_masks")):
+        return evaluate_regional(args, record, restored, metadata)
+    if not args.vessel_mask or not args.background_mask:
+        raise ValueError("Supply the regional masks, or legacy --vessel-mask and --background-mask")
     vessel = load_evaluation_mask(args.vessel_mask, record.roi.shape)
     background = load_evaluation_mask(args.background_mask, record.roi.shape)
     if (not vessel.any()):
@@ -870,11 +922,22 @@ def main(argv=None):
     p = commands.add_parser("evaluate", help="Calculate the article's per-recording metrics")
     p.add_argument("--record", required=True)
     p.add_argument("--denoised", required=True)
-    p.add_argument("--vessel-mask", required=True, help="NPY or PNG mask: nonzero pixels select vessels; black is excluded")
-    p.add_argument("--background-mask", required=True, help="NPY or PNG mask: nonzero pixels select background")
+    p.add_argument("--vessel-mask", help="Legacy single-region NPY or PNG mask")
+    p.add_argument("--background-mask", help="Background NPY or PNG for legacy single-region evaluation only")
+    p.add_argument("--retinal-artery-mask", "--retinal-artery", nargs="+", help="One or more artery masks, combined by union")
+    p.add_argument("--retinal-vein-mask", "--retinal-vein", nargs="+", help="One or more vein masks, combined by union")
+    p.add_argument("--choroidal-masks", "--choroidal-mask", nargs="+", help="One or more choroidal masks")
+    p.add_argument("--background-masks", nargs="+", help=argparse.SUPPRESS)
+    p.add_argument("--background-dilation-radius", type=int, default=2,
+                   help="Regional background: retinal dilation disk radius in prepared-image pixels (default: 2; 0 disables dilation)")
+    p.add_argument("--cardiac-hz", type=float, help="Regional report: override common cardiac frequency")
+    p.add_argument("--local-size", type=int, default=32, help="Regional report: local grid patch width in pixels")
+    p.add_argument("--local-count", type=int, default=3, help="Regional report: maximum local patches per vessel group")
+    p.add_argument("--max-lag-seconds", type=float, default=.25)
+    p.add_argument("--profiles", help="Regional report: JSON mapping region to start/end [x,y] profile coordinates")
     p.add_argument("--min-hz", type=float, default=.5)
     p.add_argument("--max-hz", type=float, default=3.)
-    p.add_argument("--output", required=True)
+    p.add_argument("--output", required=True, help="New report folder for regional masks; JSON file for legacy evaluation")
     p.set_defaults(func=evaluate)
     p = commands.add_parser("summarize", help="Aggregate metrics across recordings (mean and sample SD)")
     p.add_argument("--metrics", nargs="+", required=True)

@@ -21,6 +21,8 @@
     "diasys_image": "image",
     "pre_artery_mask": "mask",
     "pre_vein_mask": "mask",
+    "vessel_mask_raw": "mask",
+    "choroidal_vessel_mask_raw": "mask",
     "choroidal_vessel_mask": "mask",
     "choroidal_artery_mask": "mask",
     "choroidal_vein_mask": "mask",

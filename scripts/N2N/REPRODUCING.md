@@ -313,8 +313,9 @@ color channel selects the pixel. Fully transparent pixels are ignored, including
 hidden color values. Thus use white (or colored) vessels on black, not black
 vessels on white, and supply a mask rather than annotations over the original
 image. Nonzero antialiased edge pixels are included. Image dimensions and pixel
-alignment must match the prepared video; masks are never automatically resized
-or inverted. NPY and PNG masks can be mixed in the same command.
+alignment must match the prepared video. Different dimensions trigger nearest-neighbor
+resizing with a warning; this does not correct translation, cropping, rotation or
+registration errors. Masks are never inverted. NPY and PNG can be mixed.
 
 ```powershell
 python scripts/N2N/noise2time.py evaluate --record "D:/N2T/prepared/measure_HD_M0" --denoised "D:/N2T/results/measure/denoised.npy" --vessel-mask "D:/N2T/masks/vessels.png" --background-mask "D:/N2T/masks/background.npy" --output "D:/N2T/measure_metrics.json"
@@ -351,6 +352,98 @@ These metrics assess fluctuations and broad waveform preservation. They do not
 establish recovery of the unknown clean signal. For scientific validation add
 known-signal simulations, phase-resolved residuals, and small-vessel measurements.
 
+## 5. Regional evaluation report
+
+Provide separate retinal artery, retinal vein and choroidal masks. Background is derived automatically:
+
+```powershell
+python scripts/N2N/noise2time.py evaluate `
+  --record "D:/N2T/prepared/measure_HD_M0" `
+  --denoised "D:/N2T/results/measure/denoised.npy" `
+  --retinal-artery-mask "D:/N2T/masks/arteries.png" `
+  --retinal-vein-mask "D:/N2T/masks/veins.png" `
+  --choroidal-masks "D:/N2T/masks/choroidal.png" `
+  --background-dilation-radius 2 `
+  --output "D:/N2T/results/measure/evaluation"
+```
+
+All three vessel mask options accept multiple paths, combined by union within each
+group. Do not provide a background mask in regional mode. The old
+`--vessel-mask` evaluation remains available and produces a single JSON file.
+Regional mode requires a new output directory and publishes it only on success.
+
+### Mask exclusions
+
+Let A, V and C be the input artery, vein and choroidal unions after clipping to
+the prepared ROI. Evaluation uses `A & ~(V | C)`, `V & ~(A | C)`, and
+`C & ~(A | V)`. These exclusions are simultaneous: an overlapping pixel belongs
+to **none** of the vessel groups. Background is computed as
+`ROI & ~(dilate(original_A | original_V) | original_C)` using the original masks
+before overlap removal. Only retinal masks are dilated; choroidal pixels are
+excluded without dilation. The dilation uses a Euclidean disk with radius
+`--background-dilation-radius` in prepared-image pixels (default 2, 0 disables
+dilation). Dilation occurs before ROI clipping, so nearby retinal pixels outside
+the ROI still exclude their surrounding pixels inside it. The radius and method
+are saved in the report. Empty resulting masks stop evaluation.
+
+Removing overlapping mask pixels cannot unmix depth contributions already present
+in a pixel's measured signal. Inspect alignment and the excluded-pixel counts.
+The input masks are preserved; cleaned masks are saved separately as PNG and NPY.
+Source paths, hashes and resizing warnings are recorded in `metrics.json`.
+
+### Outputs
+
+Open `report.html` in the output folder. Keep the folder together when sharing it.
+It includes:
+
+- Per-group temporal correlation, cardiac amplitude ratio, mean intensity change,
+  estimated delay, harmonics and vessel-background contrast (full values in JSON).
+- Shared background temporal SD and NRR. NRR is not an independent score for each
+  vascular group; it measures the same selected background in all three rows.
+- Mask overlays, exclusions and up to three local patches per group.
+- Original/denoised/residual waveforms, a three-cycle zoom and frequency spectra.
+- Mean images, signed mean residuals, temporal SD and SD reduction maps.
+- Four phase-resolved residual maps using fractional preprocessing peak-to-peak
+  intervals. Frames outside complete peak pairs are excluded from these maps.
+- Vessel profiles and time-distance images at identical coordinates.
+- `comparison.avi`: synchronized original, denoised and signed residual panels,
+  using acquisition FPS and excluding the copied prefix.
+- `metrics.json`, `metrics.csv`, waveform CSVs, profile NPZs and `spatial_maps.npz`.
+
+All metrics use unquantized NPY values. Original/denoised display scales are fixed
+to [0,1]; residual scales are symmetric and fixed per plot/video. Display clipping
+does not affect metrics. Undefined ratios/correlations are JSON null.
+
+By default, one common frequency is selected from the original pooled vessel
+waveform in `--min-hz` / `--max-hz`. A dominant harmonic can be mistaken for the
+fundamental: inspect the spectra or specify a verified `--cardiac-hz 0.82`.
+Amplitude is fitted at the same frequency before and after denoising; the reported
+frequency resolution is FPS divided by scored frame count.
+
+`--local-size 32 --local-count 3` controls automatic local patches. They favor
+high mask occupancy, so they do not establish performance on faint small vessels.
+`--max-lag-seconds 0.25` bounds the integer-frame delay search. Positive delay means
+denoised output is late. Lag-corrected correlation is supplemental; inspect the
+zero-lag correlation too.
+
+Automatic profiles are approximately perpendicular to the largest local mask
+patch. For meaningful individual-vessel sections, supply `--profiles profiles.json`:
+
+```json
+{
+  "retinal_artery": {"start": [100, 120], "end": [130, 120]},
+  "retinal_vein": {"start": [200, 220], "end": [230, 220]},
+  "choroidal": {"start": [300, 320], "end": [330, 320]}
+}
+```
+
+Coordinates are `[x,y]` in the prepared image; omitted groups use automatic lines.
+Profiles include neighboring pixels along the line, unlike mask-restricted metrics.
+The matched snapshot is selected from the original region waveform's maximum.
+Temporal means are structural references, not clean ground truth. This report
+does not supply uncertainty estimates or demonstrate held-out generalization.
+The existing `summarize` command currently accepts legacy single-region JSON only.
+
 ## Ablations
 
 Copy a configuration and change one factor at a time:
@@ -368,7 +461,7 @@ this comparison as isolating spatial context unless that factor is controlled.
 ## Verification
 
 ```powershell
-python -m pytest tests/test_noise2time.py -q
+python -m pytest tests/test_noise2time.py tests/test_noise2time_report.py -q
 ```
 
 Tests check analytic derivative values and normalization, no loss dependence on

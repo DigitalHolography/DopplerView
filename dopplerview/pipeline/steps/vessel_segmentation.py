@@ -100,7 +100,7 @@ class RetinalVesselSegmentationStep(VesselSegmentationStep):
 class ChoroidalVesselSegmentationStep(VesselSegmentationStep):
     name = "choroidal_vessel_segmentation"
     requires = {"M0_ff_image", "retinal_vessel_mask"}
-    produces = {"choroidal_vessel_mask"}
+    produces = {"choroidal_vessel_mask", "choroidal_vessel_mask_raw", "vessel_mask_raw"}
 
     def _relevant_config(self, ctx):
         params = ctx.dopplerview_config["Mask"]
@@ -131,6 +131,8 @@ class ChoroidalVesselSegmentationStep(VesselSegmentationStep):
         vessel_mask = self.frangi_segmentation(ctx)
         retinal_vessel_mask = ctx.require("retinal_vessel_mask")
 
+        ctx.set("vessel_mask_raw", vessel_mask)
+
         choroidal_vessel_mask = vessel_mask & ~retinal_vessel_mask
         return choroidal_vessel_mask
     
@@ -141,4 +143,5 @@ class ChoroidalVesselSegmentationStep(VesselSegmentationStep):
         # ---- Postprocessing ----
         clean_mask = self.clean_vessel_mask(raw_mask, ctx)
 
+        ctx.set("choroidal_vessel_mask_raw", raw_mask)
         ctx.set("choroidal_vessel_mask", clean_mask)
