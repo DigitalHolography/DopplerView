@@ -45,8 +45,20 @@ class Config:
     weight_decay: float = 0.01  # AdamW default in the supplied scripts.
     patience: int = 10
     validation_records: tuple = ()  # Empty => legacy fixed sequence split.
+    input_mode: str = "patched"  # Or history_only: predict t from t-9,...,t-1.
+    split_mode: str = "mixed"  # mixed, temporal, or record
+    brightness_correction: bool = True
+    validation_fraction: float = .5
 
     def validate(self):
+        if self.input_mode not in ("patched", "history_only"):
+            raise ValueError("input_mode must be patched or history_only")
+        if self.split_mode not in ("mixed", "temporal", "record"):
+            raise ValueError("split_mode must be mixed, temporal or record")
+        if not 0 < self.validation_fraction < 1:
+            raise ValueError("validation_fraction must be between 0 and 1")
+        if self.split_mode == "record" and not self.validation_records:
+            raise ValueError("record split requires validation_records")
         for key in ("history", "base_channels", "block_size", "blocks", "epochs",
                     "samples_per_epoch", "batch_size", "validation_samples", "patience"):
             if not isinstance(getattr(self, key), int) or getattr(self, key) < 1:
@@ -464,13 +476,27 @@ class Noise2Time(nn.Module):
         return current - self.final(x)
 
 
-def replacement(record, t, cfg, rng):
+def replacement(record, t, cfg, rng, stage=None):
+    if cfg.split_mode == "temporal":
+        if stage not in ("train", "valid"):
+            raise ValueError("Temporal replacement requires an explicit train/valid stage")
+        record = record.stage_views[stage]
     sequence = np.array(record.frames[t-cfg.history:t+1], copy=True)
     target = sequence[-1].copy()
     mask = np.zeros(record.roi.shape, bool)
     occupied = np.zeros_like(mask)
     donors = record.donors[int(record.phase[t])]
     donors = donors[donors != t]
+    if cfg.split_mode == "temporal":
+        if stage not in ("train", "valid"):
+            raise ValueError("Temporal replacement requires an explicit train/valid stage")
+            # Validation targets use the training partition's donor pool.
+            donor_stage = "train" if stage == "valid" else stage
+            lo, hi = record.split_ranges[donor_stage]
+            target_lo, target_hi = record.split_ranges[stage]
+            donors = donors[(donors >= lo) & (donors < hi)]
+            if not target_lo <= t-cfg.history <= t < target_hi:
+                raise ValueError("Target history crosses temporal partition")
     if len(donors) == 0 or record.brightness[t] <= 1e-8:
         raise ValueError("No eligible donor for target")
     h, w = mask.shape
@@ -484,7 +510,7 @@ def replacement(record, t, cfg, rng):
         if not record.roi[region].all() or occupied[region].any():
             continue
         donor = int(rng.choice(donors))
-        ratio = float(record.brightness[t] / record.brightness[donor])
+        ratio = float(record.brightness[t] / record.brightness[donor]) if cfg.brightness_correction else 1.
         sequence[-1][region] = np.clip(record.frames[donor][region] * ratio, 0, 1)
         mask[region] = occupied[region] = True
         accepted += 1
@@ -492,6 +518,10 @@ def replacement(record, t, cfg, rng):
             break
     if accepted != cfg.blocks:
         raise ValueError(f"Placed {accepted}/{cfg.blocks} blocks; reduce blocks/size or check ROI")
+    # Keep the same loss locations and sampling as the baseline. The target frame
+    # (including its replaced patches) is entirely absent in history-only mode.
+    if cfg.input_mode == "history_only":
+        sequence = sequence[:-1]
     return sequence, target[None], mask[None].astype(np.float32)
 
 
@@ -524,6 +554,10 @@ def loss_terms(prediction, target, mask, objective="article"):
 
 
 def split_samples(records, cfg):
+    if cfg.split_mode == "temporal":
+        if cfg.validation_records:
+            raise ValueError("Temporal and video-disjoint validation cannot be combined")
+        return load_sibling("benchmark_splits").temporal_split(records, cfg, sys.modules[__name__])
     rng = np.random.default_rng(cfg.seed)
     pools = [[(i, t) for t in rec.eligible(cfg.history)] for i, rec in enumerate(records)]
     if any(not pool for pool in pools):
@@ -639,11 +673,15 @@ def train(args):
           f"{(cfg.samples_per_epoch + cfg.batch_size - 1) // cfg.batch_size} batches.", flush=True)
     print("Checking replacement patch placement...", flush=True)
     # Validate block placement before creating outputs or spending time on training.
-    for i,t in training[:1] + validation:
-        replacement(records[i], t, cfg, np.random.default_rng(cfg.seed))
+    for stage, samples in (("train", training[:1]), ("valid", validation)):
+        for i,t in samples:
+            replacement(records[i], t, cfg, np.random.default_rng(cfg.seed), stage)
     split = dict(training=training, validation=validation,
                policy="record" if cfg.validation_records else "overlapping_sequences",
                records=[str(r.path) for r in records])
+    if cfg.split_mode == "temporal":
+        split.update(policy="disjoint_temporal_blocks", ranges={r.name:r.split_ranges for r in records},
+                     partition_signals={r.name:r.split_signals for r in records})
     manifest = []
     for index, record in enumerate(records, 1):
         print(f"Hashing input files {index}/{len(records)}: {record.name}", flush=True)
@@ -666,16 +704,21 @@ def train(args):
     write_json(output / "config.json", asdict(cfg))
     monitors = {}
     if not getattr(args, "no_epoch_metrics", False):
-        for record in records:
+        for record in records[:1]:
             if "dataset_measure" in record.metadata:
                 monitors[record.name] = support.Monitor(record, cfg.history, sys.modules[__name__],
                                                         getattr(args, "background_dilation_radius", 2))
     monitor_provenance = {name: monitor.provenance for name,monitor in monitors.items()}
     monitor_path = output/"monitor_masks.json"
-    if resume and monitor_path.exists() and json.loads(monitor_path.read_text()) != monitor_provenance:
-        raise ValueError("Monitoring masks/settings changed; keep them unchanged when resuming")
+    if resume and monitor_path.exists():
+        previous_monitors = json.loads(monitor_path.read_text())
+        if any(name in previous_monitors and previous_monitors[name] != value
+               for name,value in monitor_provenance.items()):
+            raise ValueError("Monitoring masks/settings changed; keep them unchanged when resuming")
+        # Retain provenance for old curves when reducing monitoring to one video.
+        monitor_provenance = dict(previous_monitors, **monitor_provenance)
     write_json(monitor_path, monitor_provenance)
-    if not cfg.validation_records:
+    if not cfg.validation_records and cfg.split_mode == "mixed":
         print("Validation uses overlapping sequences and shared donor pools; it is not an independent test.", flush=True)
     print("Initializing model and optimizer...", flush=True)
     model = Noise2Time(cfg.base_channels, cfg.convlstm).to(device)
@@ -735,7 +778,7 @@ def train(args):
                     i,t = pool[int(index)]
                     # Fixed target, donor and patch choices on every validation pass.
                     sampler = rng if stage == "train" else np.random.default_rng(10000+int(index))
-                    samples.append(replacement(records[i],t,cfg,sampler))
+                    samples.append(replacement(records[i],t,cfg,sampler,stage))
                 sequence, target, mask = [torch.from_numpy(np.stack(items)).to(device) for items in zip(*samples)]
                 with torch.set_grad_enabled(stage == "train"):
                     parts = loss_terms(model(sequence), target, mask, cfg.objective)
@@ -774,7 +817,7 @@ def train(args):
             preview_dir = output / "previews" / f"epoch_{epoch:03d}"
             print(f"Epoch {epoch}/{cfg.epochs}: computing diagnostics/exporting previews...", flush=True)
             diagnostics = {}
-            for index, record in enumerate(records):
+            for index, record in enumerate(records[:1]):
                 monitor = monitors.get(record.name)
                 if monitor: monitor.reset()
                 preview_path = None if getattr(args, "no_epoch_previews", False) else preview_dir / f"{record.name}.avi"
@@ -847,7 +890,8 @@ def export_denoised(model, record, cfg, device, npy_path=None, avi_path=None, or
                         if t < cfg.history:
                             prediction = record.frames[t]
                         else:
-                            sequence = torch.from_numpy(np.array(record.frames[t-cfg.history:t+1], copy=True))[None].to(device)
+                            stop = t if cfg.input_mode == "history_only" else t+1
+                            sequence = torch.from_numpy(np.array(record.frames[t-cfg.history:stop], copy=True))[None].to(device)
                             prediction = model(sequence)[0,0].cpu().numpy()
                         if not np.isfinite(prediction).all():
                             raise FloatingPointError(f"Non-finite output at frame {t}")
@@ -914,7 +958,8 @@ def denoise(args):
     metadata = dict(record=str(record.path), record_sha256=sha256(record.path/"frames.npy"),
                checkpoint=str(Path(args.checkpoint).resolve()), checkpoint_sha256=sha256(args.checkpoint),
                first_original_frame=record.metadata["first_original_frame"], fps=record.metadata["fps"],
-               copied_prefix=cfg.history, epoch=checkpoint["epoch"], inference="fully_visible_sliding_window",
+               copied_prefix=cfg.history, epoch=checkpoint["epoch"],
+               inference="previous_frames_only" if cfg.input_mode == "history_only" else "fully_visible_sliding_window",
                intensities="float32, unclipped",
                intensity_scale=record.metadata.get("intensity_scale",1.),
                input_mode=record.metadata.get("input_mode","legacy"),

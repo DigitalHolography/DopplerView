@@ -1,4 +1,4 @@
-# Dataset workflow: raw M0_ff by default
+*# Dataset workflow: raw M0_ff by default
 
 The dataset is organized as:
 
@@ -141,6 +141,10 @@ means, correlation near 1 and waveform standard-deviation ratios near 1, recogni
 that removal of vessel noise can itself lower that ratio. No clean reference is assumed.
 All intensities use the prepared fixed scale, so compare records relative to their own
 original baseline. NRR and correlation are null when their denominator/variance is zero.
+
+Only the first supplied measurement is denoised for epoch metrics and previews.
+All supplied measurements still participate in their configured training/validation split.
+See [BENCHMARK.md](BENCHMARK.md) for the six-run, one-factor-at-a-time comparison.
 
 Metrics share the inference pass with epoch previews. `--no-epoch-previews` skips
 AVIs but still computes metrics; `--no-epoch-metrics` skips regional diagnostics.

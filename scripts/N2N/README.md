@@ -4,6 +4,9 @@ For dataset folders containing M0_ff HDF5 files and manual/pseudo masks, start w
 [Dataset workflow](DATASET_WORKFLOW.md): raw preparation by default, arterial peak
 detection, optional AVI compression, training and regional evaluation.
 
+For six controlled training comparisons, overnight execution and a combined report,
+see [One-factor-at-a-time benchmark](BENCHMARK.md) and `benchmark_noise2time.py`.
+
 To collect selected recordings from mapped drives, see
 [Collect LDH videos](COLLECTING.md) and `collect_videos.py` (AVI copy or lossless
 `moment0ff` extraction from H5).
