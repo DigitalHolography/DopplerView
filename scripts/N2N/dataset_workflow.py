@@ -229,7 +229,7 @@ def prepare_dataset(args, api):
 def choroidal_masks(folder):
     # User-selected policy: never use manual choroidal annotations. Prefer the
     # canonical unsuffixed output; do not silently choose among versioned copies.
-    paths=sorted((folder/"pseudo").glob("*choroidal_vessel_mask.png"))
+    paths=sorted((folder/"pseudo").glob("*choroidal*vessel_mask_raw.png"))
     if len(paths)==1:
         return paths,"pseudo choroidal vessel mask (not handmade)"
     raise ValueError(f"Expected one canonical pseudo/*choroidal_vessel_mask.png in {folder}")
@@ -252,7 +252,9 @@ def run_stage(args, api):
         raise ValueError("Do not mix raw and AVI preparations in one workflow root")
     if args.command=="train":
         return api.train(SimpleNamespace(records=records,output=root/"runs",config=args.config,
-                                        device=args.device,no_epoch_previews=args.no_epoch_previews))
+                                        device=args.device,no_epoch_previews=args.no_epoch_previews,
+                                        resume=args.resume,epochs=args.epochs,no_epoch_metrics=args.no_epoch_metrics,
+                                        background_dilation_radius=args.background_dilation_radius))
     checkpoint=Path(args.checkpoint) if args.checkpoint else root/"runs"/"best.pt"
     results=[]
     for folder,record in zip(folders,records):

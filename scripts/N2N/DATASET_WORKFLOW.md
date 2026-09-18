@@ -98,6 +98,58 @@ Preparations created before diaphragm masking was applied must be regenerated
 in a new output root, followed by training and evaluation. They are rejected by
 `--skip-existing` and the dataset training/denoising/evaluation commands.
 
+## Resume training and track progress
+
+Use the same dataset, measurement selection and output folder as the interrupted run:
+
+```powershell
+python scripts/N2N/noise2time.py train --input "D:/dataset_choroid2" --output "D:/N2T/raw" --resume --device cuda
+```
+
+The command loads `runs/last.pt`, restores the model and AdamW optimizer, and starts
+at the next epoch. An interrupted partial epoch is repeated. `--epochs 100` means
+100 epochs in total, including completed epochs; omit it to retain the saved target.
+The configuration is loaded from the checkpoint when `--config` is omitted. Only
+the epoch target may change on resume. Prepared-data hashes and the split must match.
+Legacy `--records` mode also supports resume, with `last.pt` directly in `--output`.
+
+New checkpoints also save the sampling/Torch/Python random-generator states and
+early-stopping counter. Older checkpoints can restore weights and optimizer but
+cannot reproduce the exact random sampling continuation; a warning explains this.
+Checkpoints are replaced atomically. If no completed epoch was saved, there is
+no checkpoint to resume. A run that already reached early stopping stays stopped.
+
+Each epoch updates `runs/metrics.jsonl`, `runs/metrics.csv`, and `runs/metrics.png`:
+
+- Training and validation losses, including reconstruction/gradient/Hessian components in the tables.
+- Mean per-pixel **temporal** background standard deviation, for original and denoised data, and NRR in the tables.
+- Artery, vein and choroid waveform correlation, temporal standard-deviation ratio,
+  and original/denoised means in the tables.
+
+Diagnostics use full, unclipped inference sequences, excluding the copied history
+prefix. Background is derived exactly as in evaluation, inside the diaphragm;
+the black exterior is never counted as background. The manual retinal and pseudo
+choroidal masks are discovered automatically and their hashes saved in
+`monitor_masks.json`. `--background-dilation-radius` defaults to 2 pixels.
+Masks and monitoring settings must remain unchanged on resume. These diagnostics
+describe supplied recordings, including training recordings; they are not independent
+test scores and do not select `best.pt`, which still uses validation loss.
+
+Lower background temporal variability is useful only together with preserved vessel
+waveforms. Zero variability also occurs for a constant output. Look for stable vessel
+means, correlation near 1 and waveform standard-deviation ratios near 1, recognizing
+that removal of vessel noise can itself lower that ratio. No clean reference is assumed.
+All intensities use the prepared fixed scale, so compare records relative to their own
+original baseline. NRR and correlation are null when their denominator/variance is zero.
+
+Metrics share the inference pass with epoch previews. `--no-epoch-previews` skips
+AVIs but still computes metrics; `--no-epoch-metrics` skips regional diagnostics.
+Loss logging always remains active. Full-video diagnostics require all three vessel
+masks; legacy records without dataset metadata only receive loss plots.
+If interrupted during diagnostics, the completed epoch checkpoint is retained, but
+that epoch may lack regional metrics or have incomplete previews; resume continues
+with the next epoch. Earlier epochs cannot be retrospectively scored without their weights.
+
 ## AVI compression experiment
 
 Use a separate output root and add `--avi` **only to prepare**:

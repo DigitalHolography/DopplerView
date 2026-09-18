@@ -604,7 +604,18 @@ def get_device(name):
 
 
 def train(args):
-    cfg = Config(**json.loads(Path(args.config).read_text(encoding="utf-8"))) if args.config else Config()
+    support = load_sibling("training_monitor")
+    output = Path(args.output)
+    resume = getattr(args, "resume", False)
+    saved = torch.load(output/"last.pt", map_location="cpu", weights_only=True) if resume else None
+    cfg = (Config(**json.loads(Path(args.config).read_text(encoding="utf-8"))) if args.config
+           else Config(**saved["config"]) if saved else Config())
+    if getattr(args, "epochs", None) is not None:
+        cfg.epochs = args.epochs
+    requested_config = json.loads(json.dumps(asdict(cfg)))
+    if saved and any(requested_config[key] != value for key,value in
+                     json.loads(json.dumps(saved["config"])).items() if key != "epochs"):
+        raise ValueError("Resume must keep the saved configuration; only total --epochs may change")
     cfg.validate()
     seed_all(cfg.seed)
     device = get_device(args.device)
@@ -630,12 +641,9 @@ def train(args):
     # Validate block placement before creating outputs or spending time on training.
     for i,t in training[:1] + validation:
         replacement(records[i], t, cfg, np.random.default_rng(cfg.seed))
-    output = Path(args.output)
-    output.mkdir(parents=True, exist_ok=False)
-    write_json(output / "config.json", asdict(cfg))
-    write_json(output / "split.json", dict(training=training, validation=validation,
+    split = dict(training=training, validation=validation,
                policy="record" if cfg.validation_records else "overlapping_sequences",
-               records=[str(r.path) for r in records]))
+               records=[str(r.path) for r in records])
     manifest = []
     for index, record in enumerate(records, 1):
         print(f"Hashing input files {index}/{len(records)}: {record.name}", flush=True)
@@ -644,9 +652,29 @@ def train(args):
             files.append("valid_frames.npy")
         manifest.append(dict(path=str(record.path), metadata=record.metadata,
                              hashes={name:sha256(record.path/name) for name in files}))
-    write_json(output / "provenance.json", dict(records=manifest, script_sha256=sha256(__file__),
+    if resume:
+        if json.loads((output/"provenance.json").read_text())["records"] != manifest:
+            raise ValueError("Prepared records changed since training; cannot resume")
+        if json.loads((output/"split.json").read_text()) != json.loads(json.dumps(split)):
+            raise ValueError("Training/validation split changed; cannot resume")
+    else:
+        output.mkdir(parents=True, exist_ok=False)
+        write_json(output / "split.json", split)
+        write_json(output / "provenance.json", dict(records=manifest, script_sha256=sha256(__file__),
                python=sys.version, platform=platform.platform(), torch=torch.__version__,
                numpy=np.__version__, scipy=scipy.__version__, opencv=cv2.__version__, device=str(device)))
+    write_json(output / "config.json", asdict(cfg))
+    monitors = {}
+    if not getattr(args, "no_epoch_metrics", False):
+        for record in records:
+            if "dataset_measure" in record.metadata:
+                monitors[record.name] = support.Monitor(record, cfg.history, sys.modules[__name__],
+                                                        getattr(args, "background_dilation_radius", 2))
+    monitor_provenance = {name: monitor.provenance for name,monitor in monitors.items()}
+    monitor_path = output/"monitor_masks.json"
+    if resume and monitor_path.exists() and json.loads(monitor_path.read_text()) != monitor_provenance:
+        raise ValueError("Monitoring masks/settings changed; keep them unchanged when resuming")
+    write_json(monitor_path, monitor_provenance)
     if not cfg.validation_records:
         print("Validation uses overlapping sequences and shared donor pools; it is not an independent test.", flush=True)
     print("Initializing model and optimizer...", flush=True)
@@ -654,7 +682,41 @@ def train(args):
     optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.learning_rate, weight_decay=cfg.weight_decay)
     rng = np.random.default_rng(cfg.seed)
     best, stale = float("inf"), 0
-    for epoch in range(1, cfg.epochs+1):
+    rows, first_epoch = [], 1
+    if saved:
+        model.load_state_dict(saved["model"])
+        optimizer.load_state_dict(saved["optimizer"])
+        first_epoch = saved["epoch"] + 1
+        best = saved["best_validation"]
+        history_path = output/"metrics.jsonl"
+        if history_path.exists():
+            for line in history_path.read_text().splitlines():
+                try: row = json.loads(line)
+                except json.JSONDecodeError: continue  # Old interrupted append may be incomplete.
+                if row["epoch"] <= saved["epoch"]: rows.append(row)
+        by_epoch = {row["epoch"]:row for row in rows}
+        rows = [by_epoch[epoch] for epoch in sorted(by_epoch)]
+        if not rows or rows[-1]["epoch"] != saved["epoch"]:
+            rows.append(dict(epoch=saved["epoch"], **saved["metrics"]))
+        stale = saved.get("stale", 0)
+        if "stale" not in saved:
+            for row in reversed(rows):
+                if row["valid"]["total"] <= best: break
+                stale += 1
+        if "rng" in saved:
+            rng.bit_generator.state = saved["rng"]
+            torch.set_rng_state(saved["torch_rng"])
+            random.setstate(saved["python_rng"])
+            if device.type == "cuda" and saved.get("cuda_rng"):
+                torch.cuda.set_rng_state_all(saved["cuda_rng"])
+        else:
+            warnings.warn("Older checkpoint: model/optimizer restored; random sampling cannot be restored exactly")
+        support.save_history(output, rows)
+        print(f"Resuming after epoch {saved['epoch']}; target total: {cfg.epochs} epochs", flush=True)
+    for epoch in range(first_epoch, cfg.epochs+1):
+        if stale >= cfg.patience:
+            print("Saved run already reached early stopping.", flush=True)
+            break
         epoch_started = time.monotonic()
         summaries = {}
         for stage, pool in (("train", training), ("valid", validation)):
@@ -698,26 +760,37 @@ def train(args):
         best, stale = (value, 0) if improved else (best, stale+1)
         checkpoint = dict(model=model.state_dict(), optimizer=optimizer.state_dict(), config=asdict(cfg),
                           epoch=epoch, best_validation=best, metrics=summaries,
+                          stale=stale, rng=rng.bit_generator.state, torch_rng=torch.get_rng_state(),
+                          python_rng=random.getstate(),
+                          cuda_rng=torch.cuda.get_rng_state_all() if device.type == "cuda" else None,
                           script_sha256=sha256(__file__))
         print(f"Epoch {epoch}/{cfg.epochs}: saving checkpoints...", flush=True)
-        torch.save(checkpoint, output / "last.pt")
         if improved:
-            torch.save(checkpoint, output / "best.pt")
-        with (output / "metrics.jsonl").open("a", encoding="utf-8") as stream:
-            stream.write(json.dumps(dict(epoch=epoch, **summaries), allow_nan=False)+"\n")
-        if not getattr(args, "no_epoch_previews", False):
+            support.atomic_checkpoint(torch, checkpoint, output / "best.pt")
+        support.atomic_checkpoint(torch, checkpoint, output / "last.pt")
+        rows.append(dict(epoch=epoch, **summaries))
+        support.save_history(output, rows)
+        if monitors or not getattr(args, "no_epoch_previews", False):
             preview_dir = output / "previews" / f"epoch_{epoch:03d}"
-            print(f"Epoch {epoch}/{cfg.epochs}: exporting AVI previews...", flush=True)
+            print(f"Epoch {epoch}/{cfg.epochs}: computing diagnostics/exporting previews...", flush=True)
+            diagnostics = {}
             for index, record in enumerate(records):
-                preview_path = preview_dir / f"{record.name}.avi"
-                export_denoised(model, record, cfg, device, avi_path=preview_path)
-                write_json(preview_path.with_suffix(".json"), dict(
+                monitor = monitors.get(record.name)
+                if monitor: monitor.reset()
+                preview_path = None if getattr(args, "no_epoch_previews", False) else preview_dir / f"{record.name}.avi"
+                if preview_path is None and monitor is None: continue
+                export_denoised(model, record, cfg, device, avi_path=preview_path,
+                                frame_callback=monitor.update if monitor else None)
+                if monitor: diagnostics[record.name] = monitor.result()
+                if preview_path is not None: write_json(preview_path.with_suffix(".json"), dict(
                     epoch=epoch, record=str(record.path), config=asdict(cfg),
                     record_sha256=manifest[index]["hashes"]["frames.npy"],
                     first_original_frame=record.metadata["first_original_frame"],
                     fps=record.metadata["fps"], copied_prefix=cfg.history,
                     intensities="MJPG preview: clip [0,1], round to uint8; no contrast normalization",
                     weights_source="Current epoch model; only best.pt and last.pt weights retained"))
+            rows[-1]["diagnostics"] = diagnostics
+            support.save_history(output, rows)
         print(f"Epoch {epoch}/{cfg.epochs}: train={summaries['train']['total']:.6g}, "
               f"valid={value:.6g}, best={best:.6g}, "
               f"no improvement={stale}/{cfg.patience}, "
@@ -728,21 +801,21 @@ def train(args):
     print(f"Training finished. Best checkpoint: {output / 'best.pt'}", flush=True)
 
 
-def export_denoised(model, record, cfg, device, npy_path=None, avi_path=None, original_avi_path=None):
+def export_denoised(model, record, cfg, device, npy_path=None, avi_path=None, original_avi_path=None, frame_callback=None):
     """One inference pass; stream float NPY and/or fixed-scale MJPG AVI."""
     paths = [Path(p) for p in (npy_path, avi_path, original_avi_path) if p is not None]
-    if not paths:
+    if not paths and frame_callback is None:
         raise ValueError("At least one output is required")
     if len(record.frames) <= cfg.history:
         raise ValueError("Record shorter than history")
     if any(p.exists() for p in paths):
         raise FileExistsError(next(p for p in paths if p.exists()))
-    if len({p.parent.resolve() for p in paths}) != 1:
+    if paths and len({p.parent.resolve() for p in paths}) != 1:
         raise ValueError("AVI and NPY outputs must share a directory")
     fps = float(record.metadata["fps"])
     if (avi_path is not None or original_avi_path is not None) and (not np.isfinite(fps) or fps <= 0):
         raise ValueError("AVI output requires a finite positive acquisition FPS")
-    parent = paths[0].parent.resolve()
+    parent = paths[0].parent.resolve() if paths else Path(tempfile.gettempdir()).resolve()
     parent.mkdir(parents=True, exist_ok=True)
     previous_mode = model.training
     model.eval()
@@ -781,6 +854,8 @@ def export_denoised(model, record, cfg, device, npy_path=None, avi_path=None, or
                         if record.metadata.get("diaphragm_mask_applied", False):
                             # Convolutions may predict nonzero values outside the aperture.
                             prediction = np.where(record.roi, prediction, 0)
+                        if frame_callback is not None:
+                            frame_callback(t, prediction)
                         if restored is not None:
                             restored[t] = prediction  # Preserve unclipped scientific intensities.
                         if writer is not None:
@@ -1059,6 +1134,10 @@ def main(argv=None):
     p.add_argument("--output", required=True, help="Dataset mode: workflow root; legacy mode: new experiment directory")
     p.add_argument("--device", default="auto")
     p.add_argument("--no-epoch-previews", action="store_true", help="Skip the default end-of-epoch AVI export for every supplied record")
+    p.add_argument("--resume", action="store_true", help="Resume output/runs/last.pt (legacy: output/last.pt), from the last completed epoch")
+    p.add_argument("--epochs", type=int, help="Total epoch target, including already completed epochs")
+    p.add_argument("--no-epoch-metrics", action="store_true", help="Skip full-video regional diagnostics; loss history is always saved")
+    p.add_argument("--background-dilation-radius", type=int, default=2)
     p.add_argument("--input",help="Dataset folder; use --output as workflow root (training writes runs/)")
     p.add_argument("--measures",nargs="+")
     p.set_defaults(func=train)
