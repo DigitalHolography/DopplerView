@@ -473,6 +473,57 @@ def split_samples(records, cfg):
     return train, valid
 
 
+def resolve_training_records(paths):
+    """Expand a prepared-record parent folder into its direct child records."""
+    resolved = []
+    for path in map(Path, paths):
+        if (path / "frames.npy").is_file():
+            resolved.append(path)
+        elif path.is_dir():
+            children = sorted(
+                (child for child in path.iterdir()
+                 if child.is_dir() and (child / "frames.npy").is_file()),
+                key=lambda child: child.name.casefold(),
+            )
+            if not children:
+                raise ValueError(f"No prepared records found in {path}")
+            resolved.extend(children)
+        else:
+            raise ValueError(f"Not a prepared record or record folder: {path}")
+    paths_by_identity = [path.resolve() for path in resolved]
+    if len(set(paths_by_identity)) != len(paths_by_identity):
+        raise ValueError("The same prepared record was supplied more than once")
+    return resolved
+
+
+def select_train_samples_for_epoch(training, samples_per_epoch, rng):
+    """Choose at least one target per record, then fill from the pooled split."""
+    by_record = {}
+    for index, (record_index, _) in enumerate(training):
+        by_record.setdefault(record_index, []).append(index)
+    if len(by_record) > samples_per_epoch:
+        raise ValueError(
+            f"{len(by_record)} training records exceed the "
+            f"{samples_per_epoch} samples-per-epoch budget"
+        )
+    mandatory = [int(rng.choice(indices)) for _, indices in sorted(by_record.items())]
+    mandatory_set = set(mandatory)
+    remaining_pool = [i for i in range(len(training)) if i not in mandatory_set]
+    remaining_count = samples_per_epoch - len(mandatory)
+    if remaining_count:
+        if not remaining_pool:
+            remaining_pool = list(range(len(training)))
+        extra = rng.choice(
+            remaining_pool, size=remaining_count,
+            replace=remaining_count > len(remaining_pool),
+        ).tolist()
+    else:
+        extra = []
+    choices = np.asarray(mandatory + extra, dtype=np.int64)
+    rng.shuffle(choices)
+    return choices
+
+
 def get_device(name):
     return torch.device("cuda" if torch.cuda.is_available() else "cpu") if name == "auto" else torch.device(name)
 
@@ -485,15 +536,18 @@ def train(args):
     print(f"Training device: {device}", flush=True)
     if device.type == "cuda":
         print(f"GPU: {torch.cuda.get_device_name(device)}", flush=True)
+    record_paths = resolve_training_records(args.records)
     records = []
-    for index, path in enumerate(args.records, 1):
-        print(f"Loading recording {index}/{len(args.records)}: {path}", flush=True)
+    for index, path in enumerate(record_paths, 1):
+        print(f"Loading recording {index}/{len(record_paths)}: {path}", flush=True)
         records.append(Record(path))
     if len({r.name for r in records}) != len(records):
         raise ValueError("Record folder names must be unique")
     if len({r.frames.shape[1:] for r in records}) != 1:
         raise ValueError("All training records must have the same spatial dimensions")
     training, validation = split_samples(records, cfg)
+    if len({i for i, _ in training}) > cfg.samples_per_epoch:
+        raise ValueError("samples_per_epoch must be at least the number of training records")
     print(f"Split: {len(training)} training targets, {len(validation)} validation targets. "
           f"Each epoch: {cfg.samples_per_epoch} training samples, "
           f"{(cfg.samples_per_epoch + cfg.batch_size - 1) // cfg.batch_size} batches.", flush=True)
@@ -528,7 +582,8 @@ def train(args):
         summaries = {}
         for stage, pool in (("train", training), ("valid", validation)):
             model.train(stage == "train")
-            choices = rng.integers(len(pool), size=cfg.samples_per_epoch) if stage == "train" else np.arange(len(pool))
+            choices = (select_train_samples_for_epoch(pool, cfg.samples_per_epoch, rng)
+                       if stage == "train" else np.arange(len(pool)))
             sums = {key:0. for key in ("total","reconstruction","gradient","hessian")}
             seen = 0
             batch_size = cfg.batch_size if stage == "train" else 1
@@ -907,7 +962,8 @@ def main(argv=None):
     p.add_argument("--brightness-mask", help="Optional NPY mask for legacy vessel-mean brightness")
     p.set_defaults(func=prepare)
     p = commands.add_parser("train", help="Train on one or multiple prepared records")
-    p.add_argument("--records", nargs="+", required=True)
+    p.add_argument("--records", nargs="+", required=True,
+                   help="Prepared record directories and/or a folder containing prepared records")
     p.add_argument("--config", help="JSON configuration; unspecified keys use defaults")
     p.add_argument("--output", required=True, help="New experiment directory")
     p.add_argument("--device", default="auto")
