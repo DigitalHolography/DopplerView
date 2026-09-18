@@ -135,10 +135,28 @@ def phases_from_peaks(count, peaks):
     return phase
 
 
+def load_sibling(name):
+    """Import a local workflow module, including when this script is loaded by tests."""
+    import importlib.util
+    module_name = "noise2time_" + name
+    if module_name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(module_name, Path(__file__).with_name(name+".py"))
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+    return sys.modules[module_name]
+
+
 def prepare(args):
     """Prepare one file, or all supported files directly inside an input folder."""
     if Path(args.input).is_dir():
+        if any(p.is_dir() and list(p.glob("*.h5")) for p in Path(args.input).iterdir()):
+            return load_sibling("dataset_workflow").prepare_dataset(args, sys.modules[__name__])
+        if getattr(args,"avi",False) or getattr(args,"measures",None):
+            raise ValueError("--avi and --measures require a dataset of HDF5 measurement folders")
         return prepare_folder(args)
+    if getattr(args,"avi",False) or getattr(args,"measures",None):
+        raise ValueError("--avi and --measures require a dataset of HDF5 measurement folders")
     return prepare_one(args)
 
 
@@ -217,10 +235,41 @@ def prepare_one(args):
     win = args.smooth_window
     smooth = np.convolve(np.pad(raw, (win // 2, win - 1 - win // 2), mode="edge"),
                          np.ones(win) / win, mode="valid")
-    amplitude = np.percentile(smooth, 95) - np.percentile(smooth, 5)
-    peaks, _ = find_peaks(smooth, distance=args.peak_distance,
-                         prominence=args.prominence * amplitude)
-    if amplitude <= 0 or len(peaks) < 2:
+    artery_path = getattr(args, "artery_mask", None)
+    method = getattr(args, "peak_method", "auto")
+    method = ("arterial" if artery_path else "legacy") if method == "auto" else method
+    peak_diagnostics = None
+    if method == "arterial":
+        if not artery_path:
+            raise ValueError("Arterial peak detection requires --artery-mask")
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("arterial_peaks", Path(__file__).with_name("arterial_peaks.py"))
+        detector = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(detector)
+        # Strict geometry for a scientific signal; unlike visualization masks,
+        # resizing without registration can select different vessels.
+        if Path(artery_path).suffix.lower() == ".npy":
+            mask_values = np.load(artery_path, allow_pickle=False)
+        else:
+            mask_values = cv2.imdecode(np.fromfile(artery_path, np.uint8), cv2.IMREAD_UNCHANGED)
+        if mask_values is None or mask_values.shape[:2] != roi.shape:
+            raise ValueError("Artery mask must match the prepared video geometry; no automatic resizing")
+        artery_mask = load_evaluation_mask(artery_path, roi.shape) & roi
+        if not artery_mask.any():
+            raise ValueError("Artery mask has no pixels inside the ROI")
+        arterial_signal = np.array([frame[artery_mask].mean(dtype=np.float64) for frame in frames])
+        peak_diagnostics = detector.detect_arterial_peaks(arterial_signal, float(fps),
+            min_hz=getattr(args, "peak_min_hz", .5), max_hz=getattr(args, "peak_max_hz", 2.5))
+        peaks = peak_diagnostics["peaks"]
+        for message in peak_diagnostics["warnings"]:
+            warnings.warn(message)
+    else:
+        amplitude = np.percentile(smooth, 95) - np.percentile(smooth, 5)
+        peaks, _ = find_peaks(smooth, distance=args.peak_distance,
+                             prominence=args.prominence * amplitude)
+        if amplitude <= 0:
+            raise ValueError("Brightness signal has no usable variation")
+    if len(peaks) < 2:
         raise ValueError("Need at least two reliable detected peaks for donor pairing")
     first = int(peaks[0])
     phase = phases_from_peaks(len(frames) - first, peaks - first)
@@ -233,11 +282,33 @@ def prepare_one(args):
     np.save(output / "brightness.npy", smooth[first:].astype(np.float32))
     np.save(output / "brightness_raw.npy", raw[first:].astype(np.float32))
     np.save(output / "phase.npy", phase)
+    if peak_diagnostics is not None:
+        np.savez_compressed(output/"arterial_peak_diagnostics.npz", raw=arterial_signal,
+                           **{k:v for k,v in peak_diagnostics.items() if isinstance(v,np.ndarray)})
+        peak_summary = {k:v.tolist() if isinstance(v,np.ndarray) else v for k,v in peak_diagnostics.items()
+                        if k not in ("smoothed","detection_signal","repaired","artifact_mask","acf")}
+        peak_summary.update(method="arterial", mask_sha256=sha256(artery_path),
+                            min_hz=getattr(args,"peak_min_hz",.5),max_hz=getattr(args,"peak_max_hz",2.5),
+                            frames=len(frames),fps=float(fps),indices="original input frames, before trimming",
+                            artifact_frames=np.flatnonzero(peak_diagnostics["artifact_mask"]).tolist(),
+                            detector_sha256=sha256(Path(__file__).with_name("arterial_peaks.py")))
+        write_json(output/"arterial_peaks.json",peak_summary)
+        from matplotlib.figure import Figure
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+        figure=Figure(figsize=(12,4),layout="constrained");FigureCanvasAgg(figure)
+        ax=figure.subplots();times=np.arange(len(frames))/fps
+        ax.plot(times,arterial_signal,color=".65",label="Raw arterial mean")
+        ax.plot(times,peak_diagnostics["smoothed"],color="#147c91",label="Detection smoothing")
+        ax.scatter(times[peaks],peak_diagnostics["smoothed"][peaks],color="red",marker="v",label="Selected maxima")
+        ax.set(xlabel="Time from original input start (s)",ylabel="Arterial mean intensity",
+               title="Arterial peaks — inspect warnings in arterial_peaks.json")
+        ax.legend();figure.savefig(output/"arterial_peaks.png",dpi=130);figure.clear()
     save_preparation_previews(output, frames[first:], raw[first:], smooth[first:],
                               phase, peaks-first, first, float(fps), Path(args.input).stem)
     metadata = dict(source=str(Path(args.input).resolve()), source_sha256=sha256(args.input),
                     first_original_frame=first, original_frame_count=len(frames), fps=float(fps),
                     peaks=(peaks - first).tolist(), phase_definition="frames_since_peak",
+                    peak_method=method,
                     brightness_definition="vessel_mask" if args.brightness_mask else "whole_masked_frame",
                     brightness_mask_sha256=sha256(args.brightness_mask) if args.brightness_mask else None,
                     smooth_window=win, peak_distance=args.peak_distance, prominence_ratio=args.prominence,
@@ -312,16 +383,20 @@ class Record:
             raise ValueError("Prepared frames must be float32 with H,W divisible by 32")
         if self.brightness.shape != (len(self.frames),) or self.phase.shape != (len(self.frames),):
             raise ValueError("Frame/brightness/phase lengths differ")
+        dataset_record = self.metadata.get("schema") == "noise2time.dataset.v1"
         if (not np.isfinite(self.frames).all() or self.frames.min() < 0 or self.frames.max() > 1
                 or not np.isfinite(self.brightness).all() or np.any(self.brightness < 0)
-                or not np.issubdtype(self.phase.dtype, np.integer) or np.any(self.phase < 0)):
+                or not np.issubdtype(self.phase.dtype, np.integer) or np.any(self.phase < (-1 if dataset_record else 0))):
             raise ValueError("Invalid prepared intensities, brightness or phase")
-        self.donors = {int(p): np.flatnonzero((self.phase == p) & (self.brightness > 1e-8))
+        self.valid = np.load(self.path/"valid_frames.npy", allow_pickle=False).astype(bool) if dataset_record else np.ones(len(self.frames),bool)
+        if self.valid.shape != (len(self.frames),):
+            raise ValueError("Invalid valid_frames dimensions")
+        self.donors = {int(p): np.flatnonzero((self.phase == p) & self.valid & (self.phase >= 0) & (self.brightness > 1e-8))
                        for p in np.unique(self.phase)}
 
     def eligible(self, history):
         return [t for t in range(history, len(self.frames))
-                if self.brightness[t] > 1e-8 and np.any(self.donors[int(self.phase[t])] != t)]
+                if self.valid[t] and self.phase[t] >= 0 and self.brightness[t] > 1e-8 and np.any(self.donors[int(self.phase[t])] != t)]
 
 
 class ConvBlock(nn.Module):
@@ -564,9 +639,11 @@ def train(args):
     manifest = []
     for index, record in enumerate(records, 1):
         print(f"Hashing input files {index}/{len(records)}: {record.name}", flush=True)
+        files = ["frames.npy","roi.npy","phase.npy","brightness.npy","metadata.json"]
+        if (record.path/"valid_frames.npy").exists():
+            files.append("valid_frames.npy")
         manifest.append(dict(path=str(record.path), metadata=record.metadata,
-                             hashes={name:sha256(record.path/name) for name in
-                                     ("frames.npy","roi.npy","phase.npy","brightness.npy","metadata.json")}))
+                             hashes={name:sha256(record.path/name) for name in files}))
     write_json(output / "provenance.json", dict(records=manifest, script_sha256=sha256(__file__),
                python=sys.version, platform=platform.platform(), torch=torch.__version__,
                numpy=np.__version__, scipy=scipy.__version__, opencv=cv2.__version__, device=str(device)))
@@ -701,6 +778,9 @@ def export_denoised(model, record, cfg, device, npy_path=None, avi_path=None, or
                             prediction = model(sequence)[0,0].cpu().numpy()
                         if not np.isfinite(prediction).all():
                             raise FloatingPointError(f"Non-finite output at frame {t}")
+                        if record.metadata.get("diaphragm_mask_applied", False):
+                            # Convolutions may predict nonzero values outside the aperture.
+                            prediction = np.where(record.roi, prediction, 0)
                         if restored is not None:
                             restored[t] = prediction  # Preserve unclipped scientific intensities.
                         if writer is not None:
@@ -734,7 +814,7 @@ def denoise(args):
     folder_mode = requested.is_dir() or requested.suffix.lower() not in (".npy", ".avi")
     record = Record(args.record)
     if folder_mode:
-        measure = record.name.removesuffix("_HD_M0")
+        measure = record.name if record.metadata.get("schema") == "noise2time.dataset.v1" else record.name.removesuffix("_HD_M0")
         if not measure or measure in (".", ".."):
             raise ValueError("Invalid measurement folder name")
         destination = requested.resolve() / measure
@@ -761,12 +841,16 @@ def denoise(args):
                first_original_frame=record.metadata["first_original_frame"], fps=record.metadata["fps"],
                copied_prefix=cfg.history, epoch=checkpoint["epoch"], inference="fully_visible_sliding_window",
                intensities="float32, unclipped",
+               intensity_scale=record.metadata.get("intensity_scale",1.),
+               input_mode=record.metadata.get("input_mode","legacy"),
+               diaphragm_mask_applied=record.metadata.get("diaphragm_mask_applied",False),
                avi=str(avi_path.resolve()) if avi_path is not None else None,
                avi_conversion="MJPG; clip [0,1], round to uint8; no contrast normalization" if avi_path is not None else None)
     if folder_mode:
         destination.parent.mkdir(parents=True, exist_ok=True)
         metadata.update(original_avi=str(destination/"original.avi"),
-                        original_definition="Prepared input before denoising; circularly masked and trimmed to first peak; aligned with denoised output")
+                        original_definition=("Full-length selected input, fixed-scale preview; diaphragm masking follows preparation metadata; no trimming" if record.metadata.get("schema") == "noise2time.dataset.v1" else
+                        "Prepared input before denoising; circularly masked and trimmed to first peak; aligned with denoised output"))
         with tempfile.TemporaryDirectory(prefix=".denoise-record-", dir=destination.parent) as temporary:
             staging = Path(temporary).resolve()
             if staging.parent != destination.parent.resolve() or destination.resolve().parent != staging.parent:
@@ -947,12 +1031,14 @@ def summarize(args):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    p = commands.add_parser("prepare", help="Prepare one AVI/NPY or all collected files in a folder")
-    p.add_argument("--input", required=True, help="AVI/NPY file or folder containing collected files")
-    p.add_argument("--output", required=True)
+    p = commands.add_parser("prepare", help="Find arterial peaks and brightness tables from an HDF5 dataset; cache selected input and preview")
+    p.add_argument("--input", required=True, help="Dataset folder containing measurement folders; legacy AVI/NPY input also accepted")
+    p.add_argument("--output", required=True,help="Dataset mode: workflow root, writes prepared/; legacy mode: prepared destination")
+    p.add_argument("--measures",nargs="+",help="Dataset mode: selected measurement folder names; default all")
+    p.add_argument("--avi",action="store_true",help="Dataset mode: encode/decode MJPG before peak detection and training; default raw HDF5")
     p.add_argument("--pattern", default="*", help="Folder mode: filename glob, e.g. '*.avi' or '*.npy'")
     p.add_argument("--skip-existing", action="store_true", help="Folder mode: leave existing outputs untouched (not verified)")
-    p.add_argument("--fps", type=float, help="Acquisition FPS; overrides video metadata")
+    p.add_argument("--fps", type=float, help="Effective M0 FPS; dataset default 37000/256 = 144.53125")
     p.add_argument("--cx", type=int, default=255)
     p.add_argument("--cy", type=int, default=255)
     p.add_argument("--radius", type=int, default=260)
@@ -960,24 +1046,37 @@ def main(argv=None):
     p.add_argument("--peak-distance", type=int, default=15)
     p.add_argument("--prominence", type=float, default=.10)
     p.add_argument("--brightness-mask", help="Optional NPY mask for legacy vessel-mean brightness")
+    p.add_argument("--artery-mask", help="Manual retinal artery PNG/NPY used for robust peak timing; same geometry as input")
+    p.add_argument("--peak-method", choices=("auto","arterial","legacy"),default="auto",
+                   help="Auto uses arterial detection when --artery-mask is supplied, otherwise legacy detection")
+    p.add_argument("--peak-min-hz",type=float,default=.5)
+    p.add_argument("--peak-max-hz",type=float,default=2.5)
     p.set_defaults(func=prepare)
     p = commands.add_parser("train", help="Train on one or multiple prepared records")
-    p.add_argument("--records", nargs="+", required=True,
+    p.add_argument("--records", nargs="+",
                    help="Prepared record directories and/or a folder containing prepared records")
     p.add_argument("--config", help="JSON configuration; unspecified keys use defaults")
-    p.add_argument("--output", required=True, help="New experiment directory")
+    p.add_argument("--output", required=True, help="Dataset mode: workflow root; legacy mode: new experiment directory")
     p.add_argument("--device", default="auto")
     p.add_argument("--no-epoch-previews", action="store_true", help="Skip the default end-of-epoch AVI export for every supplied record")
+    p.add_argument("--input",help="Dataset folder; use --output as workflow root (training writes runs/)")
+    p.add_argument("--measures",nargs="+")
     p.set_defaults(func=train)
     p = commands.add_parser("denoise", help="Infer from a checkpoint, without retraining")
-    p.add_argument("--checkpoint", required=True)
-    p.add_argument("--record", required=True)
+    p.add_argument("--checkpoint", help="Dataset mode default: output/runs/best.pt")
+    p.add_argument("--record")
+    p.add_argument("--input",help="Dataset folder; use --output as workflow root")
+    p.add_argument("--measures",nargs="+")
     p.add_argument("--output", required=True, help="Parent folder for a measurement bundle; alternatively .npy or .avi output filename")
     p.add_argument("--device", default="auto")
     p.set_defaults(func=denoise)
     p = commands.add_parser("evaluate", help="Calculate the article's per-recording metrics")
-    p.add_argument("--record", required=True)
-    p.add_argument("--denoised", required=True)
+    p.add_argument("--record")
+    p.add_argument("--denoised")
+    p.add_argument("--input",help="Dataset folder: auto-load manual retinal/pseudo choroidal masks; writes evaluation/")
+    p.add_argument("--measures",nargs="+")
+    p.add_argument("--checkpoint",help="Dataset mode default: output/runs/best.pt; infer missing denoised outputs")
+    p.add_argument("--device",default="auto")
     p.add_argument("--vessel-mask", help="Legacy single-region NPY or PNG mask")
     p.add_argument("--background-mask", help="Background NPY or PNG for legacy single-region evaluation only")
     p.add_argument("--retinal-artery-mask", "--retinal-artery", nargs="+", help="One or more artery masks, combined by union")
@@ -1000,6 +1099,16 @@ def main(argv=None):
     p.add_argument("--output", required=True)
     p.set_defaults(func=summarize)
     args = parser.parse_args(argv)
+    if args.command in ("train","denoise","evaluate") and args.input:
+        if any(getattr(args,key,None) for key in ("record","records","denoised","vessel_mask","retinal_artery_mask","retinal_vein_mask","choroidal_masks","background_mask","background_masks")):
+            parser.error("Dataset --input mode automatically resolves records and masks; do not mix legacy input flags")
+        return load_sibling("dataset_workflow").run_stage(args,sys.modules[__name__]) or 0
+    if args.command == "train" and not args.records:
+        parser.error("train requires --input dataset or --records")
+    if args.command == "denoise" and (not args.record or not args.checkpoint):
+        parser.error("denoise requires --input dataset or both --record and --checkpoint")
+    if args.command == "evaluate" and (not args.record or not args.denoised):
+        parser.error("evaluate requires --input dataset or both --record and --denoised")
     return args.func(args) or 0
 
 

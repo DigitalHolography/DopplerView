@@ -31,11 +31,11 @@ import torch.nn as nn
 # ============================================================
 
 VIDEO_DIR = Path(
-    r"C:\Users\Novovorontsovka\Downloads\video_masqued\output\05_trimmed_videos"
+    r"D:\N2T\videos_2\output\05_trimmed_videos"
 )
 
 BRIGHTNESS_DIR = Path(
-    r"C:\Users\Novovorontsovka\Downloads\video_masqued\output\04_brightness_tables"
+    r"D:\N2T\videos_2\output\04_brightness_tables"
 )
 
 
@@ -1195,7 +1195,7 @@ if DEVICE.type == "cuda":
     )
 
 LEARNING_RATE = 5e-5
-EPOCHS = 250
+EPOCHS = 6
 
 # Sample 8000 ten-frame source sequences for training in each epoch.
 # During sampling, ensure that every valid video contributes at least one sequence.
@@ -2224,13 +2224,13 @@ def train_model(
 # ============================================================
 
 MODEL_SAVE_PATH = Path(
-    r"C:\Users\Novovorontsovka\Downloads\model\best_block32_convlstm_L2_200videos_batch2_8000.pth"
+    r"D:\N2T\denoised_yang\model\best_block32_convlstm_L2_200videos_batch2_8000.pth"
 )
 
 # Save the model state_dict at the end of every epoch.
 # Any epoch_xxx.pth can then be used directly for inference.
 EPOCH_MODEL_DIR = Path(
-    r"C:\Users\Novovorontsovka\Downloads\model\epoch_models_block32_L2_200videos_batch2_8000"
+    r"D:\N2T\denoised_yang\model\epoch_models_block32_L2_200videos_batch2_8000"
 )
 
 # Epoch from which full-video denoising starts for every epoch model.
@@ -2239,12 +2239,12 @@ DENOISE_START_EPOCH = 5
 
 # Denoised outputs of all training videos for each epoch model.
 DENOISED_EPOCH_ROOT = Path(
-    r"C:\Users\Novovorontsovka\Downloads\model\denoised_all_videos_by_epoch_L2"
+    r"D:\N2T\denoised_yang\model\denoised_all_videos_by_epoch_L2"
 )
 
 # After early stopping, reload the best model and additionally save denoised outputs for all videos.
 BEST_DENOISED_DIR = Path(
-    r"C:\Users\Novovorontsovka\Downloads\model\best_model_denoised_all_videos_L2"
+    r"D:\N2T\denoised_yang\model\best_model_denoised_all_videos_L2"
 )
 
 model = train_model(

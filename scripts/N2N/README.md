@@ -1,5 +1,9 @@
 # N2N research scripts
 
+For dataset folders containing M0_ff HDF5 files and manual/pseudo masks, start with
+[Dataset workflow](DATASET_WORKFLOW.md): raw preparation by default, arterial peak
+detection, optional AVI compression, training and regional evaluation.
+
 To collect selected recordings from mapped drives, see
 [Collect LDH videos](COLLECTING.md) and `collect_videos.py` (AVI copy or lossless
 `moment0ff` extraction from H5).

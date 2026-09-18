@@ -1,5 +1,11 @@
 # Reproducing Noise2Time
 
+**Current dataset workflow:** see [DATASET_WORKFLOW.md](DATASET_WORKFLOW.md).
+It reads raw `doppler_signal/M0_ff` directly, uses manual arterial peak detection
+by default, supports an explicit `--avi` compression experiment, and organizes
+outputs as `prepared/`, `runs/`, and `evaluation/`. The file-based commands below
+remain available for earlier experiments.
+
 `noise2time.py` implements the **proposed method** in `backup_260708.pdf`, with
 separate preprocessing, training, inference, and evaluation commands. It does
 not launch experiments when imported, and does not modify the historical scripts.
@@ -351,6 +357,14 @@ patient identity across differently named records is not detected automatically.
 These metrics assess fluctuations and broad waveform preservation. They do not
 establish recovery of the unknown clean signal. For scientific validation add
 known-signal simulations, phase-resolved residuals, and small-vessel measurements.
+
+## Arterial peak detection
+
+Preparation now accepts `--artery-mask path/to/manual_artery.png`. This selects
+the robust arterial detector for peak timing while preserving the existing
+brightness-normalization choice. The detector, experiments on all 22 recordings
+in `D:/dataset_choroid2`, comparisons with DopplerView, and limitations are
+documented in [ARTERIAL_PEAKS.md](ARTERIAL_PEAKS.md).
 
 ## 5. Regional evaluation report
 

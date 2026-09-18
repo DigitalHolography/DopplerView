@@ -1,0 +1,17 @@
+{
+  "seed": 2026,
+  "history": 9,
+  "base_channels": 32,
+  "convlstm": true,
+  "block_size": 32,
+  "blocks": 32,
+  "objective": "l1",
+  "epochs": 10,
+  "samples_per_epoch": 3500,
+  "batch_size": 2,
+  "validation_samples": 35,
+  "learning_rate": 0.00005,
+  "weight_decay": 0.01,
+  "patience": 10,
+  "validation_records": []
+}
