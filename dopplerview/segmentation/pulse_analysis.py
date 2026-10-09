@@ -301,7 +301,7 @@ def _select_minmax(signals_n, gradient_n, idx0):
 #     return idx0
 
 def compute_period(signal, sampling_frequency,
-                 fmin=0.4, fmax=2.0):
+                 fmin=0.5, fmax=2.0):
     """
     Robust estimation of cardiac period in number of frames
     """
