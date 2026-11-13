@@ -2,14 +2,19 @@ from dopplerview.pipeline.step import BaseStep
 
 import numpy as np
 
+
 class EyeLateralityClassificationStep(BaseStep):
-    requires = {"M0_ff_image_cleaned"}
+    requires = {"M0_ff_image"}
     produces = {"eye_laterality", "eye_laterality_confidence"}
     name = "eye_laterality_classification"
 
     def _relevant_config(self, ctx):
-        return {"eye_laterality_classification_model": ctx.get_current_model_name_for_task(self.name)}
-    
+        return {
+            "eye_laterality_classification_model": ctx.get_current_model_name_for_task(
+                self.name
+            )
+        }
+
     def classify(self, ctx):
         model = ctx.get_current_model_for_task(self.name)
 
@@ -20,10 +25,12 @@ class EyeLateralityClassificationStep(BaseStep):
 
         laterality = "left" if pred == 0 else "right"
 
-        self.logger.info(f"    - Eye laterality classified as: {laterality} (confidence: {confidence:.2f})")
+        self.logger.info(
+            f"    - Eye laterality classified as: {laterality} (confidence: {confidence:.2f})"
+        )
 
         return pred, confidence
-    
+
     def run(self, ctx):
         laterality, confidence = self.classify(ctx)
         eye_laterality = "left" if laterality == 0 else "right"

@@ -61,11 +61,11 @@ optic_disc_detector:
 YOLO_EyeSide:
   task: eye_laterality_classification
   hf_repo: DigitalHolography/YOLO_EyeSide
-  filename: eye_side.onnx
+  filename: eye_side_512x512.onnx
   format: onnx
   input_norm: minmax
   output_activation: none
   revision: main
-  input_channels: ["M0_ff_image_cleaned", "M0_ff_image_cleaned", "M0_ff_image_cleaned"]
-  input_shape: [640, 640]
-  output_shape: [640, 640]
+  input_channels: ["M0_ff_image", "M0_ff_image", "M0_ff_image"]
+  input_shape: [512, 512]
+  output_shape: [512, 512]
